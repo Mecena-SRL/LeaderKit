@@ -1,6 +1,6 @@
--- LeaderKit probe 2: prova le varianti di API che servono al plugin definitivo.
+-- LeaderKit probe 3: prova le varianti di API che servono al plugin definitivo.
 local report = {}
-local function log(s) report[#report + 1] = tostring(s); print("[LeaderKit probe 2] " .. tostring(s)) end
+local function log(s) report[#report + 1] = tostring(s); print("[LeaderKit probe 3] " .. tostring(s)) end
 local function try(label, fn)
   local ok, res = pcall(fn)
   if ok then log(label .. ": " .. tostring(res)) else log(label .. ": ERRORE " .. tostring(res)) end
@@ -11,12 +11,12 @@ local home = os.getenv("HOME") or os.getenv("USERPROFILE") or "."
 local sep = package.config:sub(1, 1)
 
 local function finish()
-  local path = home .. sep .. "Desktop" .. sep .. "LeaderKit-probe2.txt"
+  local path = home .. sep .. "Desktop" .. sep .. "LeaderKit-probe3.txt"
   local f = io.open(path, "w")
-  if not f then path = home .. sep .. "LeaderKit-probe2.txt"; f = io.open(path, "w") end
+  if not f then path = home .. sep .. "LeaderKit-probe3.txt"; f = io.open(path, "w") end
   if f then f:write(table.concat(report, "\n") .. "\n"); f:close() end
   pcall(function()
-    c:AskUser("LeaderKit probe 2", { { "Risultato", "Text",
+    c:AskUser("LeaderKit probe 3", { { "Risultato", "Text",
       Default = table.concat(report, "\n") .. "\n\nReport: " .. path, Lines = 30, Wrap = true } })
   end)
 end
@@ -96,8 +96,8 @@ end
 local target = base + 8 * fps
 try("SetCurrentTimecode " .. tc(target), function() return tl:SetCurrentTimecode(tc(target)) end)
 try("GetCurrentTimecode", function() return tl:GetCurrentTimecode() end)
-local gen = try("InsertFusionGeneratorIntoTimeline('LeaderKit Probe 2')", function()
-  return tl:InsertFusionGeneratorIntoTimeline("LeaderKit Probe 2")
+local gen = try("InsertFusionGeneratorIntoTimeline('LeaderKit Probe 3')", function()
+  return tl:InsertFusionGeneratorIntoTimeline("LeaderKit Probe 3")
 end)
 if gen then
   try("  nuovo generatore", function()

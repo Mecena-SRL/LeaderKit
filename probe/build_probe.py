@@ -3,7 +3,7 @@
 
     python3 probe/build_probe.py
 
-* LeaderKit-Probe-2.drfx: grafica statica + bottone "Test timeline" (button2.lua)
+* LeaderKit-Probe-3.drfx: grafica statica + bottone "Test timeline" (button3.lua)
 * LeaderKit-Test-Grafica.drfx: 6 generatori, uno per tecnica di espressione.
   In Fusion un nodo che fallisce rende nera tutta l'uscita, quindi ogni
   tecnica sta in un generatore separato: quelli neri indicano cosa non va.
@@ -18,7 +18,8 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "src"))
 from leaderkit.fusion import Expr, FuID, Link, Tool, lua_string  # noqa: E402
 
-FF = [("UseFrameFormatSettings", 1), ("Width", 1920), ("Height", 1080)]
+RANGE = [("GlobalIn", 0), ("GlobalOut", 100000)]
+FF = RANGE + [("UseFrameFormatSettings", 1), ("Width", 1920), ("Height", 1080)]
 
 
 def background(name, grey, mask=None, extra=()):
@@ -70,8 +71,8 @@ def macro(name, tools, output, inputs=(), user_controls=None):
             % (macro_id, ins, lua_string(output), inner, lua_string(macro_id)))
 
 
-def probe2():
-    with open(os.path.join(HERE, "button2.lua")) as fh:
+def probe3():
+    with open(os.path.join(HERE, "button3.lua")) as fh:
         button = fh.read()
     controls = (
         "\t\t\t\t\tUserControls = ordered() {\n"
@@ -89,10 +90,10 @@ def probe2():
         "ICS_ControlPage = \"Controls\", BTNCS_Execute = %s, },\n"
         "\t\t\t\t\t},\n") % lua_string(button)
     tools = base_tools([("LKTitle", "Titolo di prova"), ("LKNum", 8), ("LKCombo", 0)]) + [
-        text("LKLabel", "LEADERKIT PROBE 2\nmetti la testina qui e premi Test timeline",
+        text("LKLabel", "LEADERKIT PROBE 3\nmetti la testina qui e premi Test timeline",
              size=0.04),
         merge("LKM1", "LKM0", "LKLabel")]
-    return macro("LeaderKit Probe 2", tools, "LKM1",
+    return macro("LeaderKit Probe 3", tools, "LKM1",
                  [("LKLabel", "StyledText", "Testo (nativo Text+)"), ("LKBg", "LKTitle", "Titolo (personalizzato)"),
                   ("LKBg", "LKNum", "Numero (slider)"), ("LKBg", "LKCombo", "Preset (menu)"),
                   ("LKBg", "LKTest", "Test timeline")], controls)
@@ -124,7 +125,16 @@ def test_generator(letter, desc, label, text_extra, merge_extra):
         text("LKDesc", "Test %s: %s" % (letter, desc), center=(0.5, 0.12), size=0.025),
         merge("LKM1", "LKM0", "LKDesc"), t,
         merge("LKM2", "LKM1", "LKText", [merge_extra] if merge_extra else [])]
-    return macro("LeaderKit Test %s" % letter, tools, "LKM2")
+    return macro("LK2 Test %s" % letter, tools, "LKM2")
+
+
+def solid(tag, with_range):
+    """Solo un Background rosso, collegato direttamente all'uscita."""
+    inputs = [("UseFrameFormatSettings", 1), ("Width", 1920), ("Height", 1080),
+              ("TopLeftRed", 1.0), ("TopLeftGreen", 0.0), ("TopLeftBlue", 0.0), ("TopLeftAlpha", 1.0)]
+    if with_range:
+        inputs = RANGE + inputs
+    return macro("LK2 Controllo %s" % tag, [Tool("LKBg", "Background", inputs, (0, 0))], "LKBg")
 
 
 def write_drfx(name, files):
@@ -140,9 +150,11 @@ def write_drfx(name, files):
 
 
 def build():
-    return [write_drfx("LeaderKit-Probe-2.drfx", [("LeaderKit Probe 2.setting", probe2())]),
-            write_drfx("LeaderKit-Test-Grafica.drfx",
-                       [("LeaderKit Test %s.setting" % t[0], test_generator(*t)) for t in TESTS])]
+    return [write_drfx("LeaderKit-Probe-3.drfx", [("LeaderKit Probe 3.setting", probe3())]),
+            write_drfx("LeaderKit-Test-Grafica-2.drfx",
+                       [("LK2 Test %s.setting" % t[0], test_generator(*t)) for t in TESTS]
+                       + [("LK2 Controllo Z1.setting", solid("Z1", False)),
+                          ("LK2 Controllo Z2.setting", solid("Z2", True))])]
 
 
 if __name__ == "__main__":
