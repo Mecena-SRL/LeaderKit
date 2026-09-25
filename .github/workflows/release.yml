@@ -1,0 +1,35 @@
+name: Release
+
+# Un tag vX.Y.Z crea la release su GitHub con il .drfx allegato
+# (pre-release se il tag e' 0.x o contiene un suffisso, es. v1.0.0-rc1).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: sudo apt-get update -q && sudo apt-get install -y -q lua5.4
+      - run: pip install pytest pyflakes pillow numpy
+      - run: python -m pyflakes src tests tools
+      - run: python -m pytest -q tests
+      - run: python tools/build_fx.py
+      - name: Crea la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          NOTES="docs/release-notes/${VERSION}.md"
+          [ -f "$NOTES" ] || echo "LeaderKit ${VERSION}" > "$NOTES"
+          PRE=""
+          case "$VERSION" in 0.*|*-*) PRE="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" "dist/LeaderKit-${VERSION}.drfx" \
+            --title "LeaderKit ${VERSION}" --notes-file "$NOTES" $PRE
