@@ -189,6 +189,8 @@ local markersOn = get("MarkersOn", preset == 0 and 1 or 0) > 0.5
 local markerKind = math.floor(get("MarkerKind", 0) + 0.5)   -- 0 rullo, 1 break
 local markerEvery = get("MarkerEvery", 20)
 local tailOn = get("TailOn", 1) > 0.5
+local popLevel = (math.floor(get("PopLevel", 0) + 0.5) == 1) and -18 or -20   -- SMPTE -20 / EBU -18 dBFS
+local beepEach = get("BeepEach", 0) > 0.5
 local n = r.nominal
 if preset == 1 then
   if slateSec < 5 then warn("RAI chiede un ident di almeno 5\": uso 5\"."); slateSec = 5 end
@@ -201,6 +203,7 @@ local tailLen = math.floor(tailSec * n + 0.5)
 -- Parametri del pannello da ricopiare quando il blocco viene ricreato.
 local PARAMS = { "Preset", "Reel", "CountFrom", "SlateSec", "GapSec", "TailSec", "Title", "Director",
   "Editor", "Colorist", "Version", "Date", "Note", "MarkersOn", "MarkerKind", "MarkerEvery", "TailOn",
+  "PopLevel", "BeepEach",
   "TextRed", "TextGreen", "TextBlue", "BgRed", "BgGreen", "BgBlue", "AccentRed", "AccentGreen", "AccentBlue" }
 local COLORS = { "TextRed", "TextGreen", "TextBlue", "BgRed", "BgGreen", "BgBlue", "AccentRed", "AccentGreen", "AccentBlue" }
 
@@ -354,7 +357,7 @@ end
 -- 3) Pop audio (WAV generato, 1 kHz -20 dBFS, rifilato a 1 fotogramma).
 local home = os.getenv("HOME") or os.getenv("USERPROFILE") or "."
 local sep = package.config:sub(1, 1)
-local WAV_NAME = "LeaderKit_pop_1kHz_-20dBFS.wav"
+local WAV_NAME = string.format("LeaderKit_pop_1kHz_%ddBFS.wav", popLevel or -20)
 local cacheDir = home .. sep .. ".leaderkit"
 pcall(function() bmd.createdir(cacheDir) end)
 local wavPath = cacheDir .. sep .. WAV_NAME
@@ -369,7 +372,8 @@ local function writeWav(path)
     local size = f:seek("end"); f:close()
     if size and size > 1000 then return true end
   end
-  local sr, total, tone, amp = 48000, 48000, 12000, 0.1 * 32767
+  local sr, total, tone = 48000, 48000, 12000
+  local amp = (10 ^ ((popLevel or -20) / 20)) * 32767
   local function le(v, bytes)
     local t = {}
     for i = 1, bytes do t[i] = string.char(v % 256); v = math.floor(v / 256) end
@@ -466,7 +470,10 @@ if preset == 0 then
   local pop = ffoa - 2 * n
   popTc = framesToTc(pop, r)
   placePop(pop, "2-pop")
-  marker(pop, "Cyan", "2-POP", "2-pop " .. popTc .. " — 1 kHz -20 dBFS", "pop")
+  marker(pop, "Cyan", "2-POP", string.format("2-pop %s — 1 kHz %d dBFS", popTc, popLevel), "pop")
+  if beepEach then
+    for d = countFrom, 3, -1 do placePop(ffoa - d * n, "Bip " .. d) end
+  end
 end
 marker(ffoa, "Blue", "FFOA", "First frame of action " .. framesToTc(ffoa, r), "ffoa")
 

@@ -3,7 +3,7 @@
 -- di AppendToTimeline produce 1 fotogramma), runs, usermarker, remove.
 local enginePath = arg[1]
 local opt = { fps = "24", df = "0", preset = "0", head = "5", progstart = "30", program = "60",
-  variant = "1", runs = "1", usermarker = "0", remove = "0", marks = "abs_incl" }
+  variant = "1", runs = "1", usermarker = "0", remove = "0", marks = "abs_incl", beep = "0" }
 for i = 2, #arg do local k, v = arg[i]:match("([^=]+)=(.*)"); opt[k] = v end
 local fps = tonumber(opt.fps)
 local nominal = math.floor(fps + 0.5)
@@ -58,7 +58,7 @@ local function newComp(tool) local c = { tool = tool }
 local headTool = newTool()
 headTool.inputs = { Preset = tonumber(opt.preset), Reel = 1, CountFrom = 8, SlateSec = 8, GapSec = 2,
   TailSec = tonumber(opt.preset) == 0 and 8 or 3, MarkersOn = 1, MarkerKind = 0, MarkerEvery = 20, TailOn = 1,
-  Title = "Il film", TextRed = 0.5 }
+  Title = "Il film", TextRed = 0.5, BeepEach = tonumber(opt.beep), PopLevel = 0 }
 local head = setmetatable({ off = 0, dur = tonumber(opt.head) * nominal, name = "LeaderKit Head",
   comp = newComp(headTool) }, Item)
 table.insert(tracks.video[1].items, head)
@@ -177,6 +177,7 @@ end
 for f, m in pairs(markers) do print("RESULT marker=" .. m.name .. "|" .. tc(tlStart + f)) end
 for _, t in ipairs(tracks.audio) do
   if t.name == "LeaderKit Pop" then
+    table.sort(t.items, function(a, b) return a.off < b.off end)
     for _, it in ipairs(t.items) do print("RESULT pop=" .. tc(it:GetStart()) .. "|" .. it:GetDuration()) end
   end
 end

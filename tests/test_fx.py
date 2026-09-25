@@ -181,3 +181,12 @@ def test_engine_rai_and_remove():
     assert res["head"][0].split("|")[1] == str(11 * 25)
     assert res.get("pop", []) == []
     assert res["after_remove_markers"] == ["0"]
+
+
+def test_engine_beep_each_second():
+    res, log = run_engine(fps="25", df="0", preset=0, head=5, progstart=18, program=60, beep=1)
+    pops = [p.split("|")[0] for p in res["pop"]]
+    # bip su 8..3 + 2-pop + tail pop
+    assert pops[:7] == ["01:00:00:00", "01:00:01:00", "01:00:02:00", "01:00:03:00",
+                        "01:00:04:00", "01:00:05:00", "01:00:06:00"], pops
+    assert len(pops) == 8

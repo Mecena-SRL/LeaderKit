@@ -255,6 +255,7 @@ HEAD_INPUTS = [
     "SecPreset", "Preset", "Reel", "CountFrom", "SlateSec", "GapSec", "TailSec",
     "SecSlate", "Title", "Director", "Editor", "Colorist", "Version", "Date", "Note", "Duration", "Info",
     "SecLook"] + color_inputs() + [
+    "SecAudio", "PopLevel", "BeepEach",
     "SecTimeline", "MarkersOn", "MarkerKind", "MarkerEvery", "TailOn", "Generate", "Remove", "Guide",
 ]
 
@@ -276,6 +277,9 @@ def head():
           + uc_text("Duration", "Durata (da Genera)", read_only=True)
           + uc_text("Info", "TC (da Genera)", read_only=True)
           + uc_label("SecLook", "Aspetto") + color_controls()
+          + uc_label("SecAudio", "Audio (sync pop 1 kHz, 1 fotogramma)")
+          + uc_combo("PopLevel", "Livello pop", ["-20 dBFS (SMPTE / USA)", "-18 dBFS (EBU / Europa)"])
+          + uc_check("BeepEach", "Bip anche su 8..3 (non standard)", 0)
           + uc_label("SecTimeline", "Timeline")
           + uc_check("MarkersOn", "Marker a intervalli", 1)
           + uc_combo("MarkerKind", "Tipo marker", ["Fine rullo", "Break"])
@@ -290,6 +294,7 @@ def head():
                 ("Title", '"TITOLO"'), ("Director", '""'), ("Editor", '""'),
                 ("Colorist", '""'), ("Version", '"v1"'), ("Date", '""'),
                 ("Duration", '"premi Genera"'), ("Info", '""'),
+                ("PopLevel", "0"), ("BeepEach", "0"),
                 ("MarkersOn", "1"), ("MarkerKind", "0"), ("MarkerEvery", "20"), ("TailOn", "1")], uc)
 
     g.background("Bg", color="Bg")
