@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Build del .drfx di prova: Edit > Generators > LeaderKit > LeaderKit Probe."""
+"""Build dei .drfx di prova (Edit > Generators > LeaderKit).
+
+    python3 probe/build_probe.py
+
+* LeaderKit-Probe-2.drfx: grafica statica + bottone "Test timeline" (button2.lua)
+* LeaderKit-Test-Grafica.drfx: 6 generatori, uno per tecnica di espressione.
+  In Fusion un nodo che fallisce rende nera tutta l'uscita, quindi ogni
+  tecnica sta in un generatore separato: quelli neri indicano cosa non va.
+"""
 
 import os
 import sys
@@ -10,89 +18,133 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "src"))
 from leaderkit.fusion import Expr, FuID, Link, Tool, lua_string  # noqa: E402
 
-BUTTON = os.environ.get("PROBE_BUTTON", "button.lua")
-NAME = os.environ.get("PROBE_NAME", "LeaderKit Probe")
-MACRO = NAME.replace(" ", "")
-
 FF = [("UseFrameFormatSettings", 1), ("Width", 1920), ("Height", 1080)]
 
 
-def text(name, center, size, expr, pos):
+def background(name, grey, mask=None, extra=()):
+    inputs = FF + [("TopLeftRed", grey), ("TopLeftGreen", grey), ("TopLeftBlue", grey),
+                   ("TopLeftAlpha", 1.0)] + list(extra)
+    if mask:
+        inputs.append(("EffectMask", Link(mask, "Mask")))
+    return Tool(name, "Background", inputs, (0, 0))
+
+
+def ring():
+    return Tool("LKRing", "EllipseMask", [
+        ("Filter", FuID("Fast Gaussian")), ("SoftEdge", 0.0), ("MaskWidth", 1920),
+        ("MaskHeight", 1080), ("PixelAspect", (1, 1)), ("UseFrameFormatSettings", 1),
+        ("ClippingMode", FuID("None")), ("Center", (0.5, 0.5)), ("Width", 0.36),
+        ("Height", 0.36), ("Solid", 0), ("BorderWidth", 0.004)], (0, 60))
+
+
+def text(name, value, center=(0.5, 0.5), size=0.06, extra=()):
     return Tool(name, "TextPlus", FF + [
         ("Center", center), ("Font", "Open Sans"), ("Style", "Bold"), ("Size", size),
-        ("StyledText", Expr("", expr))], pos)
+        ("StyledText", value)] + list(extra), (220, 0))
 
 
-def merge(name, bg, fg, pos):
+def merge(name, bg, fg, extra=()):
     return Tool(name, "Merge", [("Background", Link(bg)), ("Foreground", Link(fg)),
-                                ("PerformDepthMerge", 0)], pos)
+                                ("PerformDepthMerge", 0)] + list(extra), (330, 0))
 
 
-def build():
-    with open(os.path.join(HERE, BUTTON)) as fh:
-        button = fh.read()
-    tools = [
-        Tool("LKBg", "Background", FF + [("TopLeftRed", 0.0), ("TopLeftGreen", 0.0),
-                                         ("TopLeftBlue", 0.0), ("TopLeftAlpha", 1.0),
-                                         ("LKTitle", "Titolo di prova")], (0, 0)),
-        Tool("LKRing", "EllipseMask", [("Filter", FuID("Fast Gaussian")), ("SoftEdge", 0.0),
-                                       ("MaskWidth", 1920), ("MaskHeight", 1080),
-                                       ("PixelAspect", (1, 1)), ("UseFrameFormatSettings", 1),
-                                       ("ClippingMode", FuID("None")), ("Center", (0.5, 0.5)),
-                                       ("Width", 0.36), ("Height", 0.36), ("Solid", 0),
-                                       ("BorderWidth", 0.004)], (0, 60)),
-        Tool("LKRingBg", "Background", FF + [("TopLeftRed", 0.8), ("TopLeftGreen", 0.8),
-                                             ("TopLeftBlue", 0.8), ("TopLeftAlpha", 1.0),
-                                             ("EffectMask", Link("LKRing", "Mask"))], (110, 60)),
-        text("LKDigit", (0.5, 0.5), 0.30,
-             ": local fps = math.floor(comp:GetPrefs('Comp.FrameFormat.Rate') + 0.5); "
-             "return Text(tostring(math.floor((comp.RenderEnd - time) / fps) + 1))", (220, 0)),
-        text("LKFormat", (0.5, 0.92), 0.035,
-             ": return Text(string.format('A) %dx%d @ %.3f fps', "
-             "comp:GetPrefs('Comp.FrameFormat.Width'), comp:GetPrefs('Comp.FrameFormat.Height'), "
-             "comp:GetPrefs('Comp.FrameFormat.Rate')))", (220, 60)),
-        text("LKFrame", (0.5, 0.86), 0.035,
-             ": return Text(string.format('B) frame %d di %d (range %d-%d)', "
-             "time - comp.RenderStart, comp.RenderEnd - comp.RenderStart + 1, "
-             "comp.RenderStart, comp.RenderEnd))", (220, 120)),
-        text("LKTitleText", (0.5, 0.12), 0.045, ": return Text('C) ' .. LKBg.LKTitle)", (220, 180)),
-        merge("LKM1", "LKBg", "LKRingBg", (330, 0)),
-        merge("LKM2", "LKM1", "LKDigit", (440, 0)),
-        merge("LKM3", "LKM2", "LKFormat", (550, 0)),
-        merge("LKM4", "LKM3", "LKFrame", (660, 0)),
-        merge("LKM5", "LKM4", "LKTitleText", (770, 0)),
-    ]
+def base_tools(extra_bg=()):
+    return [background("LKBg", 0.0, extra=extra_bg), ring(),
+            background("LKRingBg", 0.8, "LKRing"), merge("LKM0", "LKBg", "LKRingBg")]
+
+
+def macro(name, tools, output, inputs=(), user_controls=None):
+    macro_id = name.replace(" ", "").replace("-", "")
     inner = "\n".join(t.to_lua(4) for t in tools)
-    user_controls = (
+    if user_controls:
+        head = "\t\t\t\tLKBg = Background {\n"
+        inner = inner.replace(head, head + user_controls, 1)
+    ins = "\n".join('\t\t\t\tInput%d = InstanceInput { SourceOp = %s, Source = %s, Name = %s, },'
+                    % (i, lua_string(op), lua_string(src), lua_string(label))
+                    for i, (op, src, label) in enumerate(inputs, 1))
+    return ("{\n\tTools = ordered() {\n\t\t%s = MacroOperator {\n\t\t\tCtrlWZoom = false,\n"
+            "\t\t\tInputs = ordered() {\n%s\n\t\t\t},\n\t\t\tOutputs = {\n"
+            "\t\t\t\tMainOutput1 = InstanceOutput { SourceOp = %s, Source = \"Output\", },\n"
+            "\t\t\t},\n\t\t\tViewInfo = GroupInfo { Pos = { 0, 0 } },\n"
+            "\t\t\tTools = ordered() {\n%s\n\t\t\t},\n\t\t},\n\t},\n\tActiveTool = %s\n}\n"
+            % (macro_id, ins, lua_string(output), inner, lua_string(macro_id)))
+
+
+def probe2():
+    with open(os.path.join(HERE, "button2.lua")) as fh:
+        button = fh.read()
+    controls = (
         "\t\t\t\t\tUserControls = ordered() {\n"
         "\t\t\t\t\t\tLKTitle = { LINKS_Name = \"Titolo\", LINKID_DataType = \"Text\", "
         "INPID_InputControl = \"TextEditControl\", TEC_Lines = 1, ICS_ControlPage = \"Controls\", },\n"
+        "\t\t\t\t\t\tLKNum = { LINKS_Name = \"Numero (slider)\", LINKID_DataType = \"Number\", "
+        "INPID_InputControl = \"SliderControl\", INP_Default = 8, INP_MinScale = 0, INP_MaxScale = 20, "
+        "INP_Integer = true, ICS_ControlPage = \"Controls\", },\n"
+        "\t\t\t\t\t\tLKCombo = { LINKS_Name = \"Preset (menu)\", LINKID_DataType = \"Number\", "
+        "INPID_InputControl = \"ComboControl\", INP_Default = 0, INP_Integer = true, "
+        "ICS_ControlPage = \"Controls\", { CCS_AddString = \"Cinema / DCP\" }, "
+        "{ CCS_AddString = \"Spot RAI\" }, },\n"
         "\t\t\t\t\t\tLKTest = { LINKS_Name = \"Test timeline\", LINKID_DataType = \"Number\", "
         "INPID_InputControl = \"ButtonControl\", INP_Integer = false, INP_External = false, "
         "ICS_ControlPage = \"Controls\", BTNCS_Execute = %s, },\n"
         "\t\t\t\t\t},\n") % lua_string(button)
-    # UserControls va dentro il blocco del Background LKBg.
-    marker = "\t\t\t\tLKBg = Background {\n"
-    inner = inner.replace(marker, marker + user_controls, 1)
-    setting = (
-        "{\n\tTools = ordered() {\n\t\t" + MACRO + " = MacroOperator {\n"
-        "\t\t\tCtrlWZoom = false,\n\t\t\tInputs = ordered() {\n"
-        "\t\t\t\tInput1 = InstanceInput { SourceOp = \"LKBg\", Source = \"LKTitle\", Name = \"Titolo\", },\n"
-        "\t\t\t\tInput2 = InstanceInput { SourceOp = \"LKBg\", Source = \"LKTest\", Name = \"Test timeline\", },\n"
-        "\t\t\t},\n\t\t\tOutputs = {\n"
-        "\t\t\t\tMainOutput1 = InstanceOutput { SourceOp = \"LKM5\", Source = \"Output\", },\n"
-        "\t\t\t},\n\t\t\tViewInfo = GroupInfo { Pos = { 0, 0 } },\n"
-        "\t\t\tTools = ordered() {\n%s\n\t\t\t},\n\t\t},\n\t},\n"
-        "\tActiveTool = \"" + MACRO + "\"\n}\n") % inner
-    out_dir = os.path.join(ROOT, "dist")
-    os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, NAME.replace(" ", "-") + ".drfx")
+    tools = base_tools([("LKTitle", "Titolo di prova"), ("LKNum", 8), ("LKCombo", 0)]) + [
+        text("LKLabel", "LEADERKIT PROBE 2\nmetti la testina qui e premi Test timeline",
+             size=0.04),
+        merge("LKM1", "LKM0", "LKLabel")]
+    return macro("LeaderKit Probe 2", tools, "LKM1",
+                 [("LKLabel", "StyledText", "Testo (nativo Text+)"), ("LKBg", "LKTitle", "Titolo (personalizzato)"),
+                  ("LKBg", "LKNum", "Numero (slider)"), ("LKBg", "LKCombo", "Preset (menu)"),
+                  ("LKBg", "LKTest", "Test timeline")], controls)
+
+
+TESTS = [
+    ("A", "statico, nessuna espressione", "A  STATICO", None, None),
+    ("B", "espressione semplice numerica (time)", "B  ESPRESSIONE SEMPLICE",
+     ("Size", Expr(0.06, "0.06 + 0*time")), None),
+    ("C", "espressione Lua ':' con Text() e time", "",
+     ("StyledText", Expr("", ': return Text("C  frame " .. tostring(time))')), None),
+    ("D", "espressione Lua con comp.RenderStart/RenderEnd", "",
+     ("StyledText", Expr("", ': return Text("D  range " .. tostring(comp.RenderStart)'
+                               ' .. "-" .. tostring(comp.RenderEnd))')), None),
+    ("E", "espressione Lua con comp:GetPrefs (fps/risoluzione)", "",
+     ("StyledText", Expr("", ': return Text("E  " .. tostring(comp:GetPrefs("Comp.FrameFormat.Width"))'
+                               ' .. "x" .. tostring(comp:GetPrefs("Comp.FrameFormat.Height"))'
+                               ' .. " @ " .. tostring(comp:GetPrefs("Comp.FrameFormat.Rate")))')), None),
+    ("F", "espressione semplice su Blend con comp.RenderEnd (visibile solo nell'ultimo secondo)",
+     "F  ULTIMO SECONDO", None, ("Blend", Expr(1.0, "iif(comp.RenderEnd - time < 24, 1, 0)"))),
+]
+
+
+def test_generator(letter, desc, label, text_extra, merge_extra):
+    t = text("LKText", label, size=0.06)
+    if text_extra:
+        t.inputs[text_extra[0]] = text_extra[1]
+    tools = base_tools() + [
+        text("LKDesc", "Test %s: %s" % (letter, desc), center=(0.5, 0.12), size=0.025),
+        merge("LKM1", "LKM0", "LKDesc"), t,
+        merge("LKM2", "LKM1", "LKText", [merge_extra] if merge_extra else [])]
+    return macro("LeaderKit Test %s" % letter, tools, "LKM2")
+
+
+def write_drfx(name, files):
+    out = os.path.join(ROOT, "dist")
+    os.makedirs(out, exist_ok=True)
+    path = os.path.join(out, name)
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("Edit/Generators/LeaderKit/%s.setting" % NAME, setting)
-    with open(os.path.join(out_dir, NAME + ".setting"), "w") as fh:
-        fh.write(setting)
+        for fname, text_ in files:
+            zf.writestr("Edit/Generators/LeaderKit/" + fname, text_)
+            with open(os.path.join(out, fname), "w") as fh:
+                fh.write(text_)
     return path
 
 
+def build():
+    return [write_drfx("LeaderKit-Probe-2.drfx", [("LeaderKit Probe 2.setting", probe2())]),
+            write_drfx("LeaderKit-Test-Grafica.drfx",
+                       [("LeaderKit Test %s.setting" % t[0], test_generator(*t)) for t in TESTS])]
+
+
 if __name__ == "__main__":
-    print(build())
+    for p in build():
+        print(p)

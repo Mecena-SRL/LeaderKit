@@ -28,6 +28,10 @@ try("tool:GetInput('LKTitle')", function() return tool:GetInput("LKTitle") end)
 try("tool:GetInput('Input1')", function() return tool:GetInput("Input1") end)
 try("tool.LKTitle[0]", function() return tool.LKTitle[0] end)
 try("FindTool('LKBg'):GetInput('LKTitle')", function() return c:FindTool("LKBg"):GetInput("LKTitle") end)
+try("FindTool('LKBg') LKNum / LKCombo", function()
+  local bg = c:FindTool("LKBg"); return tostring(bg:GetInput("LKNum")) .. " / " .. tostring(bg:GetInput("LKCombo"))
+end)
+try("FindTool('LKLabel') StyledText", function() return c:FindTool("LKLabel"):GetInput("StyledText") end)
 try("tool list", function()
   local names = {}
   for _, t in pairs(c:GetToolList(false)) do names[#names + 1] = t.Name .. "(" .. t.ID .. ")" end
