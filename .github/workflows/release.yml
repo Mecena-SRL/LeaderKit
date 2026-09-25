@@ -2,9 +2,16 @@ name: Release
 
 # Un tag vX.Y.Z crea la release su GitHub con il .drfx allegato
 # (pre-release se il tag e' 0.x o contiene un suffisso, es. v1.0.0-rc1).
+# Senza tag: Actions › Release › Run workflow con la versione (es. 0.8.0);
+# il tag vX.Y.Z viene creato da GitHub sull'ultimo commit di main.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versione da pubblicare (es. 0.8.0)"
+        required: true
 
 permissions:
   contents: write
@@ -14,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -26,10 +35,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -n "${{ inputs.version }}" ]; then TAG="v${{ inputs.version }}"; else TAG="$GITHUB_REF_NAME"; fi
+          VERSION="${TAG#v}"
+          grep -q "__version__ = \"${VERSION}\"" src/leaderkit/__init__.py || { echo "Versione diversa da src/leaderkit/__init__.py"; exit 1; }
           NOTES="docs/release-notes/${VERSION}.md"
           [ -f "$NOTES" ] || echo "LeaderKit ${VERSION}" > "$NOTES"
           PRE=""
           case "$VERSION" in 0.*|*-*) PRE="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" "dist/LeaderKit-${VERSION}.drfx" \
+          gh release create "$TAG" "dist/LeaderKit-${VERSION}.drfx" --target "$(git rev-parse HEAD)" \
             --title "LeaderKit ${VERSION}" --notes-file "$NOTES" $PRE
