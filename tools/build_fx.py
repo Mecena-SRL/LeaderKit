@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+"""Build di LeaderKit come generatori Fusion (Edit > Generators > LeaderKit).
+
+    python3 tools/build_fx.py   ->  dist/LeaderKit.drfx
+
+* LeaderKit Head: slate + countdown + 2-pop in un solo clip. La fine del clip
+  e' il FFOA; tutto e' calcolato a ogni fotogramma dal frame rate e dalla
+  risoluzione della timeline. Parametri e bottoni nell'Inspector.
+* LeaderKit Tail: tail pop + END OF PROGRAM; inserita dal bottone "Genera".
+
+Convenzioni verificate in Resolve 21 (probe): GroupOperator, nodo Custom
+"LK" come pannello di controllo, testi letti con .Value, espressioni con
+comp:GetPrefs / comp.RenderStart / comp.RenderEnd / time.
+"""
+
+import os
+import sys
+import zipfile
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "src"))
+from leaderkit import __version__  # noqa: E402
+from leaderkit.fusion import lua_string  # noqa: E402
+
+FPS = 'math.floor(comp:GetPrefs("Comp.FrameFormat.Rate") + 0.5)'
+REM = '(comp.RenderEnd - time + 1)'                  # fotogrammi al FFOA (1 = ultimo)
+ELAPSED = '(time - comp.RenderStart)'                # fotogrammi dall'inizio clip
+ASPECT = '(comp:GetPrefs("Comp.FrameFormat.Width") / comp:GetPrefs("Comp.FrameFormat.Height"))'
+CD = 'LK.CountFrom'
+
+RING_D = 0.36
+LINE_W = 0.0025
+
+
+def e(expr):
+    """Sostituisce i segnaposto nelle espressioni."""
+    return (expr.replace("FPS", FPS).replace("REM", REM).replace("ELAPSED", ELAPSED)
+            .replace("ASPECT", ASPECT).replace("CD", CD))
+
+
+class G(object):
+    """Grafo di un generatore: nodi come testo Lua."""
+
+    def __init__(self):
+        self.tools = []
+        self.x = 0
+
+    def _add(self, name, reg, inputs, extra=""):
+        body = []
+        for key, val in inputs:
+            k = key if key.isidentifier() else "[%s]" % lua_string(key)
+            if isinstance(val, tuple) and val[0] == "expr":
+                v = "Expression = %s, " % lua_string(val[1])
+            elif isinstance(val, tuple) and val[0] == "link":
+                v = "SourceOp = %s, Source = %s, " % (lua_string(val[1]), lua_string(val[2]))
+            else:
+                v = "Value = %s, " % val
+            body.append("\t\t\t\t\t\t%s = Input { %s}," % (k, v))
+        self.x += 110
+        self.tools.append("\t\t\t\t%s = %s {\n\t\t\t\t\tCtrlWShown = false,\n\t\t\t\t\tNameSet = true,\n"
+                          "\t\t\t\t\tInputs = {\n%s\n\t\t\t\t\t},\n"
+                          "\t\t\t\t\tViewInfo = OperatorInfo { Pos = { %d, %d } },\n%s\t\t\t\t},\n"
+                          % (name, reg, "\n".join(body), self.x, 0, extra))
+        return name
+
+    CREATOR = [("GlobalOut", "100000"), ("Width", "1920"), ("Height", "1080"),
+               ("UseFrameFormatSettings", "1")]
+
+    def background(self, name, grey=0.0, mask=None, alpha=1.0):
+        ins = self.CREATOR + [("TopLeftRed", repr(grey)), ("TopLeftGreen", repr(grey)),
+                              ("TopLeftBlue", repr(grey)), ("TopLeftAlpha", repr(alpha))]
+        if mask:
+            ins.append(("EffectMask", ("link", mask, "Mask")))
+        return self._add(name, "Background", ins)
+
+    def mask(self, name, kind, width, height, center=None, border=None):
+        ins = [("Filter", 'FuID { "Fast Gaussian" }'), ("SoftEdge", "0"),
+               ("MaskWidth", "1920"), ("MaskHeight", "1080"), ("PixelAspect", "{ 1, 1 }"),
+               ("UseFrameFormatSettings", "1"), ("ClippingMode", 'FuID { "None" }'),
+               ("Width", width), ("Height", height)]
+        if center:
+            ins.append(("Center", center))
+        if border:
+            ins += [("Solid", "0"), ("BorderWidth", border)]
+        return self._add(name, kind, ins)
+
+    def text(self, name, styled, size, y=0.5, grey=1.0, style="Bold", spacing=None):
+        ins = self.CREATOR + [
+            ("Center", "{ 0.5, %s }" % y), ("Font", '"Open Sans"'), ("Style", lua_string(style)),
+            ("Size", repr(size)), ("StyledText", styled),
+            ("Red1", repr(grey)), ("Green1", repr(grey)), ("Blue1", repr(grey)),
+            ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")]
+        if spacing:
+            ins.append(("LineSpacing", repr(spacing)))
+        return self._add(name, "TextPlus", ins)
+
+    def merge(self, name, bg, fg, blend=None):
+        ins = [("Background", ("link", bg, "Output")), ("Foreground", ("link", fg, "Output")),
+               ("PerformDepthMerge", "0")]
+        if blend:
+            ins.append(("Blend", ("expr", blend)))
+        return self._add(name, "Merge", ins)
+
+    def transform(self, name, src, angle):
+        return self._add(name, "Transform", [("Input", ("link", src, "Output")),
+                                             ("Angle", ("expr", angle))])
+
+    def controls(self, values, user_controls):
+        ins = [(k, v) for k, v in values]
+        return self._add("LK", "Custom", ins,
+                         "\t\t\t\t\tUserControls = ordered() {\n%s\t\t\t\t\t},\n" % user_controls)
+
+
+def uc_text(name, label, lines=1, read_only=False):
+    return ("\t\t\t\t\t\t%s = { LINKID_DataType = \"Text\", INPID_InputControl = \"TextEditControl\", "
+            "TEC_Lines = %d, TEC_Wrap = true, TEC_ReadOnly = %s, LINKS_Name = %s, },\n"
+            % (name, lines, "true" if read_only else "false", lua_string(label)))
+
+
+def uc_combo(name, label, items):
+    opts = " ".join("{ CCS_AddString = %s }," % lua_string(i) for i in items)
+    return ("\t\t\t\t\t\t%s = { %s LINKID_DataType = \"Number\", INPID_InputControl = \"ComboControl\", "
+            "CC_LabelPosition = \"Horizontal\", INP_Integer = true, LINKS_Name = %s, },\n"
+            % (name, opts, lua_string(label)))
+
+
+def uc_slider(name, label, lo, hi, default, integer=True):
+    return ("\t\t\t\t\t\t%s = { LINKID_DataType = \"Number\", INPID_InputControl = \"SliderControl\", "
+            "INP_Integer = %s, INP_MinScale = %s, INP_MaxScale = %s, INP_MinAllowed = %s, "
+            "INP_MaxAllowed = %s, INP_Default = %s, LINKS_Name = %s, },\n"
+            % (name, "true" if integer else "false", lo, hi, lo, hi * 10, default, lua_string(label)))
+
+
+def uc_check(name, label, default):
+    return ("\t\t\t\t\t\t%s = { LINKID_DataType = \"Number\", INPID_InputControl = \"CheckboxControl\", "
+            "INP_Integer = true, INP_Default = %d, CBC_TriState = false, LINKS_Name = %s, },\n"
+            % (name, default, lua_string(label)))
+
+
+def uc_label(name, label):
+    return ("\t\t\t\t\t\t%s = { LINKID_DataType = \"Number\", INPID_InputControl = \"LabelControl\", "
+            "LBLC_DropDownButton = false, INP_External = false, INP_Passive = true, LINKS_Name = %s, },\n"
+            % (name, lua_string(label)))
+
+
+def uc_button(name, label, code):
+    return ("\t\t\t\t\t\t%s = { LINKID_DataType = \"Number\", INPID_InputControl = \"ButtonControl\", "
+            "INP_Integer = false, INP_External = false, LINKS_Name = %s, BTNCS_Execute = %s, },\n"
+            % (name, lua_string(label), lua_string(code)))
+
+
+def leader_stack(g, prefix, digit_expr, sweep_vis=None):
+    """Cerchi, croce, braccio rotante e cifra centrale. Ritorna il nodo in cima."""
+    r = RING_D / 2.0
+    g.mask(prefix + "RingO", "EllipseMask", repr(RING_D), repr(RING_D), border=repr(LINE_W * 1.6))
+    g.mask(prefix + "RingI", "EllipseMask", repr(RING_D * 0.86), repr(RING_D * 0.86), border=repr(LINE_W))
+    g.mask(prefix + "LineH", "RectangleMask", "1", repr(LINE_W))
+    g.mask(prefix + "LineV", "RectangleMask", repr(LINE_W), ("expr", e("1 / ASPECT")))
+    g.background(prefix + "RingOBg", 0.85, prefix + "RingO", )
+    g.background(prefix + "RingIBg", 0.85, prefix + "RingI")
+    g.background(prefix + "LineHBg", 0.6, prefix + "LineH")
+    g.background(prefix + "LineVBg", 0.6, prefix + "LineV")
+    top = g.merge(prefix + "M1", prefix + "RingOBg", prefix + "RingIBg")
+    top = g.merge(prefix + "M2", top, prefix + "LineHBg")
+    top = g.merge(prefix + "M3", top, prefix + "LineVBg")
+    if sweep_vis:
+        g.mask(prefix + "Arm", "RectangleMask", repr(LINE_W * 1.6), repr(r),
+               center=("expr", e("Point(0.5, 0.5 + %s * ASPECT)" % (r / 2.0))))
+        g.background(prefix + "ArmBg", 0.95, prefix + "Arm")
+        g.transform(prefix + "Sweep", prefix + "ArmBg",
+                    e("-360 * math.fmod(CD * FPS - REM, FPS) / FPS"))
+        top = g.merge(prefix + "M4", top, prefix + "Sweep", e(sweep_vis))
+    g.text(prefix + "Digit", ("expr", e(digit_expr)), 0.30)
+    return g.merge(prefix + "M5", top, prefix + "Digit")
+
+
+def group(name, g, output, inputs):
+    gid = "".join(ch for ch in name if ch.isalnum())
+    ins = "\n".join("\t\t\t\tInput%d = InstanceInput { SourceOp = \"LK\", Source = %s, },"
+                    % (i, lua_string(src)) for i, src in enumerate(inputs, 1))
+    return ("{\n\tTools = ordered() {\n\t\t%s = GroupOperator {\n\t\t\tCtrlWZoom = false,\n"
+            "\t\t\tInputs = ordered() {\n%s\n\t\t\t},\n"
+            "\t\t\tOutputs = {\n\t\t\t\tMainOutput1 = InstanceOutput { SourceOp = %s, Source = \"Output\", },\n\t\t\t},\n"
+            "\t\t\tViewInfo = GroupInfo { Pos = { 0, 0 }, Flags = { AllowPan = false, AutoSnap = true, "
+            "RemoveRouters = true }, Size = { 900, 300, 450, 24 }, Direction = \"Horizontal\", "
+            "PipeStyle = \"Direct\", Scale = 1, Offset = { 0, 0 } },\n"
+            "\t\t\tTools = ordered() {\n%s\t\t\t},\n\t\t},\n\t},\n\tActiveTool = %s\n}\n"
+            % (gid, ins, lua_string(output), "".join(g.tools), lua_string(gid)))
+
+
+def engine(mode):
+    with open(os.path.join(ROOT, "fx", "engine.lua")) as fh:
+        return 'LK_MODE = "%s"\n' % mode + fh.read()
+
+
+HEAD_INPUTS = [
+    "SecPreset", "Preset", "Reel", "CountFrom",
+    "SecSlate", "Title", "Director", "Editor", "Colorist", "Version", "Date", "Duration", "Info",
+    "SecTimeline", "MarkersOn", "MarkerKind", "MarkerEvery", "TailOn", "Generate", "Remove",
+]
+
+
+def head():
+    g = G()
+    uc = (uc_label("SecPreset", "LeaderKit %s" % __version__)
+          + uc_combo("Preset", "Preset", ["Cinema / DCP", "Spot RAI"])
+          + uc_slider("Reel", "Rullo (FFOA a N:00:08:00)", 1, 23, 1)
+          + uc_slider("CountFrom", "Countdown da", 3, 11, 8)
+          + uc_label("SecSlate", "Slate")
+          + uc_text("Title", "Titolo") + uc_text("Director", "Regia")
+          + uc_text("Editor", "Montaggio") + uc_text("Colorist", "Color")
+          + uc_text("Version", "Versione") + uc_text("Date", "Data")
+          + uc_text("Duration", "Durata (da Genera)", read_only=True)
+          + uc_text("Info", "TC (da Genera)", read_only=True)
+          + uc_label("SecTimeline", "Timeline")
+          + uc_check("MarkersOn", "Marker a intervalli", 1)
+          + uc_combo("MarkerKind", "Tipo marker", ["Fine rullo", "Break"])
+          + uc_slider("MarkerEvery", "Ogni (minuti)", 1, 60, 20, integer=False)
+          + uc_check("TailOn", "Inserisci la coda", 1)
+          + uc_button("Generate", "Genera sulla timeline", engine("generate"))
+          + uc_button("Remove", "Rimuovi elementi generati", engine("remove")))
+    g.controls([("Preset", "0"), ("Reel", "1"), ("CountFrom", "8"),
+                ("Title", '"TITOLO"'), ("Director", '""'), ("Editor", '""'),
+                ("Colorist", '""'), ("Version", '"v1"'), ("Date", '""'),
+                ("Duration", '"premi Genera"'), ("Info", '""'),
+                ("MarkersOn", "1"), ("MarkerKind", "0"), ("MarkerEvery", "20"), ("TailOn", "1")], uc)
+
+    g.background("Bg", 0.0)
+    # Slate
+    g.text("SHeading", ("expr", 'Text(iif(LK.Preset == 0, "CINEMA / DCP", "SPOT RAI") .. "  ·  LEADERKIT")'),
+           0.026, y=0.86, grey=0.65)
+    g.text("STitle", ("expr", "string.upper(LK.Title.Value)"), 0.065, y=0.75)
+    g.mask("SRule", "RectangleMask", "0.6", repr(LINE_W), center="{ 0.5, 0.665 }")
+    g.background("SRuleBg", 0.5, "SRule")
+    details = ('"DIRECTOR   " .. LK.Director.Value .. "\\nEDITOR   " .. LK.Editor.Value'
+               ' .. "\\nCOLORIST   " .. LK.Colorist.Value .. "\\nDATE   " .. LK.Date.Value'
+               ' .. "\\nVERSION   " .. LK.Version.Value .. "\\nDURATION   " .. LK.Duration.Value'
+               ' .. "\\nFRAME RATE   " .. string.format("%g fps", comp:GetPrefs("Comp.FrameFormat.Rate"))'
+               ' .. "\\nRESOLUTION   " .. comp:GetPrefs("Comp.FrameFormat.Width") .. " x "'
+               ' .. comp:GetPrefs("Comp.FrameFormat.Height") .. "\\n\\n" .. LK.Info.Value'
+               ' .. iif(LK.Preset == 1, "\\nLOUDNESS -23 LUFS +/-0,2  ·  MAX ST -18 LUFS  ·  TP -2 dBTP", "")')
+    g.text("SDetails", ("expr", "Text(%s)" % details), 0.024, y=0.38, style="Regular", spacing=1.1)
+    s = g.merge("SM1", "SHeading", "STitle")
+    s = g.merge("SM2", s, "SRuleBg")
+    s = g.merge("SM3", s, "SDetails")
+    top = g.merge("MSlate", "Bg", s, e("iif(LK.Preset == 0, iif(REM > (CD + 2) * FPS, 1, 0), iif(REM > 3 * FPS, 1, 0))"))
+    # Leader (countdown + 2-pop)
+    lead = leader_stack(g, "L", 'Text(iif(REM < CD * FPS and REM >= 2 * FPS, tostring(math.ceil(REM / FPS)), ""))',
+                        sweep_vis="iif(REM < CD * FPS and REM > 2 * FPS, 1, 0)")
+    top = g.merge("MLeader", top, lead, e("iif(LK.Preset == 0 and REM <= CD * FPS and REM >= 2 * FPS, 1, 0)"))
+    g.text("PicStart", ("expr", 'Text("PICTURE\\nSTART")'), 0.075, spacing=1.0)
+    top = g.merge("MPicStart", top, "PicStart", e("iif(LK.Preset == 0 and REM == CD * FPS, 1, 0)"))
+    # Avviso se il clip e' troppo corto per il preset
+    g.text("Warn", ("expr", e('Text("ALLUNGA IL CLIP: servono almeno " .. iif(LK.Preset == 0, CD, 8) .. " secondi")')),
+           0.03, y=0.08, grey=1.0)
+    top = g.merge("MWarn", top, "Warn",
+                  e("iif((comp.RenderEnd - comp.RenderStart + 1) < iif(LK.Preset == 0, CD, 8) * FPS, 1, 0)"))
+    return group("LeaderKit Head", g, top, HEAD_INPUTS)
+
+
+def tail():
+    g = G()
+    uc = (uc_combo("Preset", "Preset", ["Cinema / DCP", "Spot RAI"])
+          + uc_text("Info", "Info (da Genera)"))
+    g.controls([("Preset", "0"), ("Info", '""')], uc)
+    g.background("Bg", 0.0)
+    lead = leader_stack(g, "T", 'Text("2")')
+    top = g.merge("MPop", "Bg", lead, e("iif(LK.Preset == 0 and ELAPSED == 2 * FPS - 1, 1, 0)"))
+    g.text("CardText", ("expr", 'Text("END OF PROGRAM")'), 0.07)
+    g.text("CardSub", ("expr", "Text(LK.Info.Value)"), 0.024, y=0.36, grey=0.7, style="Regular")
+    card = g.merge("CM1", "CardText", "CardSub")
+    top = g.merge("MCard", top, card, e("iif(LK.Preset == 0 and ELAPSED >= 3 * FPS, 1, 0)"))
+    return group("LeaderKit Tail", g, top, ["Preset", "Info"])
+
+
+def build():
+    out = os.path.join(ROOT, "dist")
+    os.makedirs(out, exist_ok=True)
+    files = [("LeaderKit Head.setting", head()), ("LeaderKit Tail.setting", tail())]
+    path = os.path.join(out, "LeaderKit.drfx")
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, text in files:
+            zf.writestr("Edit/Generators/LeaderKit/" + name, text)
+            with open(os.path.join(out, name), "w") as fh:
+                fh.write(text)
+    return path
+
+
+if __name__ == "__main__":
+    print(build())

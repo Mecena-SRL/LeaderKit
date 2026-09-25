@@ -1,17 +1,33 @@
 # LeaderKit
 
-Plugin per **DaVinci Resolve 20+** che genera automaticamente leader, slate,
-countdown, sync pop, coda e marker di rullo/break, con preset per contesto
-(cinema/DCP, spot RAI, …). Tutto viene ricalcolato sul **frame rate e sulla
-risoluzione reali della timeline**: niente countdown pre-renderizzati.
+Plugin per **DaVinci Resolve 20+** che genera leader, slate, countdown, sync
+pop, coda e marker di rullo/break, con preset per contesto (cinema/DCP, spot
+RAI, …). Tutto si adatta al **frame rate e alla risoluzione reali della
+timeline**. Valori di riferimento: [`docs/industry-standards.md`](docs/industry-standards.md).
 
-La fonte di verità per i valori dei preset è
-[`docs/industry-standards.md`](docs/industry-standards.md).
+## v0.2 — generatori nella libreria Effetti (consigliato)
 
-> **Stato: v0.1.0 (MVP).** Il motore di calcolo, i template Fusion generati e
-> il flusso verso l'API di Resolve sono coperti da test automatici su un
-> Resolve simulato. **Non è ancora stato provato dentro DaVinci Resolve
-> reale**: vedi [Da verificare in Resolve](#da-verificare-in-resolve).
+Si installa solo con **`LeaderKit.drfx`** (doppio clic): niente installer, niente Python.
+
+1. Effetti › Generators › LeaderKit › **LeaderKit Head**: trascinalo prima del
+   programma, come un solido, e allungalo (Cinema/DCP: 18" = slate 8" + nero
+   2" + leader 8"; Spot RAI: almeno 8"). **La fine del clip è il FFOA.**
+2. Nell'Inspector: preset, rullo, countdown, campi slate, marker.
+3. **Genera sulla timeline**: imposta lo start TC (FFOA a 01:00:08:00 o N:00:08:00
+   per il rullo N; 10:00:00:00 per RAI), mette il 2-pop audio a FFOA −2", inserisce
+   **LeaderKit Tail** dopo il programma con il tail pop a LFOA +2", aggiunge i
+   marker FFOA/LFOA/pop/fine rullo (con `customData` "leaderkit:…") e scrive
+   durata e TC nella slate.
+4. **Rimuovi elementi generati** cancella solo marker, pop e coda di LeaderKit.
+
+Il countdown non è pre-renderizzato: cifre, Picture Start, braccio e 2-pop sono
+calcolati a ogni fotogramma dal frame rate della timeline (48 fotogrammi a
+24/23.976, 50 a 25, 60 a 29.97 DF). Build: `python3 tools/build_fx.py`; motore
+dei bottoni in `fx/engine.lua`. Test: `tests/test_fx.py` (espressioni e motore
+eseguiti in Lua su comp e timeline simulati).
+
+La v0.1 (script Python da Workspace › Scripts, descritta sotto) resta nel repo
+come riferimento del motore di calcolo.
 
 ## Cosa fa (v1)
 
