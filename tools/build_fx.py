@@ -145,10 +145,11 @@ def uc_check(name, label, default):
 def uc_color(prefix, label, group, default):
     out = ""
     for i, ch in enumerate(("Red", "Green", "Blue")):
+        name = ("ICS_Name = %s, " % lua_string(label)) if i == 0 else ""
         out += ("\t\t\t\t\t\t%s%s = { LINKID_DataType = \"Number\", INPID_InputControl = \"ColorControl\", "
-                "LINKS_Name = %s, IC_ControlGroup = %d, IC_ControlID = %d, INP_Default = %s, "
-                "INP_MinScale = 0, INP_MaxScale = 1, },\n"
-                % (prefix, ch, lua_string(label), group, i, repr(default[i])))
+                "%sLINKS_Name = %s, IC_ControlGroup = %d, IC_ControlID = %d, INP_Default = %s, "
+                "INP_MinScale = 0, INP_MaxScale = 1, CLRC_ShowWheel = false, },\n"
+                % (prefix, ch, name, lua_string(label), group, i, repr(default[i])))
     return out
 
 
@@ -156,8 +157,18 @@ COLOR_DEFAULTS = [("Text", "Colore testo", (1.0, 1.0, 1.0)), ("Bg", "Colore sfon
                   ("Accent", "Colore grafica leader", (0.85, 0.85, 0.85))]
 
 
+COLOR_GROUP_BASE = 11
+
+
 def color_controls():
-    return "".join(uc_color(p, label, i + 1, d) for i, (p, label, d) in enumerate(COLOR_DEFAULTS))
+    return "".join(uc_color(p, label, COLOR_GROUP_BASE + i, d) for i, (p, label, d) in enumerate(COLOR_DEFAULTS))
+
+
+def control_group(src):
+    for i, (p, _, _) in enumerate(COLOR_DEFAULTS):
+        if src.startswith(p) and src[len(p):] in ("Red", "Green", "Blue"):
+            return COLOR_GROUP_BASE + i
+    return None
 
 
 def color_values():
@@ -211,8 +222,12 @@ def leader_stack(g, prefix, digit_expr, sweep_vis=None):
 
 def group(name, g, output, inputs):
     gid = "".join(ch for ch in name if ch.isalnum())
-    ins = "\n".join("\t\t\t\tInput%d = InstanceInput { SourceOp = \"LK\", Source = %s, },"
-                    % (i, lua_string(src)) for i, src in enumerate(inputs, 1))
+    def inst(i, src):
+        grp = control_group(src)
+        extra = (" ControlGroup = %d," % grp) if grp else ""
+        return ("\t\t\t\tInput%d = InstanceInput { SourceOp = \"LK\", Source = %s,%s },"
+                % (i, lua_string(src), extra))
+    ins = "\n".join(inst(i, src) for i, src in enumerate(inputs, 1))
     return ("{\n\tTools = ordered() {\n\t\t%s = GroupOperator {\n\t\t\tCtrlWZoom = false,\n"
             "\t\t\tInputs = ordered() {\n%s\n\t\t\t},\n"
             "\t\t\tOutputs = {\n\t\t\t\tMainOutput1 = InstanceOutput { SourceOp = %s, Source = \"Output\", },\n\t\t\t},\n"
@@ -225,7 +240,15 @@ def group(name, g, output, inputs):
 
 def engine(mode):
     with open(os.path.join(ROOT, "fx", "engine.lua")) as fh:
-        return 'LK_MODE = "%s"\n' % mode + fh.read()
+        body = fh.read()
+    return ('LK_MODE = "%s"\n' % mode
+            + "local function __leaderkit_main()\n" + body + "\nend\n"
+            + "local __ok, __err = xpcall(__leaderkit_main, debug and debug.traceback or tostring)\n"
+            + "if not __ok then\n"
+            + "  print('[LeaderKit] ERRORE: ' .. tostring(__err))\n"
+            + "  pcall(function() local cc = comp or fusion:GetCurrentComp(); cc:AskUser('LeaderKit - errore', "
+            + "{ { 'Errore', 'Text', Default = tostring(__err), Lines = 14, Wrap = true } }) end)\n"
+            + "end\n")
 
 
 HEAD_INPUTS = [
@@ -322,7 +345,7 @@ def build():
     out = os.path.join(ROOT, "dist")
     os.makedirs(out, exist_ok=True)
     files = [("LeaderKit Head.setting", head()), ("LeaderKit Tail.setting", tail())]
-    path = os.path.join(out, "LeaderKit.drfx")
+    path = os.path.join(out, "LeaderKit-%s.drfx" % __version__)
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
         for name, text in files:
             zf.writestr("Edit/Generators/LeaderKit/" + name, text)

@@ -6,7 +6,7 @@ local MODE = LK_MODE or "generate"
 local PREFIX = "leaderkit"
 local POP_TRACK = "LeaderKit Pop"
 local TAIL_NAME = "LeaderKit Tail"
-local HEAD_NAME = "LeaderKit Head"
+HEAD_NAME = "LeaderKit Head"
 
 local report, warnings = {}, {}
 local function log(s) report[#report + 1] = tostring(s); print("[LeaderKit] " .. tostring(s)) end
@@ -17,9 +17,21 @@ local c = comp or (fusion and fusion:GetCurrentComp())
 local function show(title)
   local text = table.concat(report, "\n")
   if #warnings > 0 then text = text .. "\n\nATTENZIONE:\n- " .. table.concat(warnings, "\n- ") end
-  pcall(function()
-    c:AskUser(title, { { "Esito", "Text", Default = text, Lines = 18, Wrap = true, ReadOnly = true } })
-  end)
+  print("[LeaderKit] " .. title .. "\n" .. text)
+  local home = os.getenv("HOME") or os.getenv("USERPROFILE")
+  if home then
+    local sep = package.config:sub(1, 1)
+    local f = io.open(home .. sep .. "Desktop" .. sep .. "LeaderKit-riepilogo.txt", "w")
+    if f then f:write(title .. "\n\n" .. text .. "\n"); f:close() end
+  end
+  local shown = false
+  for _, target in ipairs({ c, fusion and fusion:GetCurrentComp() }) do
+    if not shown and target then
+      shown = pcall(function()
+        target:AskUser(title, { { "Esito", "Text", Default = text, Lines = 18, Wrap = true } })
+      end)
+    end
+  end
 end
 
 -- ---------------------------------------------------------------- timecode
@@ -143,17 +155,29 @@ if MODE == "remove" then
 end
 
 -- ---------------------------------------------------------------- generate
+local function isHeadItem(item)
+  if not item then return false end
+  local ok, has = pcall(function()
+    local cmp = item:GetFusionCompByIndex(1)
+    local t = findTool(cmp, "LK")
+    return t ~= nil and t:GetInput("SlateSec") ~= nil
+  end)
+  if ok and has then return true end
+  return string.find(item:GetName() or "", "Head", 1, true) ~= nil
+end
+
 local head = tl:GetCurrentVideoItem()
-if not head or head:GetName() ~= HEAD_NAME then
+if not isHeadItem(head) then
   head = nil
   for _, e in ipairs(allItems("video")) do
-    if e.item:GetName() == HEAD_NAME then head = e.item; break end
+    if isHeadItem(e.item) then head = e.item; break end
   end
 end
 if not head then
   log("Non trovo il blocco LeaderKit Head: mettici sopra la testina e riprova.")
   show("LeaderKit"); return
 end
+HEAD_NAME = head:GetName()   -- nome del template installato (serve per ricrearlo)
 
 local preset = math.floor(get("Preset", 0) + 0.5)   -- 0 Cinema/DCP, 1 Spot RAI
 local reel = math.floor(get("Reel", 1) + 0.5)

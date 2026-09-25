@@ -7,7 +7,7 @@ timeline**. Valori di riferimento: [`docs/industry-standards.md`](docs/industry-
 
 ## Generatori nella libreria Effetti (consigliato)
 
-Si installa solo con **`LeaderKit.drfx`** (doppio clic): niente installer, niente Python.
+Si installa solo con **`LeaderKit-<versione>.drfx`** (doppio clic): niente installer, niente Python.
 
 1. Effetti › Generators › LeaderKit › **LeaderKit Head**: trascinalo dove deve
    iniziare il leader (di solito a inizio timeline). La lunghezza non conta.
