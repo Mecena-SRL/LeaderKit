@@ -7,4 +7,4 @@ Il pacchetto è diviso in due parti:
 * ``resolve_ops`` e ``ui``, che parlano con l'API di scripting di Resolve.
 """
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"

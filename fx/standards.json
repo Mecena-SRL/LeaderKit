@@ -3,7 +3,7 @@
   "presets": [
     {
       "id": "cinema_dcp",
-      "name": "Cinema / DCP",
+      "name": "Cinema — DCP",
       "heading": "CINEMA / DCP",
       "source": "§A Deluxe DCP v5.11, SMPTE Universal leader",
       "ffoa": "01:00:08:00",
@@ -41,11 +41,39 @@
       "ntsc_warning": "Il digital cinema non supporta frequenze NTSC (23.976/29.97): per il DCP vanno convertite.",
       "notes": [
         "Deluxe: leader Academy 8\" in testa e in coda su ogni rullo, pop allineati all'audio, almeno 1 fotogramma di nero in testa e in coda."
-      ]
+      ],
+      "category": "cinema",
+      "resolutions": [
+        [
+          1998,
+          1080
+        ],
+        [
+          2048,
+          858
+        ],
+        [
+          3996,
+          2160
+        ],
+        [
+          4096,
+          1716
+        ],
+        [
+          2048,
+          1080
+        ],
+        [
+          4096,
+          2160
+        ]
+      ],
+      "resolution_hint": "Container DCI: Flat 1.85 = 1998×1080 / 3996×2160, Scope 2.39 = 2048×858 / 4096×1716, Full = 2048×1080 / 4096×2160 (docs §A). Imposta la timeline su uno di questi prima di montare, oppure prevedi il ridimensionamento nel DCP."
     },
     {
       "id": "dubbing",
-      "name": "Doppiaggio / M&E",
+      "name": "Cinema — Doppiaggio / M&E",
       "heading": "DOPPIAGGIO / M&E",
       "source": "§C Doppiaggio, §A leader Academy",
       "ffoa": "01:00:08:00",
@@ -76,44 +104,221 @@
       "ntsc_warning": null,
       "notes": [
         "Netflix: leader e sync pop vanno rimossi dai file Atmos doppiati (lunghezza identica all'IMF)."
+      ],
+      "category": "cinema"
+    },
+    {
+      "id": "rai_tv",
+      "name": "TV Italia — RAI (programmi)",
+      "heading": "RAI — PROGRAMMA",
+      "category": "tv",
+      "source": "§C: specifica programmi RAI non pubblica → layout EBU/DPP di riferimento",
+      "ffoa": "10:00:00:00",
+      "ffoa_hour_per_reel": false,
+      "bars": 20,
+      "bars_dbfs": -18,
+      "slate": 7,
+      "clock": true,
+      "gap": 3,
+      "countdown": 0,
+      "pop": false,
+      "pop_dbfs": -18,
+      "sync_flash": null,
+      "tail": 3,
+      "tail_pop": false,
+      "tail_flash": false,
+      "card_from": 0,
+      "card_to": 0,
+      "card_text": "",
+      "markers": {
+        "kind": "break",
+        "every_min": 0
+      },
+      "duration": "slot",
+      "slate_lines": [
+        "LOUDNESS -23 LUFS ±0,5 LU  ·  TRUE PEAK -1 dBTP (EBU R128)",
+        "PROGRAMMA 10:00:00:00"
+      ],
+      "rates": [
+        "25",
+        "50"
+      ],
+      "resolutions": [
+        [
+          1920,
+          1080
+        ],
+        [
+          3840,
+          2160
+        ]
+      ],
+      "ntsc_warning": null,
+      "unverified": true,
+      "notes": [
+        "RAI non pubblica la specifica di consegna dei programmi: questo è un layout EBU/DPP di riferimento. Verifica barre, clock e timecode con il capitolato di produzione.",
+        "Servizio pubblico: limiti di affollamento pubblicitario più stretti delle reti commerciali."
       ]
     },
     {
-      "id": "review",
-      "name": "Review / lavorazione",
-      "heading": "REVIEW / WORK IN PROGRESS",
-      "source": "§ Recommendations, riga Review/WIP",
-      "ffoa": "01:00:00:00",
+      "id": "mediaset_tv",
+      "name": "TV Italia — Mediaset (programmi)",
+      "heading": "MEDIASET — PROGRAMMA",
+      "category": "tv",
+      "source": "§C: consegna HD solo via Digital Delivery (specifica non pubblica)",
+      "ffoa": "10:00:00:00",
       "ffoa_hour_per_reel": false,
-      "bars": 0,
-      "slate": 8,
-      "clock": false,
-      "gap": 2,
-      "countdown": 8,
-      "pop": true,
-      "pop_dbfs": -20,
+      "bars": 20,
+      "bars_dbfs": -18,
+      "slate": 7,
+      "clock": true,
+      "gap": 3,
+      "countdown": 0,
+      "pop": false,
+      "pop_dbfs": -18,
       "sync_flash": null,
-      "tail": 6,
-      "tail_pop": true,
+      "tail": 3,
+      "tail_pop": false,
       "tail_flash": false,
-      "card_from": 3,
-      "card_to": 6,
-      "card_text": "END OF PROGRAM",
+      "card_from": 0,
+      "card_to": 0,
+      "card_text": "",
       "markers": {
-        "kind": "reel",
-        "every_min": 20
+        "kind": "break",
+        "every_min": 0
       },
-      "duration": "free",
+      "duration": "slot",
       "slate_lines": [
-        "COPIA DI LAVORAZIONE — NON PER LA CONSEGNA"
+        "LOUDNESS da capitolato (spot Publitalia -24 LKFS ±0,5)",
+        "PROGRAMMA 10:00:00:00"
       ],
-      "rates": [],
+      "rates": [
+        "25",
+        "50"
+      ],
+      "resolutions": [
+        [
+          1920,
+          1080
+        ],
+        [
+          3840,
+          2160
+        ]
+      ],
       "ntsc_warning": null,
-      "notes": []
+      "unverified": true,
+      "notes": [
+        "Mediaset/Publitalia: specifica programmi non pubblica, consegna via Digital Delivery. Layout EBU/DPP di riferimento: verifica con il capitolato."
+      ]
+    },
+    {
+      "id": "sky_it",
+      "name": "TV Italia — Sky Italia",
+      "heading": "SKY ITALIA — PROGRAMMA",
+      "category": "tv",
+      "source": "§B variante Sky UK come riferimento (specifica Sky Italia non pubblica)",
+      "ffoa": "10:00:00:00",
+      "ffoa_hour_per_reel": false,
+      "bars": 20,
+      "bars_dbfs": -18,
+      "slate": 7,
+      "clock": true,
+      "gap": 3,
+      "countdown": 0,
+      "pop": false,
+      "pop_dbfs": -18,
+      "sync_flash": null,
+      "tail": 3,
+      "tail_pop": false,
+      "tail_flash": false,
+      "card_from": 0,
+      "card_to": 0,
+      "card_text": "",
+      "markers": {
+        "kind": "break",
+        "every_min": 0
+      },
+      "duration": "slot",
+      "slate_lines": [
+        "LOUDNESS -23 LUFS  ·  TRUE PEAK -1 dBTP",
+        "PROGRAMMA 10:00:00:00"
+      ],
+      "rates": [
+        "25",
+        "50"
+      ],
+      "resolutions": [
+        [
+          1920,
+          1080
+        ],
+        [
+          3840,
+          2160
+        ]
+      ],
+      "ntsc_warning": null,
+      "unverified": true,
+      "notes": [
+        "Sky Italia: specifica non pubblica; layout basato su Sky UK. Verifica con il capitolato."
+      ]
+    },
+    {
+      "id": "ebu_generic",
+      "name": "TV Europa — EBU (generico)",
+      "heading": "EUROPEAN BROADCAST — EBU",
+      "category": "tv",
+      "source": "§B EBU R128 / R95, layout DPP come riferimento",
+      "ffoa": "10:00:00:00",
+      "ffoa_hour_per_reel": false,
+      "bars": 20,
+      "bars_dbfs": -18,
+      "slate": 7,
+      "clock": true,
+      "gap": 3,
+      "countdown": 0,
+      "pop": false,
+      "pop_dbfs": -18,
+      "sync_flash": null,
+      "tail": 3,
+      "tail_pop": false,
+      "tail_flash": false,
+      "card_from": 0,
+      "card_to": 0,
+      "card_text": "",
+      "markers": {
+        "kind": "break",
+        "every_min": 0
+      },
+      "duration": "slot",
+      "slate_lines": [
+        "LOUDNESS -23 LUFS ±0,5 LU  ·  TRUE PEAK -1 dBTP (EBU R128)",
+        "PROGRAMMA 10:00:00:00"
+      ],
+      "rates": [
+        "25",
+        "50"
+      ],
+      "resolutions": [
+        [
+          1920,
+          1080
+        ],
+        [
+          3840,
+          2160
+        ]
+      ],
+      "ntsc_warning": null,
+      "unverified": true,
+      "notes": [
+        "Layout di riferimento per broadcaster europei: ogni rete ha il suo capitolato (barre, clock, sync, timecode)."
+      ]
     },
     {
       "id": "dpp_uk",
-      "name": "Broadcast UK / DPP",
+      "name": "TV UK — DPP (BBC, ITV, C4…)",
       "heading": "BROADCAST UK — DPP (AS-11)",
       "source": "§B UK DPP, Channel 4 v5.2 / DPP File v5.0",
       "ffoa": "10:00:00:00",
@@ -164,11 +369,12 @@
       "notes": [
         "DPP: a fine parte 5\" di freeze o living hold (montato da te), poi almeno 1\" di nero.",
         "Barre 100% (non SMPTE) con tono di line-up; clock ≥7\" in silenzio; sync opzionale: 2 fotogrammi bianchi, tono sul primo."
-      ]
+      ],
+      "category": "tv"
     },
     {
       "id": "sky_uk",
-      "name": "Broadcast UK / Sky",
+      "name": "TV UK — Sky",
       "heading": "SKY — ASSET INFO",
       "source": "§B variante Sky",
       "ffoa": "10:00:00:00",
@@ -218,11 +424,12 @@
       "ntsc_warning": null,
       "notes": [
         "Sky: in coda 3\" di End of Programme card, 2\" di holding frame, 10\" di nero prima dei textless."
-      ]
+      ],
+      "category": "tv"
     },
     {
       "id": "rai_spot",
-      "name": "Spot Italia — RAI",
+      "name": "Spot — RAI",
       "heading": "SPOT — RAI",
       "source": "§C RAI specifiche spot HD feb. 2021 §8.2 (letta su mirror: verificare su controllopubblicita.rai.it)",
       "ffoa": "10:00:00:00",
@@ -263,11 +470,12 @@
       "ntsc_warning": null,
       "notes": [
         "RAI: niente barre né countdown, un solo spot per file, durata esatta al fotogramma, 1080i25."
-      ]
+      ],
+      "category": "spot"
     },
     {
       "id": "publitalia_spot",
-      "name": "Spot Italia — Publitalia",
+      "name": "Spot — Publitalia / Mediaset",
       "heading": "SPOT — PUBLITALIA / MEDIASET",
       "source": "§C Publitalia '80 e prassi vendor (Adstream/IMD)",
       "ffoa": "10:00:00:00",
@@ -280,7 +488,7 @@
       "pop": false,
       "pop_dbfs": -18,
       "sync_flash": null,
-      "tail": 0,
+      "tail": 2,
       "tail_pop": false,
       "tail_flash": false,
       "card_from": 0,
@@ -306,12 +514,14 @@
       ],
       "ntsc_warning": null,
       "notes": [
-        "Publitalia HD: consegna solo tramite Digital Delivery; layout di testa da prassi vendor (slate 09:59:50, nero 09:59:57)."
-      ]
+        "Publitalia HD: consegna solo tramite Digital Delivery; layout di testa da prassi vendor (slate 09:59:50, nero 09:59:57).",
+        "Coda di 2 secondi di nero aggiunta da LeaderKit (lo standard non la richiede): si toglie con 'Inserisci la coda'."
+      ],
+      "category": "spot"
     },
     {
       "id": "us_spot",
-      "name": "Spot USA",
+      "name": "Spot — USA",
       "heading": "SPOT — USA",
       "source": "§B USA (layout spot da fonte secondaria)",
       "ffoa": "01:00:00:00",
@@ -324,7 +534,7 @@
       "pop": false,
       "pop_dbfs": -20,
       "sync_flash": null,
-      "tail": 0,
+      "tail": 2,
       "tail_pop": false,
       "tail_flash": false,
       "card_from": 0,
@@ -344,8 +554,10 @@
       ],
       "ntsc_warning": null,
       "notes": [
-        "USA: identificativo Ad-ID (11 caratteri, 12° opzionale H/D) nella slate."
-      ]
+        "USA: identificativo Ad-ID (11 caratteri, 12° opzionale H/D) nella slate.",
+        "Coda di 2 secondi di nero aggiunta da LeaderKit (lo standard non la richiede): si toglie con 'Inserisci la coda'."
+      ],
+      "category": "spot"
     },
     {
       "id": "netflix",
@@ -381,7 +593,8 @@
       "notes": [
         "Netflix: esattamente 1\" di nero e silenzio in testa e in coda al programma; niente slate nel master.",
         "In 29.97/59.94 il numero di fotogrammi di ogni segmento CPL deve essere divisibile per 5."
-      ]
+      ],
+      "category": "streaming"
     },
     {
       "id": "music",
@@ -420,232 +633,357 @@
       "ntsc_warning": null,
       "notes": [
         "Digital clap: 1 fotogramma bianco + 1 fotogramma di tono in testa e in coda, per verificare la deriva."
+      ],
+      "category": "music"
+    },
+    {
+      "ffoa": "01:00:00:00",
+      "ffoa_hour_per_reel": false,
+      "bars": 0,
+      "clock": false,
+      "pop": false,
+      "pop_dbfs": -20,
+      "sync_flash": null,
+      "tail_pop": false,
+      "tail_flash": false,
+      "card_from": 0,
+      "card_to": 0,
+      "card_text": "",
+      "markers": {
+        "kind": "none"
+      },
+      "duration": "free",
+      "rates": [],
+      "ntsc_warning": null,
+      "category": "work",
+      "source": "Prassi delle copie di lavoro (Netflix Partner Help Center, Dailies: Best Practices)",
+      "id": "work_dailies",
+      "name": "Copia lavoro — Giornalieri / sync",
+      "heading": "DAILIES · GIORNALIERI",
+      "slate": 5,
+      "gap": 1,
+      "countdown": 0,
+      "tail": 2,
+      "burnin": 2,
+      "slate_lines": [
+        "COPIA DI LAVORO — GIORNALIERI"
+      ],
+      "notes": [
+        "Burn-in consigliato fuori dall'immagine attiva (bande): Netflix, Dailies Best Practices.",
+        "Scena, take, camera e roll arrivano dai metadati di Resolve: compilali nel Media Pool (o dai metadati di camera/BWF) prima di premere Genera."
       ]
+    },
+    {
+      "ffoa": "01:00:00:00",
+      "ffoa_hour_per_reel": false,
+      "bars": 0,
+      "clock": false,
+      "pop": true,
+      "pop_dbfs": -20,
+      "sync_flash": null,
+      "tail_pop": true,
+      "tail_flash": false,
+      "card_from": 2.5,
+      "card_to": 4,
+      "card_text": "END OF PROGRAM",
+      "markers": {
+        "kind": "none"
+      },
+      "duration": "free",
+      "rates": [],
+      "ntsc_warning": null,
+      "category": "work",
+      "source": "Prassi delle copie di lavoro (Netflix Partner Help Center, Dailies: Best Practices)",
+      "id": "work_offline",
+      "name": "Copia lavoro — Montaggio / review",
+      "heading": "EDITORIAL REVIEW",
+      "slate": 5,
+      "gap": 2,
+      "countdown": 8,
+      "tail": 4,
+      "burnin": 3,
+      "slate_lines": [
+        "COPIA DI LAVORO — NON PER LA DIFFUSIONE"
+      ],
+      "notes": []
+    },
+    {
+      "ffoa": "01:00:00:00",
+      "ffoa_hour_per_reel": false,
+      "bars": 0,
+      "clock": false,
+      "pop": true,
+      "pop_dbfs": -20,
+      "sync_flash": null,
+      "tail_pop": true,
+      "tail_flash": false,
+      "card_from": 2.5,
+      "card_to": 4,
+      "card_text": "END OF PROGRAM",
+      "markers": {
+        "kind": "none"
+      },
+      "duration": "free",
+      "rates": [],
+      "ntsc_warning": null,
+      "category": "work",
+      "source": "Prassi delle copie di lavoro (Netflix Partner Help Center, Dailies: Best Practices)",
+      "id": "work_sound",
+      "name": "Copia lavoro — Suono / mix / VO",
+      "heading": "PICTURE FOR SOUND",
+      "slate": 5,
+      "gap": 2,
+      "countdown": 8,
+      "tail": 4,
+      "burnin": 6,
+      "slate_lines": [
+        "PICTURE LOCK PER SUONO / MIX / VO — 2-POP {pop}"
+      ],
+      "notes": [
+        "Per suono, mix, VO e doppiaggio servono 2-pop e tail pop per il sync nella DAW: sono inclusi.",
+        "Il Record TC grande in basso e' letto a ogni fotogramma dalla timeline."
+      ]
+    },
+    {
+      "ffoa": "01:00:00:00",
+      "ffoa_hour_per_reel": false,
+      "bars": 0,
+      "clock": false,
+      "pop": false,
+      "pop_dbfs": -20,
+      "sync_flash": null,
+      "tail_pop": false,
+      "tail_flash": false,
+      "card_from": 0,
+      "card_to": 0,
+      "card_text": "",
+      "markers": {
+        "kind": "none"
+      },
+      "duration": "free",
+      "rates": [],
+      "ntsc_warning": null,
+      "category": "work",
+      "source": "Prassi delle copie di lavoro (Netflix Partner Help Center, Dailies: Best Practices)",
+      "id": "work_vfx",
+      "name": "Copia lavoro — VFX",
+      "heading": "VFX PULL / REVIEW",
+      "slate": 5,
+      "gap": 1,
+      "countdown": 0,
+      "tail": 1,
+      "burnin": 4,
+      "slate_lines": [
+        "COPIA DI LAVORO — VFX"
+      ],
+      "notes": [
+        "Contatore fotogrammi per clip da 1001 (convenzione VFX)."
+      ]
+    },
+    {
+      "ffoa": "01:00:00:00",
+      "ffoa_hour_per_reel": false,
+      "bars": 0,
+      "clock": false,
+      "pop": false,
+      "pop_dbfs": -20,
+      "sync_flash": null,
+      "tail_pop": false,
+      "tail_flash": false,
+      "card_from": 0,
+      "card_to": 0,
+      "card_text": "",
+      "markers": {
+        "kind": "none"
+      },
+      "duration": "free",
+      "rates": [],
+      "ntsc_warning": null,
+      "category": "work",
+      "source": "Prassi delle copie di lavoro (Netflix Partner Help Center, Dailies: Best Practices)",
+      "id": "work_client",
+      "name": "Copia lavoro — Approvazione cliente",
+      "heading": "CLIENT REVIEW",
+      "slate": 5,
+      "gap": 2,
+      "countdown": 0,
+      "tail": 2,
+      "burnin": 7,
+      "slate_lines": [
+        "COPIA PER APPROVAZIONE — NON PER LA DIFFUSIONE"
+      ],
+      "notes": []
+    },
+    {
+      "id": "review",
+      "name": "Personalizzato / review",
+      "heading": "REVIEW / WORK IN PROGRESS",
+      "source": "§ Recommendations, riga Review/WIP",
+      "ffoa": "01:00:00:00",
+      "ffoa_hour_per_reel": false,
+      "bars": 0,
+      "slate": 8,
+      "clock": false,
+      "gap": 2,
+      "countdown": 8,
+      "pop": true,
+      "pop_dbfs": -20,
+      "sync_flash": null,
+      "tail": 6,
+      "tail_pop": true,
+      "tail_flash": false,
+      "card_from": 3,
+      "card_to": 6,
+      "card_text": "END OF PROGRAM",
+      "markers": {
+        "kind": "reel",
+        "every_min": 20
+      },
+      "duration": "free",
+      "slate_lines": [
+        "COPIA DI LAVORAZIONE — NON PER LA CONSEGNA"
+      ],
+      "rates": [],
+      "ntsc_warning": null,
+      "notes": [],
+      "category": "custom"
     }
   ],
-  "slots": [
-    [
-      "Spot 10\"",
-      10
+  "slots": {
+    "cinema": [
+      [
+        "Cortometraggio 15'",
+        900
+      ],
+      [
+        "Cortometraggio 30'",
+        1800
+      ],
+      [
+        "Mediometraggio 60'",
+        3600
+      ],
+      [
+        "Lungometraggio 90'",
+        5400
+      ],
+      [
+        "Lungometraggio 100'",
+        6000
+      ],
+      [
+        "Lungometraggio 120'",
+        7200
+      ]
     ],
-    [
-      "Spot 15\"",
-      15
+    "tv": [
+      [
+        "Film TV 90'",
+        5400
+      ],
+      [
+        "Film TV 100'",
+        6000
+      ],
+      [
+        "Fiction / serie 50'",
+        3000
+      ],
+      [
+        "Serie 25'",
+        1500
+      ],
+      [
+        "TV 13' (parte)",
+        780
+      ],
+      [
+        "TV 26' (mezz'ora)",
+        1560
+      ],
+      [
+        "TV 45'",
+        2700
+      ],
+      [
+        "Documentario TV 52'",
+        3120
+      ]
     ],
-    [
-      "Spot 20\"",
-      20
+    "spot": [
+      [
+        "Spot 10\"",
+        10
+      ],
+      [
+        "Spot 15\"",
+        15
+      ],
+      [
+        "Spot 20\"",
+        20
+      ],
+      [
+        "Spot 30\"",
+        30
+      ],
+      [
+        "Spot 45\"",
+        45
+      ],
+      [
+        "Spot 60\"",
+        60
+      ],
+      [
+        "Spot 90\"",
+        90
+      ],
+      [
+        "Spot 120\"",
+        120
+      ]
     ],
-    [
-      "Spot 30\"",
-      30
-    ],
-    [
-      "Spot 45\"",
-      45
-    ],
-    [
-      "Spot 60\"",
-      60
-    ],
-    [
-      "Spot 90\"",
-      90
-    ],
-    [
-      "Spot 120\"",
-      120
-    ],
-    [
-      "TV 13' (parte)",
-      780
-    ],
-    [
-      "TV 26' (slot mezz'ora)",
-      1560
-    ],
-    [
-      "TV 45'",
-      2700
-    ],
-    [
-      "TV 50'",
-      3000
-    ],
-    [
-      "Documentario TV 52'",
-      3120
-    ],
-    [
-      "Cortometraggio 15'",
-      900
-    ],
-    [
-      "Cortometraggio 30'",
-      1800
-    ],
-    [
-      "Lungometraggio 90'",
-      5400
-    ],
-    [
-      "Lungometraggio 100'",
-      6000
-    ],
-    [
-      "Lungometraggio 120'",
-      7200
+    "streaming": [
+      [
+        "Episodio 25'",
+        1500
+      ],
+      [
+        "Episodio 50'",
+        3000
+      ],
+      [
+        "Documentario 52'",
+        3120
+      ],
+      [
+        "Film 90'",
+        5400
+      ],
+      [
+        "Film 100'",
+        6000
+      ],
+      [
+        "Film 120'",
+        7200
+      ]
     ]
-  ],
-  "families": [
-    {
-      "id": "cinema",
-      "name": "LeaderKit Cinema",
-      "presets": [
-        "cinema_dcp",
-        "dubbing"
-      ],
-      "durations": [
-        "free",
-        "Cortometraggio 15'",
-        "Cortometraggio 30'",
-        "Lungometraggio 90'",
-        "Lungometraggio 100'",
-        "Lungometraggio 120'",
-        "custom"
-      ],
-      "default_duration": 0,
-      "reel": true,
-      "custom_leader": false,
-      "markers": [
-        "reel"
-      ]
-    },
-    {
-      "id": "broadcast",
-      "name": "LeaderKit Broadcast TV",
-      "presets": [
-        "dpp_uk",
-        "sky_uk"
-      ],
-      "durations": [
-        "TV 13' (parte)",
-        "TV 26' (slot mezz'ora)",
-        "TV 45'",
-        "TV 50'",
-        "Documentario TV 52'",
-        "custom",
-        "free"
-      ],
-      "default_duration": 4,
-      "reel": false,
-      "custom_leader": false,
-      "markers": [
-        "break"
-      ]
-    },
-    {
-      "id": "spot",
-      "name": "LeaderKit Spot",
-      "presets": [
-        "rai_spot",
-        "publitalia_spot",
-        "us_spot"
-      ],
-      "durations": [
-        "Spot 10\"",
-        "Spot 15\"",
-        "Spot 20\"",
-        "Spot 30\"",
-        "Spot 45\"",
-        "Spot 60\"",
-        "Spot 90\"",
-        "Spot 120\"",
-        "custom"
-      ],
-      "default_duration": 3,
-      "reel": false,
-      "custom_leader": false,
-      "markers": []
-    },
-    {
-      "id": "streaming",
-      "name": "LeaderKit Streaming",
-      "presets": [
-        "netflix"
-      ],
-      "durations": [
-        "free",
-        "TV 26' (slot mezz'ora)",
-        "TV 45'",
-        "Documentario TV 52'",
-        "Lungometraggio 90'",
-        "Lungometraggio 100'",
-        "Lungometraggio 120'",
-        "custom"
-      ],
-      "default_duration": 0,
-      "reel": false,
-      "custom_leader": false,
-      "markers": [
-        "break"
-      ]
-    },
-    {
-      "id": "music",
-      "name": "LeaderKit Videoclip",
-      "presets": [
-        "music"
-      ],
-      "durations": [
-        "free",
-        "custom"
-      ],
-      "default_duration": 0,
-      "reel": false,
-      "custom_leader": false,
-      "markers": []
-    },
-    {
-      "id": "custom",
-      "name": "LeaderKit Personalizzato",
-      "presets": [
-        "review",
-        "cinema_dcp",
-        "dpp_uk",
-        "rai_spot",
-        "netflix",
-        "music"
-      ],
-      "durations": [
-        "free",
-        "Spot 10\"",
-        "Spot 15\"",
-        "Spot 20\"",
-        "Spot 30\"",
-        "Spot 45\"",
-        "Spot 60\"",
-        "Spot 90\"",
-        "Spot 120\"",
-        "TV 13' (parte)",
-        "TV 26' (slot mezz'ora)",
-        "TV 45'",
-        "TV 50'",
-        "Documentario TV 52'",
-        "Cortometraggio 15'",
-        "Cortometraggio 30'",
-        "Lungometraggio 90'",
-        "Lungometraggio 100'",
-        "Lungometraggio 120'",
-        "custom"
-      ],
-      "default_duration": 0,
-      "reel": true,
-      "custom_leader": true,
-      "markers": [
-        "reel",
-        "break"
-      ]
-    }
-  ]
+  },
+  "categories": {
+    "cinema": "Cinema",
+    "tv": "TV",
+    "spot": "Spot",
+    "streaming": "Streaming",
+    "music": "Videoclip",
+    "work": "Copia lavoro",
+    "custom": "Personalizzato"
+  },
+  "slot_defaults": {
+    "cinema": 3,
+    "tv": 0,
+    "spot": 3,
+    "streaming": 3
+  }
 }

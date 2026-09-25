@@ -5,31 +5,78 @@ pop, coda e marker di rullo/break, con preset per contesto (cinema/DCP, spot
 RAI, …). Tutto si adatta al **frame rate e alla risoluzione reali della
 timeline**. Valori di riferimento: [`docs/industry-standards.md`](docs/industry-standards.md).
 
-## Generatori nella libreria Effetti (consigliato)
+## Generatore nella libreria Effetti (consigliato)
 
 Si installa solo con **`LeaderKit-<versione>.drfx`** (doppio clic): niente installer, niente Python.
 
-1. Effetti › Generators › LeaderKit: trascina il generatore della famiglia
-   che ti serve dove deve iniziare il leader, anche **a timeline vuota**.
-   La lunghezza non conta.
-2. Nell'Inspector scegli lo **standard** e la **durata del programma**; ogni
-   generatore mostra solo le voci pertinenti, e negli standard fissi le durate
-   del leader non si possono modificare.
+1. Effetti › Generators › **LeaderKit** (un solo generatore): trascinalo dove
+   deve iniziare il leader, anche **a timeline vuota**. La lunghezza non conta.
+2. Nella scheda **Progetto** scegli lo **standard** e la **durata del
+   programma** (libera, slot della categoria dello standard, TC di fine, o
+   personalizzata). Le voci che non riguardano lo standard scelto vengono
+   nascoste e comunque ignorate da Genera; negli standard fissi le durate del
+   leader non si possono modificare (solo "Personalizzato / review").
 3. **Genera sulla timeline**: porta il blocco alla durata esatta dello standard,
    imposta lo start TC, mette tono/pop/sync audio, crea il **contenitore**
-   (con uno slot o una durata personalizzata anche senza montato), inserisce la
-   coda (**LeaderKit Tail**) sulla stessa traccia, aggiunge i marker e mostra
-   un riepilogo con i **controlli** (✓/⚠) e cosa fare.
-4. **Rimuovi elementi generati** cancella solo marker, audio e coda di LeaderKit.
+   (anche senza montato), inserisce la coda (**LeaderKit Tail**) sulla stessa
+   traccia anche oltre la fine della timeline, aggiunge marker di rullo o break
+   e mostra un riepilogo con i **controlli** (✓/⚠) e cosa fare.
+4. **Rimuovi elementi generati** cancella solo marker, audio, taratura, logo e coda di LeaderKit.
 
-| Generatore | Standard | Durate del programma | Durate leader modificabili |
-|---|---|---|---|
-| **LeaderKit Cinema** | Cinema / DCP, Doppiaggio / M&E | libera, Cortometraggio 15', Cortometraggio 30', Lungometraggio 90', Lungometraggio 100', Lungometraggio 120', personalizzata | no (standard fisso) |
-| **LeaderKit Broadcast TV** | Broadcast UK / DPP, Broadcast UK / Sky | TV 13' (parte), TV 26' (slot mezz'ora), TV 45', TV 50', Documentario TV 52', personalizzata, libera | no (standard fisso) |
-| **LeaderKit Spot** | Spot Italia — RAI, Spot Italia — Publitalia, Spot USA | Spot 10", Spot 15", Spot 20", Spot 30", Spot 45", Spot 60", Spot 90", Spot 120", personalizzata | no (standard fisso) |
-| **LeaderKit Streaming** | Streaming — Netflix / IMF | libera, TV 26' (slot mezz'ora), TV 45', Documentario TV 52', Lungometraggio 90', Lungometraggio 100', Lungometraggio 120', personalizzata | no (standard fisso) |
-| **LeaderKit Videoclip** | Videoclip / Live | libera, personalizzata | no (standard fisso) |
-| **LeaderKit Personalizzato** | Review / lavorazione, Cinema / DCP, Broadcast UK / DPP, Spot Italia — RAI, Streaming — Netflix / IMF, Videoclip / Live | libera, Spot 10", Spot 15", Spot 20", Spot 30", Spot 45", Spot 60", Spot 90", Spot 120", TV 13' (parte), TV 26' (slot mezz'ora), TV 45', TV 50', Documentario TV 52', Cortometraggio 15', Cortometraggio 30', Lungometraggio 90', Lungometraggio 100', Lungometraggio 120', personalizzata | sì |
+Tracce create da Genera: **LeaderKit Pop** (audio), **LeaderKit Grafica**
+(taratura e frame lines) e **LeaderKit Logo**. Ogni standard ha la coda (per
+Spot Publitalia e Spot USA, che non la prevedono, 2" di nero disattivabili).
+
+Slot per categoria:
+
+| Categoria | Slot |
+|---|---|
+| Cinema | Corto 15'/30', Mediometraggio 60', Lungometraggio 90'/100'/120' |
+| TV | Film TV 90'/100', Fiction/serie 50', Serie 25', TV 13' (parte), TV 26', TV 45', Documentario TV 52' |
+| Spot | 10", 15", 20", 30", 45", 60", 90", 120" |
+| Streaming | Episodio 25'/50', Documentario 52', Film 90'/100'/120' |
+
+**Break TV** (solo standard TV): nessuno, automatici secondo la direttiva
+AVMSD (film, film TV e notiziari: al massimo un'interruzione ogni 30 minuti
+programmati) o da 1 a 6 break manuali; Genera mette i marker e avvisa se il
+numero supera il limite AVMSD.
+
+**Data**: il bottone **Oggi** scrive la data odierna; la spunta **Data
+automatica** la aggiorna a ogni render/export, così la slate ha sempre la data
+corretta.
+
+### Copie di lavoro e burn-in
+
+Gli standard **Copia lavoro** (giornalieri / sync, montaggio / review, suono /
+mix / VO, VFX, approvazione cliente) creano un leader corto e, con Genera, un
+clip **LeaderKit Burn-in** su una traccia sua ("LeaderKit Burn-in") sopra il
+montato, dal FFOA all'LFOA. Per inserirlo Genera blocca per un attimo tutte le
+altre tracce, così il montato non può essere toccato; se la versione di Resolve
+non lo permette, lo dice e basta trascinare il generatore a mano e premere
+**Aggiorna dai metadati**.
+
+Il burn-in legge da Resolve, clip per clip: nome, Start TC e punto d'ingresso
+(Source TC che scorre), scena/shot/take e take cerchiata, camera, reel/roll,
+data di ripresa, sound roll e TC dell'audio sotto (per verificare il sync),
+spazio colore del progetto. Record TC e contatore fotogrammi sono calcolati a
+ogni fotogramma. La **fase di lavoro** sceglie i campi (poi modificabili):
+
+| Fase | Campi |
+|---|---|
+| Scarico / verifica DIT | Source TC, clip, reel, camera, data, formato, colore |
+| Sync audio-video | Source TC, TC audio + sound roll, clip, scena/take, camera, reel |
+| Giornalieri | Source TC, clip, scena/take, camera, reel, data, titolo, watermark |
+| Montaggio / offline review | Record TC, Source TC, clip, titolo, versione, data, watermark |
+| VFX | Source TC, contatore da 1001, clip, reel, versione, formato |
+| Color review | Record TC, Source TC, clip, versione, colore, formato |
+| Suono / mix / VO / doppiaggio | Record TC anche grande, contatore del programma, titolo, versione |
+| Approvazione cliente | Record TC, titolo, versione, data, watermark con destinatario |
+
+Posizione (scheda Aspetto): bande sopra e sotto (opacità regolabile), bande del
+2.39 in letterbox, oppure dentro l'immagine (safe 90%); l'altezza del testo è in
+percentuale del quadro, quindi resta uguale su 16:9, 2:1 o DCI. I dati si
+aggiornano con **Aggiorna dai metadati** (o con Genera) dopo modifiche al
+montaggio o ai metadati.
 
 ### Schede dell'Inspector
 
@@ -39,45 +86,49 @@ Si installa solo con **`LeaderKit-<versione>.drfx`** (doppio clic): niente insta
 | **Produzione** | titolo, produzione, produttore, regia, cliente, agenzia, codice (Ad-ID/Clock/Auditel), episodio/rullo, lingua, data |
 | **Post** | montaggio, color, suono, VFX, versione, fase di lavorazione, stato color/suono/VFX/musica/titoli (TEMP/FINAL), note |
 | **Tecnico** | frame lines 1.33 / 1.66 / 1.78 / 1.85 / 2.00 / 2.20 / 2.39, safe area 93% e 90%, spazio colore (letto dal progetto), formato audio, livello pop |
-| **Aspetto** | colori di testo, sfondo e grafica; logo (file, posizione, dimensione, anche sulla coda) |
-| **Taratura** | strumenti sul countdown, ispirati al leader digitale SMPTE RP 428-6: stelle di fuoco negli angoli, mirino centrale, scala di grigi, patch RGBCMY, rampe B/N-R-G-B, verifica del blu (Wratten 47B), sfera sfumata per il contouring, bianco di picco, etichette fps/risoluzione |
+| **Aspetto** | colori di testo, sfondo e grafica; logo scelto con **selettore file** (posizione, dimensione, anche sulla coda) |
+| **Taratura** | strumenti sul countdown, ispirati al leader digitale SMPTE RP 428-6: stelle di Siemens per il fuoco, mirino centrale, scala di grigi a 11 gradini, patch RGBCMY, rampe continue B/N-R-G-B, verifica del blu (Wratten 47B), sfera sfumata per il contouring, bianco di picco e neri (PLUGE 2/4/8%), etichette fps/risoluzione/formato |
 
-La slate mostra solo i campi compilati. Il logo viene inserito da Genera su
-una traccia "LeaderKit Logo" sopra la slate (e sulla coda, se richiesto).
+La slate mostra solo i campi compilati.
+
+**Taratura e frame lines sono immagini statiche**: Genera le disegna pixel per
+pixel alla **risoluzione esatta della timeline** (PNG con trasparenza, in
+`~/.leaderkit`, riusato se nulla cambia) e le mette sulla traccia "LeaderKit
+Grafica" sopra il countdown (e sulla slate, se richiesto). Il generatore Fusion
+disegna solo sfondo, testi, cerchi, braccio e cifre: resta leggero in
+riproduzione. Il logo va sulla traccia "LeaderKit Logo" sopra la slate (e sulla
+coda, se richiesto); se Resolve accorcia le immagini fisse alla durata standard,
+Genera le ripete fino a coprire tutto lo spazio.
 
 ### Standard inclusi
 
 Fonte dei valori: `docs/industry-standards.md` (sezione indicata in ogni
-preset di `fx/standards.json`).
+preset di `fx/standards.json`). Gli standard contrassegnati con * non hanno una
+specifica tecnica pubblica: i valori (barre 20" + clock 7" + nero 3", FFOA
+10:00:00:00, coda 3") sono un riferimento prudente e Genera lo segnala nei
+controlli. Vanno sempre verificati con il capitolato del committente.
 
-| Standard | FFOA | Testa | Sync | Coda |
-|---|---|---|---|---|
-| Cinema / DCP | 01:00:08:00 (ora = rullo) | slate 8" + nero 2" + countdown 8→2 | 2-pop -20 dBFS | 8" + tail pop |
-| Doppiaggio / M&E | 01:00:08:00 (ora = rullo) | slate 8" + nero 2" + countdown 8→2 | 2-pop -20 dBFS | 8" + tail pop |
-| Review / lavorazione | 01:00:00:00 | slate 8" + nero 2" + countdown 8→2 | 2-pop -20 dBFS | 6" + tail pop |
-| Broadcast UK / DPP | 10:00:00:00 | barre 20" + clock 7" + nero 3" | sync flash | 1" |
-| Broadcast UK / Sky | 10:00:00:00 | barre 20" + clock 7" + nero 3" | sync flash | 15" |
-| Spot Italia — RAI | 10:00:00:00 | slate 5" + nero 3" | — | 3" |
-| Spot Italia — Publitalia | 10:00:00:00 | slate 7" + nero 3" | — | — |
-| Spot USA | 01:00:00:00 | slate 5" + nero 2" | — | — |
-| Streaming — Netflix / IMF | 01:00:00:00 | nero 1" | — | 1" |
-| Videoclip / Live | 01:00:00:00 | slate 8" + nero 3" | sync flash | 4" + clap |
+| Categoria | Standard |
+|---|---|
+| Cinema | Cinema — DCP (container DCI Flat/Scope/Full 2K e 4K), Cinema — Doppiaggio / M&E |
+| TV Italia | RAI (programmi)\*, Mediaset (programmi)\*, Sky Italia\* |
+| TV Europa / UK | EBU (generico)\*, DPP (BBC, ITV, C4…), Sky UK |
+| Spot | RAI, Publitalia / Mediaset, USA |
+| Streaming | Netflix / IMF |
+| Copia lavoro | Giornalieri / sync, Montaggio / review, Suono / mix / VO, VFX, Approvazione cliente |
+| Altro | Videoclip / Live, Personalizzato / review |
 
 ### Durata del programma
 
-- **Libera**: il programma finisce con l'ultimo clip audio o video (come prima).
-- **Slot standard**: Spot 10", Spot 15", Spot 20", Spot 30", Spot 45", Spot 60", Spot 90", Spot 120", TV 13' (parte), TV 26' (slot mezz'ora), TV 45', TV 50', Documentario TV 52', Cortometraggio 15', Cortometraggio 30', Lungometraggio 90', Lungometraggio 100', Lungometraggio 120'. Genera crea subito il
-  **contenitore** (marker verde con durata, LFOA e coda alla fine esatta) e
-  avvisa di quanti fotogrammi il montato è più lungo o più corto.
-- **Personalizzata**: durata scritta come `HH:MM:SS:FF` (es. `00:52:00:00`).
-
-Le durate degli slot TV sono quelle tipiche: vanno sempre verificate con il
-capitolato del broadcaster.
+- **Libera**: il programma finisce con l'ultimo clip audio o video.
+- **Slot standard** della categoria (tabella sopra): Genera crea subito il
+  **contenitore** (marker con durata, LFOA e coda alla fine esatta) e avvisa di
+  quanti fotogrammi il montato è più lungo o più corto.
+- **TC di fine programma** o **personalizzata** (`HH:MM:SS:FF`).
 
 ### Aggiungere o modificare uno standard
 
-Modifica `fx/standards.json` (sezioni `presets`, `slots` e `families`:
-quali standard e quali durate compaiono in ogni generatore) (durate in secondi nominali, TC del FFOA, barre,
+Modifica `fx/standards.json` (sezioni `presets`, `categories`, `slots`) (durate in secondi nominali, TC del FFOA, barre,
 slate/clock, countdown, sync, coda, righe della slate, frame rate e risoluzioni
 ammesse, note) e ricostruisci con `python3 tools/build_fx.py`.
 
@@ -307,6 +358,20 @@ permessi di esecuzione). La CI GitHub esegue test e build a ogni push; il
 Compatibilità codice: Python 3.6+ (nessuna dipendenza esterna).
 
 ## Da verificare in Resolve
+
+Generatore 0.8 (verificato in Resolve Studio 21.1: resa, schede, Genera, bip;
+da confermare sul campo):
+
+1. Immagini PNG di taratura importate con la trasparenza e alla durata del
+   countdown (altrimenti Genera le ripete a pezzi).
+2. Coda su timeline vuota con slot lunghi (es. DCP 90': coda a 02:30:08:00).
+3. Voci nascoste in base allo standard (`INPB_IC_Visible`), selettore file del
+   logo e data automatica all'export.
+4. Burn-in: inserimento automatico sulla traccia "LeaderKit Burn-in" con le
+   altre tracce bloccate, allineamento dei testi agli angoli, nomi dei metadati
+   (Scene, Take, Camera #, Reel Name, Sound Roll #…) nelle varie camere.
+
+Versione 0.1 (script Python):
 
 Il codice usa solo API documentate di Resolve (README "Developer" di
 Resolve), ma questi punti vanno confermati sul campo prima dell'uso in

@@ -39,7 +39,7 @@ function comp:GetPrefs(k)
   if k == "Comp.FrameFormat.Width" then return W end
   if k == "Comp.FrameFormat.Height" then return H end
 end
-local env = { comp = comp, LK = LK, math = math, string = string, tostring = tostring,
+local env = { comp = comp, LK = LK, pcall = pcall, os = os, math = math, string = string, tostring = tostring,
   iif = function(c, a, b) if c then return a else return b end end,
   Text = function(s) return tostring(s) end,
   Point = function(x, y) return x .. "," .. y end }

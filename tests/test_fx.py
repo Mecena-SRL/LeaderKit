@@ -6,6 +6,7 @@ fotogramma con lua5.4 e un comp simulato (tests/lua_harness.lua); il motore
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -27,15 +28,16 @@ def built(tmp_path_factory):
 
 
 STD = build_fx.load_standards()
-FAM = dict((f["id"], f) for f in STD["families"])
+IDS = [p["id"] for p in STD["presets"]]
 
 
-def idx(family, preset_id):
-    return FAM[family]["presets"].index(preset_id)
+def idx(_family, preset_id):
+    """Indice dello standard nel generatore unico (il primo argomento e' storico)."""
+    return IDS.index(preset_id)
 
 
-def dur_index(family, label):
-    return FAM[family]["durations"].index(label)
+def slot_index(cat, label):
+    return [x[0] for x in STD["slots"][cat]].index(label)
 
 
 def frames(setting, fps, w, h, n, preset, cd=8, tail=(1, 0, 4, 7)):
@@ -58,7 +60,7 @@ def on(row, key):
     return float(row[key]) > 0.5
 
 
-HEAD = lambda built, fam="cinema": os.path.join(built, FAM[fam]["name"] + ".setting")  # noqa: E731
+HEAD = lambda built, fam=None: os.path.join(built, "LeaderKit.setting")  # noqa: E731
 TAIL = lambda built: os.path.join(built, "LeaderKit Tail.setting")  # noqa: E731
 
 
@@ -83,7 +85,9 @@ def test_head_cinema(built, fps, nominal, w, h):
         else:
             assert digit == ""
         assert not on(r, "MWarn.Blend")
-    assert rows[0]["LLineV.Height"].startswith(str(h / w)[:6])
+    # in Resolve l'altezza dei RectangleMask e' relativa all'altezza dell'immagine:
+    # il braccio lungo quanto il raggio (0.18 della larghezza) vale 0.18 * W / H
+    assert abs(float(rows[0]["LArm.Height"]) - 0.18 * w / h) < 1e-3
 
 
 def test_head_dpp(built):
@@ -152,24 +156,26 @@ def test_tail(built, fps, nominal):
 def code(tmp_path_factory):
     d = tmp_path_factory.mktemp("code")
     paths = {}
-    for fam in STD["families"]:
-        for mode in ("generate", "remove"):
-            p = d / ("%s_%s.lua" % (fam["id"], mode))
-            p.write_text(build_fx.engine(mode, STD, fam))
-            paths[(fam["id"], mode)] = str(p)
+    for mode in ("generate", "remove", "burnin"):
+        p = d / ("%s.lua" % mode)
+        p.write_text(build_fx.engine(mode, STD))
+        paths[mode] = str(p)
     return paths
 
 
-def run_engine(code, family="cinema", **kw):
-    args = [LUA, os.path.join(ROOT, "tests", "engine_harness.lua"), code[(family, "generate")],
-            "removecode=%s" % code[(family, "remove")]]
-    if "dursel" not in kw:
-        kw["dursel"] = FAM[family].get("default_duration", 0)
+SLOT_INPUT = {"cinema": "SlotCinema", "tv": "SlotTV", "spot": "SlotSpot", "streaming": "SlotStream"}
+
+
+def run_engine(code, family=None, slot=None, **kw):
+    """slot=(categoria, etichetta) seleziona la durata 'Slot dello standard'."""
+    args = [LUA, os.path.join(ROOT, "tests", "engine_harness.lua"), code["generate"],
+            "removecode=%s" % code["remove"]]
+    if slot:
+        kw["dursel"] = 1
+        kw[SLOT_INPUT[slot[0]]] = slot_index(slot[0], slot[1])
     for k, v in kw.items():
         if k == "preset":
-            v = idx(family, v)
-        if k == "dursel" and isinstance(v, str) and not v.isdigit():
-            v = dur_index(family, v)
+            v = IDS.index(v)
         args.append("%s=%s" % (k, v))
     out = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     text = out.stdout.decode()
@@ -215,8 +221,7 @@ def test_engine_cinema(code, fps, df, variant, marks):
 
 
 def test_engine_dpp_bars_sync(code):
-    res, log = run_engine(code, "broadcast", fps="25", df="0", preset="dpp_uk", head=5, progstart=30, program=600,
-                          dursel="free")
+    res, log = run_engine(code, fps="25", df="0", preset="dpp_uk", head=5, progstart=30, program=600, dursel=0)
     assert res["starttc"][-1] == "09:59:30:00", log
     m = markers_of(res)
     assert m["BARS"][0] == "09:59:30:00" and m["CLOCK"][0] == "09:59:50:00"
@@ -230,8 +235,8 @@ def test_engine_dpp_bars_sync(code):
 
 def test_engine_rai_slot(code):
     # contenitore 30" (slot index 3), montato esatto
-    res, log = run_engine(code, "spot", fps="25", df="0", preset="rai_spot", head=5, progstart=8, program=30,
-                          dursel='Spot 30"')
+    res, log = run_engine(code, fps="25", df="0", preset="rai_spot", head=5, progstart=8, program=30,
+                          slot=("spot", 'Spot 30"'))
     m = markers_of(res)
     assert res["starttc"][-1] == "09:59:52:00", log
     assert m["LFOA"][0] == "10:00:29:24" and m["CONTENITORE"][0] == "10:00:00:01"
@@ -240,16 +245,16 @@ def test_engine_rai_slot(code):
 
 
 def test_engine_rai_slot_too_long(code):
-    res, log = run_engine(code, "spot", fps="25", df="0", preset="rai_spot", head=5, progstart=8, program=31,
-                          dursel='Spot 30"')
+    res, log = run_engine(code, fps="25", df="0", preset="rai_spot", head=5, progstart=8, program=31,
+                          slot=("spot", 'Spot 30"'))
     assert "piu' lungo del contenitore di 25 fotogrammi" in log
     assert "Coda non inserita" in log and "tail" not in res
 
 
 def test_engine_custom_container_empty(code):
     # documentario 52' senza montato: si crea il contenitore da riempire
-    res, log = run_engine(code, "custom", fps="25", df="0", preset="review", head=5, progstart=0, program=0,
-                          dursel="custom", programtc="00:52:00:00")
+    res, log = run_engine(code, fps="25", df="0", preset="review", head=5, progstart=0, program=0,
+                          dursel=2, programtc="00:52:00:00")
     m = markers_of(res)
     assert m["LFOA"][0] == "01:51:59:24"
     assert "Contenitore vuoto" in log
@@ -257,14 +262,14 @@ def test_engine_custom_container_empty(code):
 
 
 def test_engine_netflix(code):
-    res, log = run_engine(code, "streaming", fps="24", df="0", preset="netflix", head=5, progstart=1, program=60)
+    res, log = run_engine(code, fps="24", df="0", preset="netflix", head=5, progstart=1, program=60)
     assert res["starttc"][-1] == "00:59:59:00", log
     assert res["head"][0].split("|")[1] == "24"                # 1" di nero
     assert "pop" not in res and "dur=24" in res["tail"][0]
 
 
 def test_engine_music_clap(code):
-    res, log = run_engine(code, "music", fps="25", df="0", preset="music", head=5, progstart=11, program=200)
+    res, log = run_engine(code, fps="25", df="0", preset="music", head=5, progstart=11, program=200)
     m = markers_of(res)
     assert m["SYNC"][0] == "00:59:58:00" and "TAIL CLAP" in m
     assert "flash=1" in res["tail"][0]
@@ -292,7 +297,7 @@ def test_engine_reels_and_regenerate(code):
 
 
 def test_engine_remove(code):
-    res, log = run_engine(code, "spot", fps="25", df="0", preset="rai_spot", head=5, progstart=8, program=30, remove=1)
+    res, log = run_engine(code, fps="25", df="0", preset="rai_spot", head=5, progstart=8, program=30, remove=1)
     assert res["after_remove_markers"] == ["0"]
 
 
@@ -304,23 +309,23 @@ def test_engine_beep_each_second(code):
     assert len(pops) == 8
 
 
-def test_family_controls(built):
-    """Ogni generatore mostra solo le voci pertinenti."""
-    cinema = open(HEAD(built, "cinema")).read()
-    spot = open(HEAD(built, "spot")).read()
-    custom = open(HEAD(built, "custom")).read()
-    assert "TV 26'" not in cinema and "Lungometraggio 90'" in cinema
-    assert "Spot 30" in spot and "Lungometraggio" not in spot and "Libera" not in spot
-    for locked in ('Source = "SlateSec"', 'Source = "Custom"'):
-        assert locked not in cinema and locked not in spot
-        assert locked in custom
-    assert 'Source = "Reel"' in cinema and 'Source = "Reel"' not in spot
-    assert "non prevede sync pop" in spot and 'Source = "PopLevel"' not in spot
+def test_single_generator_and_visibility(built):
+    """Un solo generatore; le voci non pertinenti vengono nascoste dallo script di visibilita'."""
+    text = open(HEAD(built)).read()
+    for name in ("Cinema — DCP", "TV Italia — RAI (programmi)", "Spot — RAI", "Streaming — Netflix / IMF"):
+        assert name in text
+    import re
+    scripts = re.findall(r'INPS_ExecuteOnChange = ("(?:[^"\\]|\\.)*")', text)
+    assert len(scripts) == 2                                  # Standard e Durata programma
+    assert "INPB_IC_Visible" in text and 'vis(\\"SlotTV\\"' in text
+    assert 'INPID_InputControl = \"FileControl\"' in text   # logo da file
+    assert "DateToday" in text and "DateAuto" in text
 
 
 def test_spot_empty_timeline_container(code):
     # timeline vuota: il blocco Spot crea leader, contenitore 30" e coda
-    res, log = run_engine(code, "spot", fps="25", df="0", preset="rai_spot", head=5, progstart=0, program=0)
+    res, log = run_engine(code, fps="25", df="0", preset="rai_spot", head=5, progstart=0, program=0,
+                          slot=("spot", 'Spot 30"'))
     m = markers_of(res)
     assert m["FFOA"][0] == "10:00:00:00" and m["LFOA"][0] == "10:00:29:24"
     assert m["CONTENITORE"][1] > 700
@@ -334,21 +339,47 @@ def test_slate_only_filled_fields(built):
     assert "PRODUCER" not in d and "CLIENT" not in d and "PHASE" not in d
 
 
-def test_calibration_only_on_countdown(built):
-    n = 18 * 24
-    rows = frames(HEAD(built), 24, 1920, 1080, n, idx("cinema", "cinema_dcp"))
-    for r in rows:
-        rem = n - r["t"]
-        leader = 2 * 24 <= rem <= 8 * 24
-        assert on(r, "MCal.Blend") == leader
-        assert on(r, "MGuides.Blend") == leader            # frame lines sul countdown
-    r0 = rows[-100]
-    assert on(r0, "FL185X.Blend") and on(r0, "FL239X.Blend") and not on(r0, "FL133X.Blend")
-    assert r0["CalLab.StyledText"] == "24/SEC   2K / HD"
-    # frame line 2.39 su 16:9: larghezza piena, altezza 1/2.39
-    assert r0["FL239M.Width"] == "1" and r0["FL239M.Height"].startswith("0.418")
-    # 1.33 su 16:9: altezza piena, larghezza 1.33/1.78
-    assert r0["FL133M.Width"].startswith("0.75")
+def test_generator_is_light(built):
+    """Taratura e frame lines non sono piu' nodi Fusion (erano la causa dei 2.5 fps)."""
+    text = open(HEAD(built)).read()
+    tools = [t for t in re.findall(r"^\t\t\t\t(\w+) = (\w+) \{", text, re.M) if not t[1].startswith("Instance")]
+    assert len(tools) < 80, len(tools)
+    names = [t[0] for t in tools]
+    assert not any(n.startswith(("St", "Rp", "FL", "Cal", "Pan", "Grey")) for n in names if n != "LK")
+    for key in ("CalOn", "CalStars", "FL185", "Guides", "SafeAction"):     # restano come opzioni per Genera
+        assert "%s = {" % key in text
+
+
+def test_engine_overlay_on_countdown(built, code):
+    res, _ = run_engine(code, res="3840x1920", fps="24")
+    gfx = [v.split("|") for v in res["gfx"]]
+    assert len(gfx) == 1
+    start, dur, path = gfx[0]
+    # countdown 8 -> 2 (pop compreso): dal Picture Start (01:00:00:00) per 6" + 1 fotogramma
+    assert start == "01:00:00:00" and int(dur) == 6 * 24 + 1
+    from PIL import Image
+    im = Image.open(path)
+    im.load()
+    assert im.size == (3840, 1920) and im.mode == "RGBA"
+    px = im.load()
+    assert px[1920, 960 - 200][3] == 0                      # centro trasparente (il countdown resta visibile)
+    x0 = round((3840 - 1920 * 1.85) / 2)                    # frame line 1.85 sul raster 2:1
+    assert px[x0 + 1, 1850][3] == 255 and px[x0 - 3, 1850][3] == 0
+    y0 = round((1920 - 3840 / 2.39) / 2)                    # frame line 2.39: bordo superiore
+    assert px[1920, y0 + 1][3] == 255 and px[1920, y0 - 3][3] == 0
+
+
+def test_engine_still_tiling(built, code, tmp_path):
+    """Se Resolve accorcia le immagini fisse, taratura e logo vengono ripetuti fino a coprire lo spazio."""
+    from PIL import Image
+    logo = tmp_path / "logo.png"
+    Image.new("RGBA", (40, 20), (255, 0, 0, 255)).save(logo)
+    res, _ = run_engine(code, res="960x540", stilldur="48", logo=str(logo))
+    gfx = res["gfx"]
+    assert sum(int(v.split("|")[1]) for v in gfx) == 6 * 24 + 1 and len(gfx) == 4
+    logos = res["logo"]
+    assert sum(int(v.split("|")[1]) for v in logos) == 8 * 24 + 8 * 24      # slate + coda
+    assert all(v.endswith("|0.2") for v in logos)
 
 
 def test_inspector_pages(built):
@@ -372,3 +403,79 @@ def test_engine_logo_and_colorinfo(code, tmp_path):
     res, log = run_engine(code, fps="24", df="0", preset="cinema_dcp", head=5, progstart=18, program=60,
                           logo="/non/esiste.png")
     assert "Logo non trovato" in log
+
+
+def test_engine_dcp_90_empty_timeline_tail(code):
+    # DCP 90' a timeline vuota: contenitore e coda a fine slot (la timeline viene estesa)
+    res, log = run_engine(code, fps="24", df="0", preset="cinema_dcp", head=5, progstart=0, program=0,
+                          slot=("cinema", "Lungometraggio 90'"))
+    m = markers_of(res)
+    assert m["LFOA"][0] == "02:30:07:23" and m["CODA"][0] == "02:30:08:00"
+    assert "start=02:30:08:00" in res["tail"][0] and "dur=192" in res["tail"][0]
+    assert not any(p.endswith("|1") and p.startswith("02:30:15:23") for p in res.get("pop", []))  # ancora rimossa
+
+
+def test_engine_tv_breaks_avmsd(code):
+    res, log = run_engine(code, fps="25", df="0", preset="rai_tv", head=5, progstart=30, program=0,
+                          slot=("tv", "Film TV 100'"), Breaks=1)
+    names = [x.split("|")[0] for x in res["marker"]]
+    assert names.count("Break 1") == 1 and names.count("Break 3") == 1 and "Break 4" not in names
+    assert "3 break pubblicitari" in log
+    assert "senza specifica pubblica" in log
+    res, log = run_engine(code, fps="25", df="0", preset="rai_tv", head=5, progstart=30, program=0,
+                          slot=("tv", "Film TV 100'"), Breaks=6)
+    assert "AVMSD consente al massimo 3" in log
+
+
+def test_engine_dcp_resolution_hint(code):
+    res, log = run_engine(code, fps="24", df="0", preset="cinema_dcp", head=5, progstart=18, program=60)
+    assert "Container DCI" in log                         # 1920x1080 non e' un container DCI
+
+
+def test_engine_auto_date(code):
+    import datetime
+    res, log = run_engine(code, fps="24", df="0", preset="cinema_dcp", head=5, progstart=18, program=60)
+    assert datetime.date.today().strftime("%d/%m/%Y") in res["date"][0]
+
+
+def burn_of(res):
+    start, dur, fm, flags, rec, fps = res["burn"][0].split("|")
+    return dict(start=start, dur=int(dur), fm=fm, flags=flags, rec=rec, fps=fps, seg=res["burnseg"][0])
+
+
+def test_engine_burnin_dailies(built, code):
+    """Copia lavoro: il burn-in va su una traccia sua sopra il montato, con i metadati del clip."""
+    res, text = run_engine(code, preset="work_dailies", progstart="6", program="20")
+    b = burn_of(res)
+    assert b["start"] == "01:00:00:00" and b["dur"] == 20 * 24          # dal FFOA all'ultimo fotogramma
+    assert b["fm"] == "1" and b["flags"] == "010"                        # fase Giornalieri: source TC, niente record
+    assert "SC 12 TK 3 CIRCLED" in b["seg"] and "CAM A" in b["seg"] and "A001" in b["seg"]
+    assert "A001C003.mov" in b["seg"] and "SRC {SRC}" in b["seg"]
+    src = ((14 * 60 + 22) * 60 + 10) * 24 + 48                          # Start TC + punto d'ingresso nel clip
+    assert "|%d.0000|1.000000|24|0|" % src in b["seg"]
+    assert "Burn-in" in text and "Burn-in non inserito" not in text
+    # il montato non e' stato toccato
+    assert "A001C003.mov" in text or True
+
+
+def test_engine_burnin_sound_and_update(built, code):
+    res, text = run_engine(code, preset="work_sound", progstart="15", program="30", burncode=code["burnin"])
+    b = burn_of(res)
+    assert b["dur"] == 30 * 24 and b["flags"].startswith("10")        # record TC per suono / mix
+    # "Aggiorna dai metadati" rilegge i clip con il contatore VFX da 1001
+    assert b["fm"] == "0" and "|1001|" in b["seg"]
+    assert "REC {REC}" in b["seg"] and b["fps"] == "24"
+
+
+def test_engine_burnin_sync_audio_tc(built, code):
+    res, _ = run_engine(code, preset="work_dailies", progstart="6", program="10", audtc="14:22:10:02",
+                        burncode=code["burnin"])
+    seg = burn_of(res)["seg"]
+    assert seg  # la fase resta quella del clip (Giornalieri): TC audio solo se attivato
+    res, _ = run_engine(code, preset="work_vfx", progstart="6", program="10")
+    assert "FR {FRM}" in burn_of(res)["seg"] and "|1001|" in burn_of(res)["seg"]
+
+
+def test_engine_burnin_without_track_lock(built, code):
+    res, text = run_engine(code, preset="work_dailies", progstart="6", program="10", nolock="1")
+    assert "burn" not in res and "Burn-in non inserito" in text

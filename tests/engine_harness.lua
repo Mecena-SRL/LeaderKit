@@ -4,7 +4,7 @@
 local enginePath = arg[1]
 local opt = { fps = "24", df = "0", preset = "0", head = "5", progstart = "30", program = "60",
   variant = "1", runs = "1", usermarker = "0", remove = "0", marks = "abs_incl", beep = "0",
-  dursel = "0", programtc = "00:00:30:00", removecode = "", logo = "" }
+  dursel = "0", programtc = "00:00:30:00", removecode = "", logo = "", res = "1920x1080", stilldur = "0" }
 for i = 2, #arg do local k, v = arg[i]:match("([^=]+)=(.*)"); opt[k] = v end
 local fps = tonumber(opt.fps)
 local nominal = math.floor(fps + 0.5)
@@ -44,6 +44,9 @@ function Item:GetDuration() return self.dur end
 function Item:GetName() return self.name end
 function Item:GetFusionCompByIndex() return self.comp end
 function Item:SetProperty(k, v) self.props = self.props or {}; self.props[k] = v; return true end
+function Item:GetMediaPoolItem() return self.mpi end
+function Item:GetSourceStartFrame() return self.srcin or 0 end
+function Item:GetTrackTypeAndIndex() return self.where end
 
 local tracks = { video = { { name = "Video 1", items = {} } }, audio = { { name = "Audio 1", items = {} } } }
 local markers = {}
@@ -61,7 +64,9 @@ local function newComp(tool) local c = { tool = tool }
 local headTool = newTool()
 headTool.inputs = { Preset = tonumber(opt.preset), Reel = 1, Custom = 0, BarsSec = 0, CountFrom = 8, SlateSec = 8,
   GapSec = 2, TailSec = 8, MarkersOn = 1, MarkerKind = 0, MarkerEvery = 0, TailOn = 1,
-  DurSel = tonumber(opt.dursel), ProgramTC = opt.programtc,
+  DurSel = tonumber(opt.dursel), ProgramTC = opt.programtc, Breaks = tonumber(opt.Breaks or "0"),
+  SlotCinema = tonumber(opt.SlotCinema or "3"), SlotTV = tonumber(opt.SlotTV or "0"),
+  SlotSpot = tonumber(opt.SlotSpot or "3"), SlotStream = tonumber(opt.SlotStream or "3"), DateAuto = 1,
   Title = "Il film", TextRed = 0.5, BeepEach = tonumber(opt.beep), PopLevel = 0,
   Logo = opt.logo, LogoPos = 0, LogoSize = 20, LogoOnTail = 1 }
 local head = setmetatable({ off = 0, dur = tonumber(opt.head) * nominal, name = "LeaderKit Head",
@@ -70,8 +75,15 @@ table.insert(tracks.video[1].items, head)
 local progDur = math.floor(tonumber(opt.program) * nominal)
 local progOff = math.floor(tonumber(opt.progstart) * nominal)
 if progDur > 0 then
-  table.insert(tracks.video[1].items, setmetatable({ off = progOff, dur = progDur, name = "A001.mov" }, Item))
-  table.insert(tracks.audio[1].items, setmetatable({ off = progOff, dur = progDur, name = "A001.mov" }, Item))
+  local md = { Scene = "12", Take = "3", ["Camera #"] = "A", ["Reel Name"] = "A001", ["Good Take"] = "1",
+    ["Start TC"] = opt.srctc or "14:22:10:00", FPS = opt.srcfps or opt.fps }
+  local mpi = { GetMetadata = function(_, k) return md[k] end, GetClipProperty = function(_, k) return md[k] end }
+  local amd = { ["Start TC"] = opt.audtc or "14:22:10:00", ["Sound Roll #"] = "S012" }
+  local ampi = { GetMetadata = function(_, k) return amd[k] end, GetClipProperty = function(_, k) return amd[k] end }
+  table.insert(tracks.video[1].items, setmetatable({ off = progOff, dur = progDur, name = "A001C003.mov", mpi = mpi,
+    srcin = 48 }, Item))
+  table.insert(tracks.audio[1].items, setmetatable({ off = progOff, dur = progDur, name = "A001C003.mov", mpi = ampi,
+    srcin = 48 }, Item))
 end
 if opt.usermarker == "1" then markers[5] = { name = "nota utente", customData = "" } end
 
@@ -80,13 +92,15 @@ function tl:GetName() return "Timeline 1" end
 function tl:GetSetting(k)
   if k == "timelineFrameRate" then return opt.fps end
   if k == "timelineDropFrameTimecode" then return opt.df end
-  if k == "timelineResolutionWidth" then return "1920" end
-  if k == "timelineResolutionHeight" then return "1080" end
+  if k == "timelineResolutionWidth" then return opt.res:match("^(%d+)") end
+  if k == "timelineResolutionHeight" then return opt.res:match("x(%d+)$") end
 end
 function tl:GetStartFrame() return tlStart end
 function tl:GetStartTimecode() return tc(tlStart) end
 function tl:SetStartTimecode(s) tlStart = tcf(s); print("RESULT starttc=" .. s); return true end
 function tl:GetTrackCount(k) return #tracks[k] end
+function tl:SetTrackLock(k, i, v) if opt.nolock == "1" then error("no lock api") end; tracks[k][i].locked = v; return true end
+function tl:GetIsTrackLocked(k, i) return tracks[k][i].locked or false end
 function tl:GetTrackName(k, i) return tracks[k][i].name end
 function tl:SetTrackName(k, i, n) tracks[k][i].name = n; return true end
 function tl:AddTrack(k) table.insert(tracks[k], { name = k .. " " .. (#tracks[k] + 1), items = {} }); return true end
@@ -128,8 +142,12 @@ function tl:InsertFusionGeneratorIntoTimeline(name)
     if opt.marks == "abs_incl" and marks[1] < tlStart then off, dur = -1, 5 * nominal end
     if off < 0 then off = tcf(playhead) - tlStart end
   end
-  local it = setmetatable({ off = off, dur = dur, name = name, comp = newComp(t) }, Item)
-  table.insert(tracks.video[1].items, it)
+  if name == "LeaderKit Burn-in" then t.inputs = { BPhase = 2, BFrameMode = 1 } end
+  local ti = 1
+  while tracks.video[ti] and tracks.video[ti].locked do ti = ti + 1 end
+  if not tracks.video[ti] then return nil end
+  local it = setmetatable({ off = off, dur = dur, name = name, comp = newComp(t), where = { "video", ti } }, Item)
+  table.insert(tracks.video[ti].items, it)
   if name == "LeaderKit Head" then head = it; comp = it.comp end
   return it
 end
@@ -146,7 +164,7 @@ function pool:GetCurrentFolder() return folder end
 function pool:SetCurrentFolder() return true end
 function pool:ImportMedia(paths)
   local name = paths[1]:match("[^/\\]+$")
-  local clip = { GetName = function() return name end }
+  local clip = { GetName = function() return name end, path = paths[1] }
   table.insert(folder.clips, clip)
   return counted({ clip })
 end
@@ -156,7 +174,11 @@ function pool:AppendToTimeline(infos)
   local incl = tonumber(opt.variant) ~= 1
   local dur = info.endFrame - info.startFrame + (incl and 1 or 0)
   local kind = info.mediaType == 1 and "video" or "audio"
-  local it = setmetatable({ off = info.recordFrame - tlStart, dur = dur, name = info.mediaPoolItem:GetName() }, Item)
+  if not info.mediaType and not info.mediaPoolItem:GetName():match("%.wav$") then kind = "video" end
+  -- immagini fisse limitate alla durata standard (opzione stilldur, in fotogrammi)
+  if kind == "video" and tonumber(opt.stilldur) > 0 then dur = math.min(dur, tonumber(opt.stilldur)) end
+  local it = setmetatable({ off = info.recordFrame - tlStart, dur = dur, name = info.mediaPoolItem:GetName(),
+    path = info.mediaPoolItem.path }, Item)
   table.insert(tracks[kind][info.trackIndex].items, it)
   return counted({ it })
 end
@@ -182,6 +204,15 @@ for i = 1, runs do
   comp = head.comp; tool = head.comp.tool
   assert(load(source, "engine", "t", _ENV))()
 end
+if opt.burncode then
+  for _, t in ipairs(tracks.video) do for _, it in ipairs(t.items) do
+    if it.name == "LeaderKit Burn-in" then
+      it.comp.tool.inputs.Seg = ""; it.comp.tool.inputs.BFrameMode = 0
+      comp = it.comp; tool = it.comp.tool
+    end
+  end end
+  assert(load(io.open(opt.burncode):read("a"), "engine", "t", _ENV))()
+end
 if opt.remove == "1" then
   comp = head.comp; tool = head.comp.tool
   assert(load(io.open(opt.removecode):read("a"), "engine", "t", _ENV))()
@@ -197,6 +228,18 @@ for _, t in ipairs(tracks.audio) do
   end
 end
 for _, t in ipairs(tracks.video) do
+  if t.name == "LeaderKit Grafica" then
+    table.sort(t.items, function(a, b) return a.off < b.off end)
+    for _, it in ipairs(t.items) do print("RESULT gfx=" .. tc(it:GetStart()) .. "|" .. it:GetDuration() .. "|" .. tostring(it.path)) end
+  end
+  if t.name == "LeaderKit Burn-in" then
+    for _, it in ipairs(t.items) do
+      local ti = it.comp.tool.inputs
+      print("RESULT burn=" .. tc(it:GetStart()) .. "|" .. it:GetDuration() .. "|" .. tostring(ti.BFrameMode) .. "|" ..
+        tostring(ti.BRec) .. tostring(ti.BSrc) .. tostring(ti.BAtc) .. "|" .. tostring(ti.RecStart) .. "|" .. tostring(ti.TlFps))
+      print("RESULT burnseg=" .. (tostring(ti.Seg):gsub("\n", " // ")))
+    end
+  end
   if t.name == "LeaderKit Logo" then
     for _, it in ipairs(t.items) do
       print("RESULT logo=" .. tc(it:GetStart()) .. "|" .. it:GetDuration() .. "|" .. tostring((it.props or {}).ZoomX))
@@ -215,6 +258,7 @@ for _, it in ipairs(tracks.video[1].items) do
     print("RESULT head=" .. tc(it:GetStart()) .. "|" .. it:GetDuration() .. "|" .. tostring(it.comp.tool.inputs.Title))
     print("RESULT duration=" .. tostring(it.comp.tool.inputs.Duration))
     print("RESULT colorinfo=" .. tostring(it.comp.tool.inputs.ColorInfo))
+    print("RESULT date=" .. tostring(it.comp.tool.inputs.Date))
     print("RESULT info=" .. tostring(it.comp.tool.inputs.Info):gsub("\n", " / "))
     print("RESULT guide=" .. tostring(it.comp.tool.inputs.Guide):gsub("\n", " / "))
   end
