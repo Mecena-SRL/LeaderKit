@@ -80,7 +80,10 @@ dove vanno i dati: la prassi delle grandi produzioni, "fuori dall'immagine
 attiva"), se è più stretto diventa pillarbox (bande laterali, es. 1.33 su una
 timeline 2:1 o 2.39), se coincide non si vede. Senza mascherino i dati stanno in
 bande proprie semitrasparenti o dentro l'immagine (safe 90%). L'altezza del
-testo è in percentuale del quadro, quindi resta uguale su 16:9, 2:1 o DCI. I dati si
+testo è in percentuale del quadro, quindi resta uguale su 16:9, 2:1 o DCI.
+I dati sono **allineati ai bordi** (sinistra / destra); se in una versione di
+Resolve l'ancoraggio di Text+ non si comporta come previsto, "Allineamento dei
+dati › Centrati nelle celle" li riporta al centro delle loro celle. I dati si
 aggiornano con **Aggiorna dai metadati** (o con Genera) dopo modifiche al
 montaggio o ai metadati.
 
@@ -95,7 +98,23 @@ montaggio o ai metadati.
 | **Aspetto** | colori di testo, sfondo e grafica; logo scelto con **selettore file** (posizione, dimensione, anche sulla coda) |
 | **Taratura** | strumenti sul countdown, ispirati al leader digitale SMPTE RP 428-6: griglie di risoluzione pixel-esatte (righe verticali e orizzontali da 1, 2, 3, 4 px: se quelle da 1 px si impastano, l'immagine è morbida o è stata scalata), mirino centrale, scala di grigi a 11 gradini, patch RGBCMY, rampe continue B/N-R-G-B, verifica del blu (Wratten 47B), sfera sfumata per il contouring, bianco di picco e neri (PLUGE 2/4/8%), etichette fps/risoluzione/formato |
 
-**Slate**: titolo grande (si riduce da solo se è lungo), "Directed by", filo
+**Stili della slate** (scheda Aspetto › Slate):
+
+| Stile | Impaginazione |
+|---|---|
+| Pannelli | titolo, regia e tre pannelli Production / Post / Technical |
+| Quadrante | a sinistra un quadrante con i fotogrammi del secondo (00–23 a 24 fps, 00–24 a 25…) e la tacca che gira, secondi al FFOA al centro; a destra titolo, standard, dati allineati a sinistra e fotogrammi al FFOA |
+| Orologio | a sinistra un cronometro con i secondi al FFOA; a destra titolo nel colore evidenza e dati allineati a sinistra |
+| Minimale | titolo grande al centro, regia, una riga di dati essenziali |
+
+Il **titolo può essere un PNG** (con trasparenza): Genera lo mette nel riquadro
+del titolo dello stile scelto, leggendo le proporzioni dal file, e il titolo di
+testo sparisce. Il **logo della produzione** e un secondo logo vanno negli
+angoli scelti, con i margini esatti. I quadranti degli stili Quadrante e
+Orologio sono PNG creati da Genera alla risoluzione della timeline, con i
+numeri dei fotogrammi del frame rate reale.
+
+**Slate a pannelli**: titolo grande (si riduce da solo se è lungo), "Directed by", filo
 nel colore evidenza e tre pannelli: **Production** (produzione, produttore,
 cliente, agenzia, codice, episodio, lingua, data), **Post** (montaggio, color,
 suono, VFX, versione, fase, stato TEMP/FINAL) e **Technical** (durata, formato e

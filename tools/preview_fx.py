@@ -155,7 +155,7 @@ class Renderer(object):
         if not s.strip():
             return out
         size = num(self.inp(name, "Size"), 0.08)
-        bold = (self.inp(name, "Style") or "Bold") != "Regular"
+        bold = (self.inp(name, "Style") or "Bold") not in ("Regular", "Light")
         font = ImageFont.truetype(FONTS[0] if bold else FONTS[1], max(6, int(size * self.w * 0.55)))
         cx, cy = pt(self.inp(name, "Center"))
         spacing = num(self.inp(name, "LineSpacing"), 1.0)
@@ -165,9 +165,17 @@ class Renderer(object):
         lh = font.size * 1.2 * spacing
         total = lh * len(lines)
         y0 = (1 - cy) * self.h - total / 2
+        anchor = num(self.inp(name, "HorizontalLeftCenterRight"), 0)   # -1 sinistra, 0 centro, 1 destra
+        widths = [d.textlength(line, font=font) for line in lines]
         for i, line in enumerate(lines):
-            tw = d.textlength(line, font=font)
-            d.text((cx * self.w - tw / 2, y0 + i * lh), line, fill=255, font=font)
+            tw = widths[i]
+            if anchor < -0.5:
+                x = cx * self.w
+            elif anchor > 0.5:
+                x = cx * self.w - tw
+            else:
+                x = cx * self.w - tw / 2
+            d.text((x, y0 + i * lh), line, fill=255, font=font)
         a = np.asarray(img).astype(np.float32) / 255
         col = [num(self.inp(name, ch), 1) for ch in ("Red1", "Green1", "Blue1")]
         out[..., 0], out[..., 1], out[..., 2] = a * col[0], a * col[1], a * col[2]

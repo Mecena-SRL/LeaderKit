@@ -154,7 +154,8 @@ local function isLeaderKit(entry, kind)
   if kind == "audio" and tl:GetTrackName("audio", entry.track) == POP_TRACK then return true end
   if kind == "video" then
     local tn = tl:GetTrackName("video", entry.track)
-    if tn == LOGO_TRACK or tn == LOGO_TRACK .. " 2" or tn == GFX_TRACK or tn == BURN_TRACK then return true end
+    if tn == LOGO_TRACK or tn == LOGO_TRACK .. " 2" or tn == LOGO_TRACK .. " Titolo" or tn == GFX_TRACK
+      or tn == BURN_TRACK then return true end
   end
   return false
 end
@@ -172,8 +173,8 @@ local function cleanup()
   end
   for _, e in ipairs(allItems("video")) do
     local tn = tl:GetTrackName("video", e.track)
-    if e.item:GetName() == TAIL_NAME or tn == LOGO_TRACK or tn == LOGO_TRACK .. " 2" or tn == GFX_TRACK
-      or tn == BURN_TRACK then
+    if e.item:GetName() == TAIL_NAME or tn == LOGO_TRACK or tn == LOGO_TRACK .. " 2"
+      or tn == LOGO_TRACK .. " Titolo" or tn == GFX_TRACK or tn == BURN_TRACK then
       doomed[#doomed + 1] = e.item
     end
   end
@@ -1024,6 +1025,71 @@ if slateSec > 0 and get("GuidesSlate", 0) > 0.5 and (#frameLines > 0 or safeA or
   end
 end
 
+-- dimensioni di un PNG (per impaginare titolo e loghi); nil per altri formati
+local function pngSize(path)
+  local fh = io.open(path, "rb")
+  if not fh then return nil end
+  local hd = fh:read(24); fh:close()
+  if not hd or #hd < 24 or hd:sub(1, 8) ~= "\137PNG\r\n\26\n" then return nil end
+  local function be(i) local a, b2, c2, d = hd:byte(i, i + 3); return ((a * 256 + b2) * 256 + c2) * 256 + d end
+  return be(17), be(21)
+end
+-- zoom/pan/tilt di Resolve per mettere un'immagine in un riquadro (pixel), con l'immagine adattata al quadro
+local function fitBox(path, bw, bh, cxp, cyp, anchorLeft)
+  local iw, ih = pngSize(path)
+  if not iw or iw <= 0 or ih <= 0 then iw, ih = w, h end
+  local f = math.min(w / iw, h / ih)
+  local z = math.min(bw / (iw * f), bh / (ih * f))
+  local dw, dh = iw * f * z, ih * f * z
+  if anchorLeft == "left" then cxp = cxp + dw / 2 elseif anchorLeft == "right" then cxp = cxp - dw / 2 end
+  return z, cxp - w / 2, cyp - h / 2, dw, dh
+end
+local function placeImage(path, span, track, label, z, pan, tilt)
+  local clip = importImage(path)
+  if not clip then bad("Resolve non ha importato " .. path .. "."); return end
+  local pieces = placeStill(clip, span[1], span[2], track)
+  for _, it in ipairs(pieces) do
+    pcall(function()
+      it:SetProperty("ZoomX", z); it:SetProperty("ZoomY", z)
+      it:SetProperty("Pan", pan); it:SetProperty("Tilt", tilt)
+    end)
+  end
+  describe(pieces, label, tl:GetTrackName("video", track) or "")
+end
+
+local slateStyle = math.floor(get("SlateStyle", 0) + 0.5)
+local slateSpan = { head:GetStart() + math.floor(barsSec * n + 0.5), math.floor(slateSec * n + 0.5) }
+if slateSec > 0 and (slateStyle == 1 or slateStyle == 2) and LK_DIALS then
+  local d = LK_DIALS[slateStyle == 1 and "b" or "c"]
+  local key = slateStyle == 1 and "dialB" or "dialC"
+  local spec = { accent = accent, framelines = {} }
+  spec[key] = { cx = d[1], cy = d[2], r = d[3], fps = r.fps }
+  local path = overlay(slateStyle == 1 and ("Quadrante" .. math.floor(r.fps + 0.5)) or "Orologio", spec)
+  local clip = path and importImage(path)
+  if clip then
+    describe(placeStill(clip, slateSpan[1], slateSpan[2], videoTrack(GFX_TRACK)),
+      (slateStyle == 1 and "Quadrante" or "Orologio") .. " della slate " .. w .. "x" .. h, GFX_TRACK)
+  end
+end
+
+local titleImg = tostring(get("TitleImage", "") or "")
+titleImg = string.gsub(string.gsub(titleImg, "^%s+", ""), "%s+$", "")
+if titleImg ~= "" and slateSec > 0 then
+  local fh = io.open(titleImg, "rb")
+  if not fh then
+    bad("Titolo in PNG non trovato: " .. titleImg .. " (sceglilo di nuovo nella scheda Aspetto).")
+  else
+    fh:close()
+    local box = (LK_TITLE_BOXES or {})[slateStyle + 1] or { 0.5, 0.8, 0.6, 0.12, "center" }
+    local k = (get("TitleImageSize", 100) or 100) / 100
+    local z, pan, tilt = fitBox(titleImg, box[3] * w * k, box[4] * h * k, box[1] * w, box[2] * h, box[5])
+    if not pngSize(titleImg) then
+      ok("Titolo: non e' un PNG, impaginato supponendo le proporzioni del quadro (meglio un PNG con trasparenza).")
+    end
+    placeImage(titleImg, slateSpan, videoTrack(LOGO_TRACK .. " Titolo"), "Titolo in PNG sulla slate", z, pan, tilt)
+  end
+end
+
 local LOGOS = { { "Logo", "LogoPos", "LogoSize", LOGO_TRACK, "Logo" },
   { "Logo2", "LogoPos2", "LogoSize2", LOGO_TRACK .. " 2", "Secondo logo" } }
 for _, L in ipairs(LOGOS) do
@@ -1042,7 +1108,10 @@ for _, L in ipairs(LOGOS) do
       else
         local size = (get(L[3], 12) or 12) / 100
         local pos = math.floor(get(L[2], L[1] == "Logo" and 0 or 1) + 0.5)
-        local mx, my = w * (0.5 - size / 2 - 0.035), h * (0.5 - size / 2 - 0.04)
+        -- riquadro del logo: largo size * W, alto al massimo meta'; angolo esatto a 3.5% / 4% dai bordi
+        local bw, bh = size * w, size * w * 0.5
+        local z, _, _, dw, dh = fitBox(logoPath, bw, bh, 0, 0, "center")
+        local mx, my = w / 2 - 0.035 * w - dw / 2, h / 2 - 0.04 * h - dh / 2
         local pan, tilt = ({ mx, -mx, mx, -mx, 0 })[pos + 1], ({ my, my, -my, -my, 0 })[pos + 1]
         local track = videoTrack(L[4])
         local spans = {}
@@ -1054,7 +1123,7 @@ for _, L in ipairs(LOGOS) do
           local pieces = placeStill(clip, sp[1], sp[2], track)
           for _, it in ipairs(pieces) do
             pcall(function()
-              it:SetProperty("ZoomX", size); it:SetProperty("ZoomY", size)
+              it:SetProperty("ZoomX", z); it:SetProperty("ZoomY", z)
               it:SetProperty("Pan", pan); it:SetProperty("Tilt", tilt)
             end)
           end

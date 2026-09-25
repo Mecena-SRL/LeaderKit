@@ -390,6 +390,59 @@ LK_OVERLAY = (function()
     local labels = nil
     local WHITE, BLACK = { 255, 255, 255 }, { 0, 0, 0 }
 
+    -- quadranti della slate (stili Quadrante e Orologio)
+    if spec.dialB then
+      local d = spec.dialB
+      local cx, cy, R = d.cx * W, d.cy * H, d.r * H
+      local fps = max(1, floor(d.fps + 0.5))
+      local ro, ri = R, R * 0.8
+      local lgh = max(8, floor(R * 0.07 + 0.5))
+      -- corona: settori alternati, uno per fotogramma del secondo, numerati
+      local x0, x1 = max(0, floor(cx - ro - 1)), min(W - 1, floor(cx + ro + 1))
+      local light, darkc = dim(0.55), { 18, 18, 18 }
+      cv:add(cy - ro - 1, cy + ro + 1, function(y, row)
+        local dy = y + 0.5 - cy
+        for x = x0, x1 do
+          local dx = x + 0.5 - cx
+          local dd = sqrt(dx * dx + dy * dy)
+          local a = min(ro + 0.5 - dd, dd - ri + 0.5, 1)
+          if a > 0 then
+            local ang = (atan2(dx, -dy) / (2 * math.pi)) % 1
+            local seg = floor(ang * fps + 0.5) % fps
+            local c = (seg % 2 == 0) and darkc or light
+            blend(row, x, c[1], c[2], c[3], a)
+          end
+        end
+      end)
+      cv:ring(cx, cy, ro, lw * 2, accent)
+      cv:ring(cx, cy, ri, lw, accent)
+      for k = 0, fps - 1 do
+        local ang = 2 * math.pi * k / fps
+        local rr = (ro + ri) / 2
+        local tx, ty = cx + math.sin(ang) * rr, cy - math.cos(ang) * rr
+        local c = (k % 2 == 0) and WHITE or BLACK
+        cv:text(string.format("%02d", k), tx, ty - lgh / 2, lgh, c, "center")
+      end
+      -- indice fisso in alto
+      cv:rect(cx - lw, cy - ri, cx + lw, cy - ri * 0.72, accent)
+    end
+    if spec.dialC then
+      local d = spec.dialC
+      local cx, cy, R = d.cx * W, d.cy * H, d.r * H
+      local lgh = max(8, floor(R * 0.075 + 0.5))
+      for k = 0, 59 do
+        local ang = 2 * math.pi * k / 60
+        local long = k % 5 == 0
+        local r0 = R * (long and 0.86 or 0.92)
+        local sx, sy = math.sin(ang), -math.cos(ang)
+        cv:segment(cx + sx * r0, cy + sy * r0, cx + sx * R * 0.985, cy + sy * R * 0.985, max(0.8, lw * (long and 0.9 or 0.5)), accent)
+        if long then
+          local rt = R * 0.74
+          cv:text(tostring(k == 0 and 60 or k), cx + sx * rt, cy + sy * rt - lgh / 2, lgh, dim(0.9), "center")
+        end
+      end
+    end
+
     -- frame lines (sul raster reale) ed etichette
     local gh = max(8, floor(0.016 * H + 0.5))
     local narrow, wide = {}, {}

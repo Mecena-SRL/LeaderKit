@@ -294,6 +294,8 @@ def engine(mode, std=None):
                                                           for k, lab, ar in FRAMELINES])
             + "LK_CALIBRATION = %s\n" % lua_literal([k for k, _, _ in CALIBRATION])
             + "LK_BURN_PHASES = %s\n" % lua_literal(burn_phase_table())
+            + "LK_TITLE_BOXES = %s\n" % lua_literal([list(b) for b in TITLE_BOXES])
+            + "LK_DIALS = %s\n" % lua_literal({"b": list(DIAL_B), "c": list(DIAL_C)})
             + "LK_BURN_FIELDS = %s\n" % lua_literal([k for k, _ in BURN_FIELDS])
             + overlay + "\n"
             + "local function __leaderkit_main()\n" + body + "\nend\n"
@@ -401,6 +403,7 @@ def head_inputs():
     out += [(x, "Tecnico") for x in ("SecGuides", "Guides", "GuidesSlate")] + [(f, "Tecnico") for f, _, _ in FRAMELINES]
     out += [(x, "Tecnico") for x in ("SafeAction", "SafeTitle", "SecTech", "ColorInfo", "AudioFormat",
                                      "SecAudio", "PopLevel", "BeepEach")]
+    out += [(x, "Aspetto") for x in ("SecStyle", "SlateStyle", "TitleImage", "TitleImageSize")]
     out += [("SecLook", "Aspetto")] + [(c, "Aspetto") for c in color_inputs()]
     out += [(x, "Aspetto") for x in ("SecLogo", "Logo", "LogoPos", "LogoSize", "Logo2", "LogoPos2", "LogoSize2",
                                      "LogoOnTail")]
@@ -502,7 +505,7 @@ def clock_stack(g, remaining_expr):
            center=("expr", e("Point(%s, 0.11 + %s * ASPECT)" % (cx, r * 0.45))))
     g.background("CkArmBg", mask="CkArm", color="Accent")
     g._add("CkSweep", "Transform", [("Input", ("link", "CkArmBg", "Output")),
-                                    ("Center", "{ %s, 0.11 }" % cx), ("Pivot", "{ %s, 0.11 }" % cx),
+                                    ("Pivot", "{ %s, 0.11 }" % cx),
                                     ("Angle", ("expr", e("-6 * math.floor((REM - 1) / FPS)")))])
     top = g.merge("CkM1", "CkRingBg", "CkSweep")
     g._add("CkDigit", "TextPlus", G.CREATOR + [
@@ -565,9 +568,161 @@ def tint(prefix, k=1.0):
     return ["LK.%s%s * %s" % (prefix, ch, k) for ch in ("Red", "Green", "Blue")]
 
 
+# ------------------------------------------------------------------ stili della slate
+SLATE_STYLES = ["Pannelli (produzione / post / tecnico)", "Quadrante (fotogrammi, dati a destra)",
+                "Orologio (titolo e dati a destra)", "Minimale (titolo al centro)"]
+# riquadro del titolo in PNG per stile: (x, y, larghezza, altezza, ancora) in frazioni del quadro;
+# ancora "center" = x e' il centro, "left" = x e' il bordo sinistro. Usato anche dal motore.
+TITLE_BOXES = [(0.5, 0.815, 0.60, 0.11, "center"), (0.53, 0.845, 0.42, 0.10, "left"),
+               (0.58, 0.80, 0.38, 0.16, "left"), (0.5, 0.60, 0.70, 0.18, "center")]
+DIAL_B = (0.27, 0.5, 0.36)         # quadrante: centro x (W), centro y (H), raggio (H)
+DIAL_C = (0.28, 0.5, 0.31)         # orologio
+
+
+def info_groups():
+    cols = slate_columns()
+    prod, post, tech = [c[2] for c in cols]
+    first = [("DIRECTOR", "LK.Director.Value")] + [f for f in prod if f[0] != "DATE"]
+    return [first, post, tech + [("DATE", DATE_EXPR % TODAY)], [("NOTE", "LK.Note.Value")]]
+
+
+def info_list_expr(k):
+    """k-esima riga della lista dati (vuota se non c'e'); i gruppi sono separati da una riga vuota."""
+    adds = []
+    for grp in info_groups():
+        adds += ['a("%s", %s)' % (lab, v) for lab, v in grp] + ["s()"]
+    return ("(function() local t = {} "
+            "local function a(l, v) v = tostring(v or '') if v ~= '' then t[#t + 1] = l .. '   ' .. v end end "
+            "local function s() if #t > 0 and t[#t] ~= '' then t[#t + 1] = '' end end "
+            + " ".join(adds) + " return t[%d] or '' end)()" % k)
+
+
+def text_left(g, name, x, y, size, styled, rgb, style="Regular"):
+    """Testo ancorato a sinistra nel punto (x, y)."""
+    g._add(name, "TextPlus", G.CREATOR + [
+        ("Center", ("expr", "Point(%s, %s)" % (x, y))), ("Font", '"Open Sans"'), ("Style", lua_string(style)),
+        ("Size", ("expr", size)), ("StyledText", ("expr", styled)),
+        ("Red1", ("expr", rgb[0])), ("Green1", ("expr", rgb[1])), ("Blue1", ("expr", rgb[2])),
+        ("HorizontalLeftCenterRight", "-1"), ("HorizontalJustificationNew", "0"),
+        ("VerticalJustificationNew", "3")])
+    return name
+
+
+NO_TITLE_IMG = 'LK.TitleImage.Value == ""'
+
+
+def info_list(g, prefix, x, y0, step, cap, n, top):
+    for k in range(1, n + 1):
+        text_left(g, "%sI%d" % (prefix, k), x, "%s - %d * %s" % (y0, k - 1, step), cap_size(cap),
+                  "Text(%s)" % info_list_expr(k), tint("Text", 0.92))
+        top = g.merge("%sMI%d" % (prefix, k), top, "%sI%d" % (prefix, k))
+    return top
+
+
+def hand(g, name, cx, cy, r0, r1, width, angle, color="Hi"):
+    """Lancetta da r0 a r1 (frazioni dell'altezza) sopra il centro (cx, cy), ruotata di 'angle' gradi."""
+    g.mask(name + "M", "RectangleMask", repr(width), repr(r1 - r0),
+           center="{ %s, %s }" % (cx, cy + (r0 + r1) / 2))
+    g.background(name + "Bg", mask=name + "M", color=color)
+    g._add(name, "Transform", [("Input", ("link", name + "Bg", "Output")), ("Pivot", "{ %s, %s }" % (cx, cy)),
+                               ("Angle", ("expr", e(angle)))])
+    return name
+
+
+def slate_style_b(g, P):
+    """Quadrante: a sinistra il quadrante dei fotogrammi del secondo (disegnato da Genera in PNG)
+    con la tacca che gira; a destra titolo, dati e fotogrammi al FFOA."""
+    cx, cy, r = DIAL_B
+    top = transparent(g, "BBase")
+    top = g.merge("BMh", top, hand(g, "BHand", cx, cy, r * 0.66, r * 0.785, 0.007,
+                                   "-360 * (FPS - 1 - ((REM - 1) % FPS)) / FPS"))
+    text_node(g, "BSec", "Point(%s, %s)" % (cx, cy + 0.03), cap_size(0.16), e("Text(tostring(math.ceil(REM / FPS)))"),
+              tint("Text"))
+    top = g.merge("BMs", top, "BSec")
+    text_node(g, "BFps", "Point(%s, %s)" % (cx, cy - 0.17), cap_size(0.022),
+              'Text(string.format("SEC / %g FPS", comp:GetPrefs("Comp.FrameFormat.Rate")))', tint("Text", 0.8))
+    top = g.merge("BMf", top, "BFps")
+    x = "0.53"
+    title_size = e("math.min(2 * 0.05 / ASPECT * %s, 0.8 / math.max(1, string.len(LK.Title.Value)))" % NARROW)
+    text_left(g, "BTitle", x, "0.845", title_size, "Text(iif(%s, string.upper(LK.Title.Value), \"\"))" % NO_TITLE_IMG,
+              tint("Text"), style="Bold")
+    top = g.merge("BMt", top, "BTitle")
+    text_left(g, "BHead", x, "0.765", cap_size(0.016), 'Text(%s)' % pv(P, "heading"), tint("Hi"), style="Bold")
+    top = g.merge("BMh2", top, "BHead")
+    top = info_list(g, "B", x, "0.70", "0.0325", 0.0155, 17, top)
+    text_left(g, "BFrames", x, "0.125", cap_size(0.062), e("Text(tostring(REM))"), tint("Text", 0.85), style="Light")
+    top = g.merge("BMfr", top, "BFrames")
+    text_left(g, "BFramesL", x, "0.058",
+              cap_size(0.016), 'Text("frames to FFOA")', tint("Text", 0.6))
+    top = g.merge("BMfl", top, "BFramesL")
+    return top
+
+
+def slate_style_c(g, P):
+    """Orologio: cerchio con lancetta dei secondi al FFOA (tacche disegnate da Genera in PNG);
+    a destra titolo (testo o PNG), intestazione e dati."""
+    cx, cy, r = DIAL_C
+    top = transparent(g, "CBase")
+    g.mask("CRing", "EllipseMask", ("expr", e("%s * 2 / ASPECT" % r)), ("expr", e("%s * 2 / ASPECT" % r)),
+           center="{ %s, %s }" % (cx, cy), border=repr(LINE_W * 0.8))
+    g.background("CRingBg", mask="CRing", color="Accent")
+    top = g.merge("CMr", top, "CRingBg")
+    g.mask("CHub", "EllipseMask", ("expr", e("%s * 0.56 / ASPECT" % r)), ("expr", e("%s * 0.56 / ASPECT" % r)),
+           center="{ %s, %s }" % (cx, cy), border=repr(LINE_W * 0.8))
+    g.background("CHubBg", mask="CHub", color="Accent")
+    top = g.merge("CMh", top, "CHubBg")
+    top = g.merge("CMa", top, hand(g, "CHand", cx, cy, r * 0.30, r * 0.93, 0.0022,
+                                   "-6 * math.floor((REM - 1) / FPS)", color="Text"))
+    text_node(g, "CSec", "Point(%s, %s)" % (cx, cy), cap_size(0.05), e("Text(tostring(math.ceil(REM / FPS)))"),
+              tint("Text"))
+    top = g.merge("CMs", top, "CSec")
+    x = "0.58"
+    title_size = e("math.min(2 * 0.06 / ASPECT * %s, 0.75 / math.max(1, string.len(LK.Title.Value)))" % NARROW)
+    text_left(g, "CTitle", x, "0.80", title_size, "Text(iif(%s, string.upper(LK.Title.Value), \"\"))" % NO_TITLE_IMG,
+              tint("Hi"), style="Bold")
+    top = g.merge("CMt", top, "CTitle")
+    text_left(g, "CHead", x, "0.69", cap_size(0.016), 'Text(%s)' % pv(P, "heading"), tint("Text", 0.8), style="Bold")
+    top = g.merge("CMh2", top, "CHead")
+    top = info_list(g, "C", x, "0.625", "0.031", 0.0145, 18, top)
+    return top
+
+
+def slate_style_d(g, P):
+    """Minimale: titolo grande al centro, regia, filo, una riga di dati essenziali e i timecode."""
+    top = transparent(g, "DBase")
+    text_node(g, "DHead", "Point(0.5, 0.80)", cap_size(0.016), 'Text(%s)' % pv(P, "heading"), tint("Hi"))
+    top = g.merge("DMh", top, "DHead")
+    title_size = e("math.min(2 * 0.09 / ASPECT * %s, 2.2 / math.max(1, string.len(LK.Title.Value)))" % NARROW)
+    text_node(g, "DTitle", "Point(0.5, 0.60)", title_size,
+              "Text(iif(%s, string.upper(LK.Title.Value), \"\"))" % NO_TITLE_IMG, tint("Text"))
+    top = g.merge("DMt", top, "DTitle")
+    text_node(g, "DDir", "Point(0.5, 0.47)", cap_size(0.024),
+              'Text(iif(LK.Director.Value == "", "", "DIRECTED BY   " .. string.upper(LK.Director.Value)))',
+              tint("Text", 0.85), style="Regular")
+    top = g.merge("DMd", top, "DDir")
+    g.mask("DRule", "RectangleMask", "0.12", repr(LINE_W * 1.2), center="{ 0.5, 0.42 }")
+    g.background("DRuleBg", mask="DRule", color="Hi")
+    top = g.merge("DMr", top, "DRuleBg")
+    parts = ["LK.Version.Value", "LK.Duration.Value", DATE_EXPR % TODAY,
+             'string.format("%g fps", comp:GetPrefs("Comp.FrameFormat.Rate"))',
+             'comp:GetPrefs("Comp.FrameFormat.Width") .. " x " .. comp:GetPrefs("Comp.FrameFormat.Height")',
+             "LK.ColorInfo.Value", "LK.AudioFormat.Value"]
+    line = ("(function() local s = '' local function a(v) v = tostring(v or '') "
+            "if v ~= '' then if s ~= '' then s = s .. '   ·   ' end s = s .. v end end "
+            + " ".join("a(%s)" % x for x in parts) + " return s end)()")
+    text_node(g, "DLine", "Point(0.5, 0.36)", cap_size(0.016), "Text(%s)" % line, tint("Text", 0.9), style="Regular")
+    top = g.merge("DMl", top, "DLine")
+    who = ("(function() local s = '' local function a(l, v) if v ~= '' then if s ~= '' then s = s .. '      ' end "
+           "s = s .. l .. '  ' .. v end end a('PRODUCTION', LK.Production.Value) a('PRODUCER', LK.Producer.Value) "
+           "a('EDITOR', LK.Editor.Value) a('CLIENT', LK.Client.Value) return s end)()")
+    text_node(g, "DWho", "Point(0.5, 0.31)", cap_size(0.0135), "Text(%s)" % who, tint("Text", 0.65), style="Regular")
+    top = g.merge("DMw", top, "DWho")
+    return top
+
+
 def slate_stack(g, P):
     heading = pv(P, "heading")
-    static = pv(P, "slate_lines", fn=lambda p: "\\n".join(l for l in p.get("slate_lines", []) if "{" not in l))
+    static = pv(P, "slate_lines", fn=lambda p: "\n".join(l for l in p.get("slate_lines", []) if "{" not in l))
     top = transparent(g, "SBase")
     # pannelli dietro alle colonne (sfondo leggermente piu' chiaro) con filo colorato in alto
     PY1 = 0.645
@@ -593,7 +748,8 @@ def slate_stack(g, P):
               'Text(%s .. "   ·   LEADERKIT")' % heading, tint("Hi"))
     top = g.merge("SMH", top, "SHeading")
     title_size = e("math.min(2 * 0.068 / ASPECT * %s, 1.9 / math.max(1, string.len(LK.Title.Value)))" % NARROW)
-    text_node(g, "STitle", "Point(0.5, 0.815)", title_size, "Text(string.upper(LK.Title.Value))", tint("Text"))
+    text_node(g, "STitle", "Point(0.5, 0.815)", title_size,
+              "Text(iif(%s, string.upper(LK.Title.Value), \"\"))" % NO_TITLE_IMG, tint("Text"))
     top = g.merge("SMT", top, "STitle")
     text_node(g, "SDirector", "Point(0.5, 0.735)", cap_size(0.024),
               'Text(iif(LK.Director.Value == "", "", "DIRECTED BY   " .. string.upper(LK.Director.Value)))',
@@ -686,7 +842,11 @@ def head(std=None):
             + uc_label("SecAudio", "Audio (tono 1 kHz)")
             + uc_combo("PopLevel", "Livello pop", ["Dallo standard", "-20 dBFS (SMPTE / USA)", "-18 dBFS (EBU / Europa)"])
             + uc_check("BeepEach", "Bip anche su 8..3 (non standard)", 0))
-    look = (uc_label("SecLook", "Colori") + color_controls()
+    look = (uc_label("SecStyle", "Slate")
+            + uc_combo("SlateStyle", "Stile della slate", SLATE_STYLES)
+            + uc_file("TitleImage", "Titolo come immagine (PNG con trasparenza)")
+            + uc_slider("TitleImageSize", "Dimensione del titolo in PNG (%)", 20, 200, 100, integer=False)
+            + uc_label("SecLook", "Colori") + color_controls()
             + uc_label("SecLogo", "Logo (inserito da Genera sopra la slate, traccia LeaderKit Logo)")
             + uc_file("Logo", "File del logo")
             + uc_combo("LogoPos", "Posizione", LOGO_POS)
@@ -709,6 +869,7 @@ def head(std=None):
               ("SafeAction", "0"), ("SafeTitle", "0"), ("ColorInfo", '""'), ("AudioFormat", '""'),
               ("PopLevel", "0"), ("BeepEach", "0"), ("Logo", '""'), ("LogoPos", "0"), ("LogoSize", "12"),
               ("Logo2", '""'), ("LogoPos2", "1"), ("LogoSize2", "12"),
+              ("SlateStyle", "0"), ("TitleImage", '""'), ("TitleImageSize", "100"),
               ("LogoOnTail", "0"), ("CalOn", "1")]
     values += [(i, str(std.get("slot_defaults", {}).get(c, 0))) for c, i, _ in SLOT_INPUTS]
     values += [(f, '""') for f, _, _ in PRODUCTION_FIELDS + POST_FIELDS if f not in ("Title", "Version")]
@@ -726,6 +887,17 @@ def head(std=None):
     top = g.dissolve("MBars", "Bg", "BarsFull", e("iif(REM > (%s + %s + %s) * FPS, 1, 0)" % (S, GP, C)))
     # slate: titolo grande, regia, tre pannelli (produzione / lavorazione / tecnico), piede con i timecode
     s_ = slate_stack(g, P)
+    for i, fn in ((1, slate_style_b), (2, slate_style_c), (3, slate_style_d)):
+        alt = fn(g, P)
+        if i != 1:
+            # piede comune (timecode, righe dello standard, note) per gli stili senza pannelli
+            text_node(g, "Foot%d" % i, "Point(0.5, 0.07)", cap_size(0.0135),
+                      'Text(LK.Info.Value .. iif(%s == "", "", "\\n" .. %s))'
+                      % (pv(P, "slate_lines", fn=lambda p: "\n".join(l for l in p.get("slate_lines", []) if "{" not in l)),
+                         pv(P, "slate_lines", fn=lambda p: "\n".join(l for l in p.get("slate_lines", []) if "{" not in l))),
+                      tint("Text", 0.7), style="Regular")
+            alt = g.merge("FootM%d" % i, alt, "Foot%d" % i)
+        s_ = g.dissolve("SStyle%d" % i, s_, alt, "iif(math.floor(LK.SlateStyle + 0.5) == %d, 1, 0)" % i)
     clock = clock_stack(g, 'Text(tostring(math.ceil(REM / FPS)))')
     s_ = g.merge("SM4", s_, clock, "iif(%s > 0.5, 1, 0)" % CLOCK)
     SLATEVIS = "(REM <= (%s + %s + %s) * FPS and REM > (%s + %s) * FPS)" % (S, GP, C, GP, C)
@@ -885,6 +1057,7 @@ def burnin(std=None):
             + uc_slider("BMatteRatio", "Rapporto personalizzato (x:1)", 1, 3, 2.39, integer=False)
             + uc_slider("BMatteAlpha", "Opacita' del mascherino", 0, 1, 1, integer=False)
             + uc_combo("BPos", "Posizione dei dati", BURN_POS)
+            + uc_combo("BAlign", "Allineamento dei dati", ["Ai bordi (sinistra / destra)", "Centrati nelle celle"])
             + uc_slider("BSize", "Altezza testo (% del quadro)", 1, 5, 1.8, integer=False)
             + uc_slider("BBandAlpha", "Opacita' delle bande", 0, 1, 0.75, integer=False)
             + uc_slider("BWaterAlpha", "Opacita' watermark", 0, 1, 0.18, integer=False)
@@ -895,7 +1068,7 @@ def burnin(std=None):
         d[k] = 1
     values = [("BPhase", "2"), ("BTitleText", '""'), ("BVersionText", '""'), ("BWaterText", '"CONFIDENZIALE"'),
               ("BRecipient", '""'), ("BInfo", '"Metti il clip sopra il montato (V3/V4) e premi Aggiorna"'),
-              ("BFrameMode", "1"), ("BPos", "0"), ("BMatte", "0"), ("BMatteRatio", "2.39"), ("BMatteAlpha", "1"), ("BSize", "1.8"), ("BBandAlpha", "0.75"), ("BWaterAlpha", "0.18"),
+              ("BFrameMode", "1"), ("BPos", "0"), ("BAlign", "0"), ("BMatte", "0"), ("BMatteRatio", "2.39"), ("BMatteAlpha", "1"), ("BSize", "1.8"), ("BBandAlpha", "0.75"), ("BWaterAlpha", "0.18"),
               ("Seg", '""'), ("RecStart", "0"), ("TlFps", "24"), ("TlDrop", "0")]
     values += [(k, str(v)) for k, v in d.items()]
     uc += ("\t\t\t\t\t\tRecStart = { LINKID_DataType = \"Number\", INPID_InputControl = \"SliderControl\", "
@@ -934,7 +1107,9 @@ def burnin(std=None):
     # angoli: 1 alto-sx, 2 alto-dx, 3 basso-sx, 4 basso-dx; due righe centrate nella loro cella
     for corner, (hx, vy) in enumerate([(-1, -1), (1, -1), (-1, 1), (1, 1)], 1):
         for line in (1, 2):
-            x = "0.2" if hx < 0 else "0.8"
+            # ai bordi: margine dentro il quadro (e dentro le bande laterali del mascherino se ci sono)
+            edge = e("iif(LK.BPos > 0.5, 0.05, 0.02) + %s" % PB)
+            x = (("iif(LK.BAlign < 0.5, %s, 0.2)" % edge) if hx < 0 else ("iif(LK.BAlign < 0.5, 1 - (%s), 0.8)" % edge))
             sign = "+" if line == 1 else "-"
             if vy < 0:
                 y = e("iif(LK.BPos > 0.5, 0.93 %s %s, 1 - (%s) / 2 %s %s)" % (sign, half, BAND, sign, half))
@@ -945,7 +1120,9 @@ def burnin(std=None):
                 ("Center", ("expr", "Point(%s, %s)" % (x, y))), ("Font", '"Open Sans"'), ("Style", '"Bold"'),
                 ("Size", ("expr", size)), ("StyledText", ("expr", "Text(%s)" % burn_lookup(corner, line))),
                 ("Red1", "1"), ("Green1", "1"), ("Blue1", "1"),
-                ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")])
+                ("HorizontalLeftCenterRight", ("expr", "iif(LK.BAlign < 0.5, %d, 0)" % hx)),
+                ("HorizontalJustificationNew", ("expr", "iif(LK.BAlign < 0.5, %d, 3)" % (0 if hx < 0 else 1))),
+                ("VerticalJustificationNew", "3")])
             top = g.merge("M" + nm, top, nm)
     # record TC grande (in basso al centro)
     g._add("Big", "TextPlus", G.CREATOR + [
@@ -964,7 +1141,7 @@ def burnin(std=None):
     inputs = ([(x, "Burn-in") for x in ("SecBurn", "BPhase", "BUpdate", "BInfo", "BTitleText", "BVersionText",
                                         "BWaterText", "BRecipient")]
               + [(k, "Campi") for k, _ in BURN_FIELDS] + [("BFrameMode", "Campi")]
-              + [(x, "Aspetto") for x in ("BMatte", "BMatteRatio", "BMatteAlpha", "BPos", "BSize", "BBandAlpha", "BWaterAlpha", "Seg")])
+              + [(x, "Aspetto") for x in ("BMatte", "BMatteRatio", "BMatteAlpha", "BPos", "BAlign", "BSize", "BBandAlpha", "BWaterAlpha", "Seg")])
     return group(BURN_NAME, g, top, inputs)
 
 

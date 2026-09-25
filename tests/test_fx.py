@@ -350,9 +350,10 @@ def test_generator_is_light(built):
     """Taratura e frame lines non sono piu' nodi Fusion (erano la causa dei 2.5 fps)."""
     text = open(HEAD(built)).read()
     tools = [t for t in re.findall(r"^\t\t\t\t(\w+) = (\w+) \{", text, re.M) if not t[1].startswith("Instance")]
-    assert len(tools) < 200, len(tools)
+    assert len(tools) < 340, len(tools)
     # slate, barre e countdown si alternano con Dissolve (Fusion calcola solo l'ingresso attivo)
     assert ("MSlate", "Dissolve") in tools and ("MLeader", "Dissolve") in tools
+    assert all(("SStyle%d" % i, "Dissolve") in tools for i in (1, 2, 3))      # stili alternativi della slate
     names = [t[0] for t in tools]
     assert not any(n.startswith(("St", "Rp", "FL", "Cal", "Pan", "Grey")) for n in names if n != "LK")
     for key in ("CalOn", "CalStars", "FL185", "Guides", "SafeAction"):     # restano come opzioni per Genera
@@ -406,7 +407,8 @@ def test_engine_logo_and_colorinfo(code, tmp_path):
     res, log = run_engine(code, fps="24", df="0", preset="cinema_dcp", head=5, progstart=18, program=60,
                           logo=str(logo))
     logos = res["logo"]
-    assert logos[0] == "00:59:50:00|192|0.2"                 # sopra la slate, 8"
+    # sopra la slate, 8"; file non PNG: riquadro 20% x 10% della larghezza con le proporzioni del quadro
+    assert logos[0].startswith("00:59:50:00|192|0.1777")
     assert len(logos) == 2                                    # anche sulla coda
     assert "Rec.709 Gamma 2.4" in res["colorinfo"][0]
     res, log = run_engine(code, fps="24", df="0", preset="cinema_dcp", head=5, progstart=18, program=60,
@@ -529,3 +531,49 @@ def test_burnin_matte_presets_and_custom(built):
     # personalizzato con lo slider: 2.10 su 16:9 = letterbox
     t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, BMatte=len(names) - 1, BMatteRatio=2.1)
     assert abs(t["MatTM"]["Height"] - (1 - (1920 / 1080) / 2.1) / 2) < 1e-3 and t["MatLM"]["Width"] == 0
+
+
+def test_slate_styles_switch(built):
+    """Quattro stili: si alternano con Dissolve; con un titolo in PNG il titolo testuale sparisce."""
+    head = HEAD(built)
+    names = build_fx.SLATE_STYLES
+    assert len(names) == 4
+    for st in range(4):
+        t = dump_tools(head, 24, 1920, 1080, 432, 40, SlateStyle=st, Title="Juna")
+        for i in (1, 2, 3):
+            assert t["SStyle%d" % i]["Mix"] == (1 if i == st else 0)
+    t = dump_tools(head, 24, 1920, 1080, 432, 40, SlateStyle=1, Title="Juna", Director="Janicel Diaz")
+    assert t["BTitle"]["StyledText"] == "JUNA" and t["BTitle"]["HorizontalLeftCenterRight"] == -1
+    assert t["BI1"]["StyledText"] == "DIRECTOR   Janicel Diaz"
+    assert t["BFrames"]["StyledText"] == str(432 - 40)
+    t = dump_tools(head, 24, 1920, 1080, 432, 40, SlateStyle=0, Title="Juna", TitleImage="/x/titolo.png")
+    assert t["STitle"]["StyledText"] == ""
+
+
+def test_engine_style_dial_and_title_png(built, code, tmp_path):
+    from PIL import Image
+    title = tmp_path / "titolo.png"
+    Image.new("RGBA", (800, 200), (255, 255, 255, 255)).save(title)
+    res, _ = run_engine(code, res="1920x1080", style="1", titleimg=str(title))
+    tracks = [v.split("|") for v in res["track"]]
+    dial = [t for t in tracks if t[0] == "LeaderKit Grafica" and "Quadrante24" in t[6]]
+    assert dial and dial[0][1] == "00:59:50:00" and int(dial[0][2]) == 8 * 24      # sopra la slate
+    tit = [t for t in tracks if t[0] == "LeaderKit Logo Titolo"]
+    assert tit and int(tit[0][2]) == 8 * 24
+    # 800x200 adattato al quadro (f = 2.4) nel riquadro 0.42 W x 0.10 H: limita l'altezza (108 px)
+    z = float(tit[0][3])
+    assert abs(z - 108 / (200 * 2.4)) < 1e-6
+    # ancorato a sinistra a 0.53 W, centro a 0.845 H
+    dw = 800 * 2.4 * z
+    assert abs(float(tit[0][4]) - (0.53 * 1920 + dw / 2 - 960)) < 1e-6
+    assert abs(float(tit[0][5]) - (0.845 * 1080 - 540)) < 1e-6
+
+
+def test_burnin_edge_alignment(built):
+    setting = os.path.join(built, "LeaderKit Burn-in.setting")
+    seg = "86400|86880|1000|1|24|0|-1|0|IL FILM~|CLIP~|SRC {SRC}~|REC {REC}~~{REC}"
+    t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg)
+    assert t["T11"]["HorizontalLeftCenterRight"] == -1 and abs(t["T11"]["Center"][0] - 0.02) < 1e-9
+    assert t["T21"]["HorizontalLeftCenterRight"] == 1 and abs(t["T21"]["Center"][0] - 0.98) < 1e-9
+    t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, BAlign=1)
+    assert t["T11"]["HorizontalLeftCenterRight"] == 0 and t["T11"]["Center"][0] == 0.2

@@ -68,7 +68,8 @@ headTool.inputs = { Preset = tonumber(opt.preset), Reel = 1, Custom = 0, BarsSec
   SlotCinema = tonumber(opt.SlotCinema or "3"), SlotTV = tonumber(opt.SlotTV or "0"),
   SlotSpot = tonumber(opt.SlotSpot or "3"), SlotStream = tonumber(opt.SlotStream or "3"), DateAuto = 1,
   Title = "Il film", TextRed = 0.5, BeepEach = tonumber(opt.beep), PopLevel = 0,
-  Logo = opt.logo, LogoPos = 0, LogoSize = 20, LogoOnTail = 1 }
+  Logo = opt.logo, LogoPos = 0, LogoSize = 20, LogoOnTail = 1,
+  SlateStyle = tonumber(opt.style or "0"), TitleImage = opt.titleimg or "", TitleImageSize = 100 }
 local head = setmetatable({ off = 0, dur = tonumber(opt.head) * nominal, name = "LeaderKit Head",
   comp = newComp(headTool) }, Item)
 table.insert(tracks.video[1].items, head)
@@ -243,6 +244,15 @@ for _, t in ipairs(tracks.video) do
   if t.name == "LeaderKit Logo" then
     for _, it in ipairs(t.items) do
       print("RESULT logo=" .. tc(it:GetStart()) .. "|" .. it:GetDuration() .. "|" .. tostring((it.props or {}).ZoomX))
+    end
+  end
+end
+for _, t in ipairs(tracks.video) do
+  if t.name:sub(1, 9) == "LeaderKit" then
+    for _, it in ipairs(t.items) do
+      local pr = it.props or {}
+      print(string.format("RESULT track=%s|%s|%d|%s|%s|%s|%s", t.name, tc(it:GetStart()), it:GetDuration(),
+        tostring(pr.ZoomX), tostring(pr.Pan), tostring(pr.Tilt), tostring(it.path)))
     end
   end
 end
