@@ -10,6 +10,10 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "src"))
 from leaderkit.fusion import Expr, FuID, Link, Tool, lua_string  # noqa: E402
 
+BUTTON = os.environ.get("PROBE_BUTTON", "button.lua")
+NAME = os.environ.get("PROBE_NAME", "LeaderKit Probe")
+MACRO = NAME.replace(" ", "")
+
 FF = [("UseFrameFormatSettings", 1), ("Width", 1920), ("Height", 1080)]
 
 
@@ -25,7 +29,7 @@ def merge(name, bg, fg, pos):
 
 
 def build():
-    with open(os.path.join(HERE, "button.lua")) as fh:
+    with open(os.path.join(HERE, BUTTON)) as fh:
         button = fh.read()
     tools = [
         Tool("LKBg", "Background", FF + [("TopLeftRed", 0.0), ("TopLeftGreen", 0.0),
@@ -71,7 +75,7 @@ def build():
     marker = "\t\t\t\tLKBg = Background {\n"
     inner = inner.replace(marker, marker + user_controls, 1)
     setting = (
-        "{\n\tTools = ordered() {\n\t\tLeaderKitProbe = MacroOperator {\n"
+        "{\n\tTools = ordered() {\n\t\t" + MACRO + " = MacroOperator {\n"
         "\t\t\tCtrlWZoom = false,\n\t\t\tInputs = ordered() {\n"
         "\t\t\t\tInput1 = InstanceInput { SourceOp = \"LKBg\", Source = \"LKTitle\", Name = \"Titolo\", },\n"
         "\t\t\t\tInput2 = InstanceInput { SourceOp = \"LKBg\", Source = \"LKTest\", Name = \"Test timeline\", },\n"
@@ -79,13 +83,13 @@ def build():
         "\t\t\t\tMainOutput1 = InstanceOutput { SourceOp = \"LKM5\", Source = \"Output\", },\n"
         "\t\t\t},\n\t\t\tViewInfo = GroupInfo { Pos = { 0, 0 } },\n"
         "\t\t\tTools = ordered() {\n%s\n\t\t\t},\n\t\t},\n\t},\n"
-        "\tActiveTool = \"LeaderKitProbe\"\n}\n") % inner
+        "\tActiveTool = \"" + MACRO + "\"\n}\n") % inner
     out_dir = os.path.join(ROOT, "dist")
     os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, "LeaderKit-Probe.drfx")
+    path = os.path.join(out_dir, NAME.replace(" ", "-") + ".drfx")
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("Edit/Generators/LeaderKit/LeaderKit Probe.setting", setting)
-    with open(os.path.join(out_dir, "LeaderKit Probe.setting"), "w") as fh:
+        zf.writestr("Edit/Generators/LeaderKit/%s.setting" % NAME, setting)
+    with open(os.path.join(out_dir, NAME + ".setting"), "w") as fh:
         fh.write(setting)
     return path
 
