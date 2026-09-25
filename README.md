@@ -11,25 +11,48 @@ Si installa solo con **`LeaderKit-<versione>.drfx`** (doppio clic): niente insta
 
 1. Effetti › Generators › LeaderKit › **LeaderKit Head**: trascinalo dove deve
    iniziare il leader (di solito a inizio timeline). La lunghezza non conta.
-2. Nell'Inspector: preset, rullo, countdown, durate (slate, nero, coda), campi
-   slate, nota libera, colori (testo, sfondo, grafica), marker.
-3. **Genera sulla timeline**:
-   - ricrea il blocco alla **lunghezza esatta del preset**, ancorato al punto in
-     cui l'hai messo (Cinema/DCP: slate + nero + countdown = 18" di default;
-     RAI: slate ≥5" + 3" di nero), ricopiando tutti i parametri;
-   - se il programma è troppo vicino, non tocca nulla e dice dove spostarlo;
-   - imposta lo start TC (FFOA a 01:00:08:00 o N:00:08:00 per il rullo N;
-     10:00:00:00 per RAI) e scrive nella **Guida timecode** dell'Inspector dove
-     cadono start, FFOA, 2-pop, LFOA e fine coda;
-   - mette il 2-pop audio a FFOA −2", inserisce **LeaderKit Tail** sulla stessa
-     traccia dopo il programma alla durata esatta, con tail pop a LFOA +2";
-   - aggiunge i marker FFOA/LFOA/pop/fine rullo con `customData` "leaderkit:…".
-4. **Rimuovi elementi generati** cancella solo marker, pop e coda di LeaderKit.
+2. Nell'Inspector scegli lo **standard**, la **durata del programma**
+   (libera, slot standard o personalizzata), i campi slate, i colori, l'audio.
+3. **Genera sulla timeline**: porta il blocco alla durata esatta dello standard,
+   imposta lo start TC, mette tono/pop/sync audio, inserisce la coda
+   (**LeaderKit Tail**) sulla stessa traccia, aggiunge i marker e mostra un
+   riepilogo con i **controlli** (✓/⚠) e cosa fare quando qualcosa non torna.
+4. **Rimuovi elementi generati** cancella solo marker, audio e coda di LeaderKit.
 
-La lunghezza esatta si ottiene impostando In/Out della timeline prima di
-inserire il blocco (l'API non permette di rifilare un clip esistente); il
-motore verifica il risultato e, se la versione di Resolve si comporta in
-modo diverso, lo segnala nel riepilogo.
+### Standard inclusi
+
+Fonte dei valori: `docs/industry-standards.md` (sezione indicata in ogni
+preset di `fx/standards.json`).
+
+| Standard | FFOA | Testa | Sync | Coda |
+|---|---|---|---|---|
+| Cinema / DCP | 01:00:08:00 (ora = rullo) | slate 8" + nero 2" + countdown 8→2 | 2-pop -20 dBFS | 8" + tail pop |
+| Doppiaggio / M&E | 01:00:08:00 (ora = rullo) | slate 8" + nero 2" + countdown 8→2 | 2-pop -20 dBFS | 8" + tail pop |
+| Review / lavorazione | 01:00:00:00 | slate 8" + nero 2" + countdown 8→2 | 2-pop -20 dBFS | 6" + tail pop |
+| Broadcast UK / DPP | 10:00:00:00 | barre 20" + clock 7" + nero 3" | sync flash | 1" |
+| Broadcast UK / Sky | 10:00:00:00 | barre 20" + clock 7" + nero 3" | sync flash | 15" |
+| Spot Italia — RAI | 10:00:00:00 | slate 5" + nero 3" | — | 3" |
+| Spot Italia — Publitalia | 10:00:00:00 | slate 7" + nero 3" | — | — |
+| Spot USA | 01:00:00:00 | slate 5" + nero 2" | — | — |
+| Streaming — Netflix / IMF | 01:00:00:00 | nero 1" | — | 1" |
+| Videoclip / Live | 01:00:00:00 | slate 8" + nero 3" | sync flash | 4" + clap |
+
+### Durata del programma
+
+- **Libera**: il programma finisce con l'ultimo clip audio o video (come prima).
+- **Slot standard**: Spot 10", Spot 15", Spot 20", Spot 30", Spot 45", Spot 60", Spot 90", Spot 120", TV 13' (parte), TV 26' (slot mezz'ora), TV 45', TV 50', Documentario TV 52', Cortometraggio 15', Cortometraggio 30', Lungometraggio 90', Lungometraggio 100', Lungometraggio 120'. Genera crea subito il
+  **contenitore** (marker verde con durata, LFOA e coda alla fine esatta) e
+  avvisa di quanti fotogrammi il montato è più lungo o più corto.
+- **Personalizzata**: durata scritta come `HH:MM:SS:FF` (es. `00:52:00:00`).
+
+Le durate degli slot TV sono quelle tipiche: vanno sempre verificate con il
+capitolato del broadcaster.
+
+### Aggiungere o modificare uno standard
+
+Modifica `fx/standards.json` (durate in secondi nominali, TC del FFOA, barre,
+slate/clock, countdown, sync, coda, righe della slate, frame rate e risoluzioni
+ammesse, note) e ricostruisci con `python3 tools/build_fx.py`.
 
 Il countdown non è pre-renderizzato: cifre, Picture Start, braccio e 2-pop sono
 calcolati a ogni fotogramma dal frame rate della timeline (48 fotogrammi a

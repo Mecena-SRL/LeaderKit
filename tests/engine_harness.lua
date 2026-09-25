@@ -3,7 +3,8 @@
 -- di AppendToTimeline produce 1 fotogramma), runs, usermarker, remove.
 local enginePath = arg[1]
 local opt = { fps = "24", df = "0", preset = "0", head = "5", progstart = "30", program = "60",
-  variant = "1", runs = "1", usermarker = "0", remove = "0", marks = "abs_incl", beep = "0" }
+  variant = "1", runs = "1", usermarker = "0", remove = "0", marks = "abs_incl", beep = "0",
+  durmode = "0", slot = "3", programtc = "00:00:30:00", removecode = "" }
 for i = 2, #arg do local k, v = arg[i]:match("([^=]+)=(.*)"); opt[k] = v end
 local fps = tonumber(opt.fps)
 local nominal = math.floor(fps + 0.5)
@@ -57,16 +58,19 @@ local function newComp(tool) local c = { tool = tool }
   return c end
 
 local headTool = newTool()
-headTool.inputs = { Preset = tonumber(opt.preset), Reel = 1, CountFrom = 8, SlateSec = 8, GapSec = 2,
-  TailSec = tonumber(opt.preset) == 0 and 8 or 3, MarkersOn = 1, MarkerKind = 0, MarkerEvery = 20, TailOn = 1,
+headTool.inputs = { Preset = tonumber(opt.preset), Reel = 1, Custom = 0, BarsSec = 0, CountFrom = 8, SlateSec = 8,
+  GapSec = 2, TailSec = 8, MarkersOn = 1, MarkerKind = 0, MarkerEvery = 0, TailOn = 1,
+  DurMode = tonumber(opt.durmode), Slot = tonumber(opt.slot), ProgramTC = opt.programtc,
   Title = "Il film", TextRed = 0.5, BeepEach = tonumber(opt.beep), PopLevel = 0 }
 local head = setmetatable({ off = 0, dur = tonumber(opt.head) * nominal, name = "LeaderKit Head",
   comp = newComp(headTool) }, Item)
 table.insert(tracks.video[1].items, head)
 local progDur = math.floor(tonumber(opt.program) * nominal)
 local progOff = math.floor(tonumber(opt.progstart) * nominal)
-table.insert(tracks.video[1].items, setmetatable({ off = progOff, dur = progDur, name = "A001.mov" }, Item))
-table.insert(tracks.audio[1].items, setmetatable({ off = progOff, dur = progDur, name = "A001.mov" }, Item))
+if progDur > 0 then
+  table.insert(tracks.video[1].items, setmetatable({ off = progOff, dur = progDur, name = "A001.mov" }, Item))
+  table.insert(tracks.audio[1].items, setmetatable({ off = progOff, dur = progDur, name = "A001.mov" }, Item))
+end
 if opt.usermarker == "1" then markers[5] = { name = "nota utente", customData = "" } end
 
 local tl = {}
@@ -95,7 +99,7 @@ end
 function tl:GetMarkers() local c = {}; for k, v in pairs(markers) do c[k] = v end; return c end
 function tl:AddMarker(f, color, name, note, d, cd)
   if markers[f] then return false end
-  markers[f] = { name = name, color = color, customData = cd }; return true
+  markers[f] = { name = name, color = color, customData = cd, duration = d }; return true
 end
 function tl:DeleteMarkerAtFrame(f) local had = markers[f] ~= nil; markers[f] = nil; return had end
 function tl:GetCurrentVideoItem() return head end
@@ -138,16 +142,20 @@ function pool:GetRootFolder() return rootFolder end
 function pool:AddSubFolder() return folder end
 function pool:GetCurrentFolder() return folder end
 function pool:SetCurrentFolder() return true end
-function pool:ImportMedia() folder.clips = { wavClip }; return counted({ wavClip }) end
-local variantCalls = 0
+function pool:ImportMedia(paths)
+  local name = paths[1]:match("[^/\\]+$")
+  local clip = { GetName = function() return name end }
+  table.insert(folder.clips, clip)
+  return counted({ clip })
+end
+-- variant 1: endFrame esclusivo; variant 2: endFrame incluso (piu' mediaType richiesto se opt.needtype)
 function pool:AppendToTimeline(infos)
   local info = infos[1]
-  variantCalls = variantCalls + 1
-  -- la variante "giusta" produce 1 fotogramma, le altre 2 fotogrammi
-  local isGood = (info.endFrame == ({ 1, 0, 1, 0 })[tonumber(opt.variant)]) and
-    ((info.mediaType ~= nil) == (tonumber(opt.variant) <= 2))
-  local it = setmetatable({ off = info.recordFrame - tlStart, dur = isGood and 1 or 2, name = wavClip:GetName() }, Item)
-  table.insert(tracks.audio[info.trackIndex].items, it)
+  local incl = tonumber(opt.variant) ~= 1
+  local dur = info.endFrame - info.startFrame + (incl and 1 or 0)
+  local kind = info.mediaType == 1 and "video" or "audio"
+  local it = setmetatable({ off = info.recordFrame - tlStart, dur = dur, name = info.mediaPoolItem:GetName() }, Item)
+  table.insert(tracks[kind][info.trackIndex].items, it)
   return counted({ it })
 end
 
@@ -165,17 +173,17 @@ os.getenv = function(k) if k == "HOME" then return HOME end end
 local source = io.open(enginePath):read("a")
 local runs = tonumber(opt.runs)
 for i = 1, runs do
-  LK_MODE = "generate"
+  comp = head.comp; tool = head.comp.tool
   assert(load(source, "engine", "t", _ENV))()
 end
 if opt.remove == "1" then
-  LK_MODE = "remove"
-  assert(load(source, "engine", "t", _ENV))()
+  comp = head.comp; tool = head.comp.tool
+  assert(load(io.open(opt.removecode):read("a"), "engine", "t", _ENV))()
   local n = 0; for _ in pairs(markers) do n = n + 1 end
   print("RESULT after_remove_markers=" .. n)
 end
 
-for f, m in pairs(markers) do print("RESULT marker=" .. m.name .. "|" .. tc(tlStart + f)) end
+for f, m in pairs(markers) do print("RESULT marker=" .. m.name .. "|" .. tc(tlStart + f) .. "|" .. tostring(m.duration or 1)) end
 for _, t in ipairs(tracks.audio) do
   if t.name == "LeaderKit Pop" then
     table.sort(t.items, function(a, b) return a.off < b.off end)
@@ -184,14 +192,16 @@ for _, t in ipairs(tracks.audio) do
 end
 for _, it in ipairs(tracks.video[1].items) do
   if it.name == "LeaderKit Tail" then
-    print("RESULT tail=preset=" .. tostring(it.comp.tool.inputs.Preset) .. " start=" .. tc(it:GetStart()) ..
-      " info=" .. tostring(it.comp.tool.inputs.Info))
+    local ti = it.comp.tool.inputs
+    print("RESULT tail=start=" .. tc(it:GetStart()) .. " dur=" .. it:GetDuration() .. " pop=" .. tostring(ti.TailPop) ..
+      " flash=" .. tostring(ti.TailFlash) .. " card=" .. tostring(ti.CardText) .. " info=" .. tostring(ti.Info))
   end
 end
 for _, it in ipairs(tracks.video[1].items) do
   if it.name == "LeaderKit Head" then
     print("RESULT head=" .. tc(it:GetStart()) .. "|" .. it:GetDuration() .. "|" .. tostring(it.comp.tool.inputs.Title))
     print("RESULT duration=" .. tostring(it.comp.tool.inputs.Duration))
+    print("RESULT info=" .. tostring(it.comp.tool.inputs.Info):gsub("\n", " / "))
     print("RESULT guide=" .. tostring(it.comp.tool.inputs.Guide):gsub("\n", " / "))
   end
 end

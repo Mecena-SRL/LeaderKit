@@ -177,14 +177,18 @@ if MODE == "remove" then
 end
 
 -- ---------------------------------------------------------------- generate
+local checks = {}
+local function ok(s) checks[#checks + 1] = "✓ " .. s end
+local function bad(s) checks[#checks + 1] = "⚠ " .. s; warnings[#warnings + 1] = s end
+
 local function isHeadItem(item)
   if not item then return false end
-  local ok, has = pcall(function()
+  local okk, has = pcall(function()
     local cmp = item:GetFusionCompByIndex(1)
     local t = findTool(cmp, "LK")
     return t ~= nil and t:GetInput("SlateSec") ~= nil
   end)
-  if ok and has then return true end
+  if okk and has then return true end
   return string.find(item:GetName() or "", "Head", 1, true) ~= nil
 end
 
@@ -201,31 +205,43 @@ if not head then
 end
 HEAD_NAME = head:GetName()   -- nome del template installato (serve per ricrearlo)
 
-local preset = math.floor(get("Preset", 0) + 0.5)   -- 0 Cinema/DCP, 1 Spot RAI
-local reel = math.floor(get("Reel", 1) + 0.5)
-local countFrom = math.floor(get("CountFrom", 8) + 0.5)
-local slateSec = get("SlateSec", 8)
-local gapSec = get("GapSec", 2)
-local tailSec = get("TailSec", preset == 0 and 8 or 3)
-local markersOn = get("MarkersOn", preset == 0 and 1 or 0) > 0.5
-local markerKind = math.floor(get("MarkerKind", 0) + 0.5)   -- 0 rullo, 1 break
-local markerEvery = get("MarkerEvery", 20)
-local tailOn = get("TailOn", 1) > 0.5
-local popLevel = (math.floor(get("PopLevel", 0) + 0.5) == 1) and -18 or -20   -- SMPTE -20 / EBU -18 dBFS
-local beepEach = get("BeepEach", 0) > 0.5
-local n = r.nominal
-if preset == 1 then
-  if slateSec < 5 then warn("RAI chiede un ident di almeno 5\": uso 5\"."); slateSec = 5 end
-  gapSec = 3                                          -- RAI: 3" di nero prima dello spot
-  tailSec = math.max(tailSec, 3)                      -- RAI: almeno 3" di nero in coda
+-- ---------------------------------------------------------------- standard
+local presets = LK_PRESETS or {}
+local slots = LK_SLOTS or {}
+local presetIdx = math.floor(get("Preset", 0) + 0.5)
+local P = presets[presetIdx + 1] or presets[1] or {}
+local custom = get("Custom", 0) > 0.5
+local function dur(key, input)
+  if custom then return get(input, P[key] or 0) end
+  return P[key] or 0
 end
-local headLen = math.floor(((preset == 0) and (slateSec + gapSec + countFrom) or (slateSec + gapSec)) * n + 0.5)
-local tailLen = math.floor(tailSec * n + 0.5)
+local n = r.nominal
+local barsSec, slateSec, gapSec = dur("bars", "BarsSec"), dur("slate", "SlateSec"), dur("gap", "GapSec")
+local countFrom = math.floor(dur("countdown", "CountFrom") + 0.5)
+local tailSec = dur("tail", "TailSec")
+local reel = math.floor(get("Reel", 1) + 0.5)
+local tailOn = get("TailOn", 1) > 0.5 and tailSec > 0
+local popChoice = math.floor(get("PopLevel", 0) + 0.5)          -- 0 standard, 1 -20, 2 -18
+local popLevel = (popChoice == 1) and -20 or ((popChoice == 2) and -18 or (P.pop_dbfs or -20))
+local beepEach = get("BeepEach", 0) > 0.5
+local markersOn = get("MarkersOn", 1) > 0.5
+local kindChoice = math.floor(get("MarkerKind", 0) + 0.5)       -- 0 standard, 1 rullo, 2 break
+local pm = P.markers or {}
+local markerKind = (kindChoice == 1) and "reel" or ((kindChoice == 2) and "break" or (pm.kind or "none"))
+local markerEvery = get("MarkerEvery", 0)
+if not markerEvery or markerEvery <= 0 then markerEvery = pm.every_min or 0 end
+local durMode = math.floor(get("DurMode", 0) + 0.5)             -- 0 libera, 1 slot, 2 personalizzata
 
--- Parametri del pannello da ricopiare quando il blocco viene ricreato.
-local PARAMS = { "Preset", "Reel", "CountFrom", "SlateSec", "GapSec", "TailSec", "Title", "Director",
-  "Editor", "Colorist", "Version", "Date", "Note", "MarkersOn", "MarkerKind", "MarkerEvery", "TailOn",
-  "PopLevel", "BeepEach",
+local headLen = math.floor((barsSec + slateSec + gapSec + countFrom) * n + 0.5)
+local tailLen = math.floor(tailSec * n + 0.5)
+if headLen < 1 then
+  log("Lo standard scelto non ha leader in testa (durata 0): niente da generare in testa.")
+  headLen = 1
+end
+
+local PARAMS = { "Preset", "Reel", "DurMode", "Slot", "ProgramTC", "Custom", "BarsSec", "SlateSec", "GapSec",
+  "CountFrom", "TailSec", "Title", "Director", "Editor", "Colorist", "Version", "Date", "Note", "MarkersOn",
+  "MarkerKind", "MarkerEvery", "TailOn", "PopLevel", "BeepEach",
   "TextRed", "TextGreen", "TextBlue", "BgRed", "BgGreen", "BgBlue", "AccentRed", "AccentGreen", "AccentBlue" }
 local COLORS = { "TextRed", "TextGreen", "TextBlue", "BgRed", "BgGreen", "BgBlue", "AccentRed", "AccentGreen", "AccentBlue" }
 
@@ -241,9 +257,8 @@ local function trackOf(item)
   return nil
 end
 
--- Inserisce un generatore LeaderKit a [start, start+len) usando In/Out della timeline.
--- Prova le convenzioni possibili dei marker (assoluti/relativi, out incluso/escluso)
--- e tiene quella che produce la durata esatta.
+-- Inserisce un generatore a [start, start+len) impostando In/Out della timeline;
+-- prova le convenzioni possibili e tiene quella che da' la durata esatta.
 local markMode = nil
 local function insertExact(name, start, len)
   local modes = markMode and { markMode } or {
@@ -262,42 +277,47 @@ local function insertExact(name, start, len)
     if it then
       if it:GetStart() == start and it:GetDuration() == len then markMode = m; return it, true end
       last = it
-      if not okMarks then return it, false end        -- marker non supportati: inutile riprovare
+      if not okMarks then return it, false end
       tl:DeleteClips({ it }, false)
       last = nil
     end
   end
   if last then return last, false end
-  -- ultimo tentativo senza marker, alla durata predefinita
   tl:SetCurrentTimecode(framesToTc(start, r))
-  local it = tl:InsertFusionGeneratorIntoTimeline(name)
-  return it, false
+  return tl:InsertFusionGeneratorIntoTimeline(name), false
 end
 
 local function lkOf(item)
-  local ok, cmp = pcall(function() return item:GetFusionCompByIndex(1) end)
-  if ok then return findTool(cmp, "LK") end
+  local okk, cmp = pcall(function() return item:GetFusionCompByIndex(1) end)
+  if okk then return findTool(cmp, "LK") end
   return nil
 end
 
--- 1) Blocco Head alla durata esatta, ancorato al suo punto di inizio.
+-- ---------------------------------------------------------------- 1) blocco Head
 local S = head:GetStart()
 local headTrack = trackOf(head)
-local programFirst = nil
+local userBefore, programFirst = nil, nil
 for _, kind in ipairs({ "video", "audio" }) do
   for _, e in ipairs(allItems(kind)) do
     local st = e.item:GetStart()
-    if not isLeaderKit(e, kind) and st >= S and (not programFirst or st < programFirst) then programFirst = st end
+    if not isLeaderKit(e, kind) and not isHeadItem(e.item) then
+      if st >= S then
+        if not programFirst or st < programFirst then programFirst = st end
+      elseif not userBefore or st < userBefore then userBefore = st end
+    end
   end
 end
 local ffoa = S + headLen
+log(string.format("Standard: %s  (%s)", P.name or "?", P.source or ""))
 if programFirst and programFirst < ffoa then
   local missing = ffoa - programFirst
-  log(string.format("Il leader %s dura %s: va da %s a %s (FFOA).", (preset == 0) and "Cinema/DCP" or "RAI",
-    framesToTc(headLen, r), framesToTc(S, r), framesToTc(ffoa - 1, r)))
-  log(string.format("Il programma inizia a %s: servono altri %s. Sposta il programma a %s (o piu' avanti) e premi di nuovo Genera.",
+  log(string.format("Il leader dura %s: va da %s a %s, il programma deve iniziare a %s (FFOA).",
+    framesToTc(headLen, r), framesToTc(S, r), framesToTc(ffoa - 1, r), framesToTc(ffoa, r)))
+  bad(string.format("Il programma inizia a %s, dentro il leader (mancano %s). Sposta il programma a %s o piu' avanti e premi di nuovo Genera. Non ho modificato nulla.",
     framesToTc(programFirst, r), framesToTc(missing, r), framesToTc(ffoa, r)))
   set(lk, "Guide", "Sposta il programma a " .. framesToTc(ffoa, r) .. " (mancano " .. framesToTc(missing, r) .. ")")
+  report[#report + 1] = "\nCONTROLLI\n" .. table.concat(checks, "\n")
+  warnings = {}
   show("LeaderKit — spazio insufficiente"); return
 end
 
@@ -307,106 +327,165 @@ if head:GetDuration() ~= headLen then
   for _, k in ipairs(PARAMS) do saved[k] = get(k, nil) end
   tl:DeleteClips({ head }, false)
   local newHead, exact = insertExact(HEAD_NAME, S, headLen)
-  if not newHead then
-    warn("Non riesco a ricreare il blocco LeaderKit Head.")
-    show("LeaderKit"); return
-  end
+  if not newHead then bad("Non riesco a ricreare il blocco LeaderKit Head."); show("LeaderKit"); return end
   head = newHead
   pcall(function() local nc = head:GetFusionCompByIndex(1); if nc then c = nc end end)
   panel = lkOf(head)
-  if panel then
-    for k, v in pairs(saved) do set(panel, k, v) end
-  else
-    warn("Parametri non ricopiati nel nuovo blocco (pannello non trovato).")
-  end
-  if exact then
-    log("Blocco Head allungato a " .. framesToTc(headLen, r) .. " da " .. framesToTc(S, r))
-  else
-    warn(string.format("Il blocco e' stato ricreato a %s invece di %s: questa versione di Resolve ignora In/Out. Allungalo a mano fino a %s.",
-      framesToTc(head:GetDuration(), r), framesToTc(headLen, r), framesToTc(ffoa, r)))
-  end
+  if panel then for k, v in pairs(saved) do set(panel, k, v) end
+  else bad("Parametri non ricopiati nel nuovo blocco (pannello non trovato).") end
+  if exact then ok("Blocco leader portato alla durata dello standard: " .. framesToTc(headLen, r) .. ".")
+  else bad(string.format("Il blocco dura %s invece di %s: questa versione di Resolve ignora In/Out. Allungalo a mano fino a %s.",
+    framesToTc(head:GetDuration(), r), framesToTc(headLen, r), framesToTc(ffoa, r))) end
   local t2 = trackOf(head)
-  if headTrack and t2 and t2 ~= headTrack then warn("Il blocco e' finito sulla traccia V" .. t2 .. " invece di V" .. headTrack) end
+  if headTrack and t2 and t2 ~= headTrack then bad("Il blocco e' finito sulla traccia V" .. t2 .. " invece di V" .. headTrack .. ": spostalo.") end
+else
+  ok("Blocco leader gia' della durata giusta (" .. framesToTc(headLen, r) .. ").")
 end
 lk = panel or lk
 ffoa = head:GetStart() + head:GetDuration()
 
--- 2) Start timecode: FFOA del preset.
-local ffoaTc = (preset == 0) and string.format("%02d:00:08:00", reel) or "10:00:00:00"
+-- ---------------------------------------------------------------- 2) start timecode
+local ffoaTc = P.ffoa or "01:00:00:00"
+if P.ffoa_hour_per_reel then ffoaTc = string.format("%02d%s", reel, string.sub(ffoaTc, 3)) end
 local ffoaTarget = tcToFrames(ffoaTc, r)
+local oldStartTc = tl:GetStartTimecode()
 local newStart = ffoaTarget - (ffoa - tl:GetStartFrame())
 if newStart < 0 then
-  warn("Il blocco e' troppo lontano dall'inizio timeline per portare il FFOA a " .. ffoaTc)
+  bad("Il blocco e' troppo lontano dall'inizio della timeline per portare il FFOA a " .. ffoaTc ..
+    ": avvicinalo all'inizio e premi di nuovo Genera.")
+elseif newStart ~= tl:GetStartFrame() then
+  if tl:SetStartTimecode(framesToTc(newStart, r)) then
+    ok("Start della timeline portato da " .. oldStartTc .. " a " .. framesToTc(newStart, r) ..
+      " perche' lo standard vuole il FFOA a " .. ffoaTc .. ".")
+  else bad("Non riesco a cambiare lo start timecode: impostalo a mano a " .. framesToTc(newStart, r) ..
+    " (clic destro sulla timeline › Timelines › Starting Timecode).") end
 else
-  if not tl:SetStartTimecode(framesToTc(newStart, r)) then warn("SetStartTimecode non riuscito") end
+  ok("Start della timeline gia' corretto (" .. oldStartTc .. ").")
 end
 ffoa = head:GetStart() + head:GetDuration()
-log(string.format("Timeline %s — %s fps%s, %sx%s", tl:GetName(), tostring(r.fps), r.df and " DF" or "", W, H))
-log("Leader " .. framesToTc(head:GetStart(), r) .. " → FFOA " .. framesToTc(ffoa, r) ..
-  "  (start timeline " .. tl:GetStartTimecode() .. ")")
-if preset == 0 and r.ntsc then
-  warn("Il digital cinema non supporta frequenze NTSC (23.976/29.97): per il DCP vanno convertite.")
-end
-if preset == 1 and (n ~= 25 or tostring(W) ~= "1920" or tostring(H) ~= "1080") then
-  warn("RAI richiede 1920x1080 a 25 fps (1080i25).")
+if userBefore then
+  bad("Ci sono clip prima del leader (da " .. framesToTc(userBefore, r) .. "): finiranno nel file prima della slate. " ..
+    "Spostali dopo il FFOA o cancellali.")
 end
 
--- Programma: clip non LeaderKit dal FFOA in poi.
-local lfoa, first = nil, nil
+-- Formato
+local rateLabel = string.format("%g", r.fps)
+local allowed = P.rates or {}
+if #allowed > 0 then
+  local found = false
+  for _, a in ipairs(allowed) do if math.abs((tonumber(a) or 0) - r.fps) < 0.01 then found = true end end
+  if found then ok("Frame rate " .. rateLabel .. " previsto dallo standard.")
+  else bad("Frame rate " .. rateLabel .. " non previsto da " .. (P.name or "") .. " (attesi: " .. table.concat(allowed, ", ") ..
+    "). Cambia il frame rate della timeline prima di montare.") end
+end
+if r.ntsc and P.ntsc_warning then bad(P.ntsc_warning) end
+if r.df and (P.ffoa or ""):sub(1, 2) == "10" then bad("Timecode drop-frame in uno standard europeo: di norma si usa non-drop.") end
+local res = P.resolutions or {}
+if #res > 0 then
+  local found = false
+  for _, wh in ipairs(res) do if tostring(wh[1]) == tostring(W) and tostring(wh[2]) == tostring(H) then found = true end end
+  if found then ok("Risoluzione " .. W .. "x" .. H .. " prevista dallo standard.")
+  else bad("Risoluzione " .. W .. "x" .. H .. " non prevista da " .. (P.name or "") .. ".") end
+end
+
+-- ---------------------------------------------------------------- 3) programma e durata
+local lastContent, firstContent = nil, nil
 for _, kind in ipairs({ "video", "audio" }) do
   for _, e in ipairs(allItems(kind)) do
     local st = e.item:GetStart()
-    if not isLeaderKit(e, kind) and st >= ffoa then
+    if not isLeaderKit(e, kind) and not isHeadItem(e.item) and st >= ffoa then
       local last = st + e.item:GetDuration() - 1
-      if not lfoa or last > lfoa then lfoa = last end
-      if not first or st < first then first = st end
+      if not lastContent or last > lastContent then lastContent = last end
+      if not firstContent or st < firstContent then firstContent = st end
     end
   end
 end
-local durTc = "—"
-if lfoa then
-  if first ~= ffoa then
-    warn("Il programma inizia a " .. framesToTc(first, r) .. ", non al FFOA " .. framesToTc(ffoa, r) ..
-      ": spostalo a " .. framesToTc(ffoa, r))
-  end
-  durTc = framesToTc(lfoa - ffoa + 1, r)
-  log("LFOA " .. framesToTc(lfoa, r) .. "  durata programma " .. durTc)
-else
-  warn("Nessun clip dopo il leader: metti il programma a " .. framesToTc(ffoa, r) ..
-    " e premi di nuovo Genera per coda, LFOA e marker.")
+if firstContent and firstContent ~= ffoa then
+  bad("Il programma inizia a " .. framesToTc(firstContent, r) .. " ma il FFOA e' " .. framesToTc(ffoa, r) ..
+    ": sposta il primo clip esattamente a " .. framesToTc(ffoa, r) .. ".")
+elseif firstContent then
+  ok("Il programma inizia esattamente al FFOA " .. framesToTc(ffoa, r) .. ".")
 end
 
--- 3) Pop audio (WAV generato, 1 kHz -20 dBFS, rifilato a 1 fotogramma).
+local slotFrames, slotLabel = nil, nil
+if durMode == 1 then
+  local sl = slots[math.floor(get("Slot", 0) + 0.5) + 1]
+  if sl then slotFrames, slotLabel = math.floor(sl[2] * n + 0.5), sl[1] end
+elseif durMode == 2 then
+  local txt = tostring(get("ProgramTC", "") or "")
+  if string.match(txt, "^%s*%d+[:;]%d+[:;]%d+[:;.]%d+%s*$") then
+    local plain = makeRate(tostring(r.fps), "0")
+    slotFrames = tcToFrames(txt, plain)
+    slotLabel = "personalizzata " .. txt
+  else
+    bad("Durata personalizzata non valida ('" .. txt .. "'): scrivila come HH:MM:SS:FF, per esempio 00:52:00:00.")
+  end
+end
+
+local lfoa = nil
+if slotFrames and slotFrames > 0 then
+  lfoa = ffoa + slotFrames - 1
+  ok("Contenitore " .. slotLabel .. ": programma da " .. framesToTc(ffoa, r) .. " a " .. framesToTc(lfoa, r) ..
+    " (" .. framesToTc(slotFrames, r) .. ").")
+  if lastContent then
+    local diff = (lastContent - ffoa + 1) - slotFrames
+    if diff > 0 then
+      bad(string.format("Il montato e' piu' lungo del contenitore di %d fotogrammi (%s): finisce a %s. Accorcialo, oppure scegli una durata libera.",
+        diff, framesToTc(diff, r), framesToTc(lastContent, r)))
+    elseif diff < 0 then
+      bad(string.format("Mancano %d fotogrammi (%s) per riempire il contenitore: il montato finisce a %s.",
+        -diff, framesToTc(-diff, r), framesToTc(lastContent, r)))
+    else
+      ok("Il montato riempie esattamente il contenitore.")
+    end
+  else
+    ok("Contenitore vuoto: monta dentro il range " .. framesToTc(ffoa, r) .. " → " .. framesToTc(lfoa, r) .. ".")
+  end
+elseif lastContent then
+  lfoa = lastContent
+  ok("Durata libera: il programma finisce con l'ultimo clip a " .. framesToTc(lfoa, r) .. ".")
+else
+  bad("Nessun clip dopo il leader: monta il programma da " .. framesToTc(ffoa, r) ..
+    " e premi di nuovo Genera, oppure scegli una durata fissa per creare subito il contenitore.")
+end
+local durTc = lfoa and framesToTc(lfoa - ffoa + 1, r) or "—"
+
+-- ---------------------------------------------------------------- 4) audio
 local home = os.getenv("HOME") or os.getenv("USERPROFILE") or "."
 local sep = package.config:sub(1, 1)
-local WAV_NAME = string.format("LeaderKit_pop_1kHz_%ddBFS.wav", popLevel or -20)
 local cacheDir = home .. sep .. ".leaderkit"
 pcall(function() bmd.createdir(cacheDir) end)
-local wavPath = cacheDir .. sep .. WAV_NAME
-do  -- se la cartella non e' scrivibile, ripiega sulla home
-  local probe = io.open(wavPath, "ab")
-  if probe then probe:close() else wavPath = home .. sep .. WAV_NAME end
+do
+  local probe = io.open(cacheDir .. sep .. "probe.txt", "w")
+  if probe then probe:close(); os.remove(cacheDir .. sep .. "probe.txt") else cacheDir = home end
 end
 
-local function writeWav(path)
+-- WAV mono 16 bit 48 kHz, tono 1 kHz: toneSec di tono seguiti da silenzio fino a totalSec.
+local function writeWav(path, level, toneSec, totalSec)
   local f = io.open(path, "rb")
   if f then
     local size = f:seek("end"); f:close()
     if size and size > 1000 then return true end
   end
-  local sr, total, tone = 48000, 48000, 12000
-  local amp = (10 ^ ((popLevel or -20) / 20)) * 32767
+  local sr = 48000
+  local total, tone = math.floor(totalSec * sr), math.floor(toneSec * sr)
+  local amp = (10 ^ (level / 20)) * 32767
   local function le(v, bytes)
     local t = {}
     for i = 1, bytes do t[i] = string.char(v % 256); v = math.floor(v / 256) end
     return table.concat(t)
   end
-  local parts = {}
-  for i = 0, total - 1 do
-    local v = 0
-    if i < tone then v = math.floor(amp * math.sin(2 * math.pi * 1000 * i / sr) + 0.5) end
+  local cycle = {}
+  for i = 0, 47 do   -- 1 kHz a 48 kHz = 48 campioni per periodo
+    local v = math.floor(amp * math.sin(2 * math.pi * i / 48) + 0.5)
     if v < 0 then v = v + 65536 end
-    parts[#parts + 1] = le(v, 2)
+    cycle[#cycle + 1] = le(v, 2)
+  end
+  local period = table.concat(cycle)
+  local silence = string.rep("\0\0", 48)
+  local parts = {}
+  for i = 0, math.floor(total / 48) - 1 do
+    parts[#parts + 1] = (i * 48 < tone) and period or silence
   end
   local data = table.concat(parts)
   f = io.open(path, "wb")
@@ -417,24 +496,32 @@ local function writeWav(path)
   return true
 end
 
-local function popClip()
-  if not writeWav(wavPath) then return nil end
+local function mediaFolder()
   local root = pool:GetRootFolder()
-  local folder = nil
   for _, sub in ipairs(listOf(root:GetSubFolderList())) do
-    if sub:GetName() == "LeaderKit" then folder = sub end
+    if sub:GetName() == "LeaderKit" then return sub end
   end
-  if not folder then folder = pool:AddSubFolder(root, "LeaderKit") end
+  return pool:AddSubFolder(root, "LeaderKit")
+end
+
+local clipCache = {}
+local function toneClip(level, toneSec, totalSec)
+  local name = string.format("LeaderKit_%s_1kHz_%ddBFS.wav", toneSec >= totalSec and ("tone" .. math.floor(totalSec) .. "s") or "pop", level)
+  if clipCache[name] then return clipCache[name] end
+  local path = cacheDir .. sep .. name
+  if not writeWav(path, level, toneSec, totalSec) then return nil end
+  local folder = mediaFolder()
   if folder then
     for _, clip in ipairs(listOf(folder:GetClipList())) do
-      if clip:GetName() == WAV_NAME then return clip end
+      if clip:GetName() == name then clipCache[name] = clip; return clip end
     end
   end
   local prev = pool:GetCurrentFolder()
   if folder then pool:SetCurrentFolder(folder) end
-  local items = pool:ImportMedia({ wavPath })
+  local items = pool:ImportMedia({ path })
   if prev then pool:SetCurrentFolder(prev) end
-  return listOf(items)[1]
+  clipCache[name] = listOf(items)[1]
+  return clipCache[name]
 end
 
 local popTrack = nil
@@ -451,94 +538,107 @@ local function ensurePopTrack()
   return popTrack
 end
 
--- Varianti di AppendToTimeline: la prima che produce 1 fotogramma esatto vince.
-local VARIANTS = {
-  { startFrame = 0, endFrame = 1, mediaType = 2 },
-  { startFrame = 0, endFrame = 0, mediaType = 2 },
-  { startFrame = 0, endFrame = 1 },
-  { startFrame = 0, endFrame = 0 },
-}
+-- Varianti di AppendToTimeline (endFrame = durata - 1 + extra): la prima che da' la durata esatta vince.
+local VARIANTS = { { extra = 1, mediaType = 2 }, { extra = 0, mediaType = 2 }, { extra = 1 }, { extra = 0 } }
 local goodVariant = nil
-local function placePop(frame, label)
-  local clip = popClip()
-  if not clip then warn("Tono di sync non importato (" .. wavPath .. ")"); return false end
+local audioOk, audioFail = 0, 0
+local function placeAudio(clip, frame, len, label)
+  if not clip then audioFail = audioFail + 1; bad(label .. ": file audio non creato (" .. cacheDir .. ")."); return false end
   local track = ensurePopTrack()
   local list = goodVariant and { goodVariant } or VARIANTS
   for _, v in ipairs(list) do
-    local info = { mediaPoolItem = clip, recordFrame = frame, trackIndex = track }
-    for k, val in pairs(v) do info[k] = val end
-    local res = pool:AppendToTimeline({ info })
-    if listOf(res)[1] then
-      local ok = true
-      for _, it in ipairs(listOf(res)) do
-        if it:GetStart() ~= frame or it:GetDuration() ~= 1 then ok = false end
+    local info = { mediaPoolItem = clip, recordFrame = frame, trackIndex = track, startFrame = 0,
+      endFrame = len - 1 + v.extra, mediaType = v.mediaType }
+    local placed = listOf(pool:AppendToTimeline({ info }))
+    if placed[1] then
+      local good = true
+      for _, it in ipairs(placed) do
+        if it:GetStart() ~= frame or it:GetDuration() ~= len then good = false end
       end
-      if ok then goodVariant = v; log(label .. " " .. framesToTc(frame, r)); return true end
-      tl:DeleteClips(listOf(res), false)
+      if good then goodVariant = v; audioOk = audioOk + 1; return true end
+      tl:DeleteClips(placed, false)
     end
   end
-  warn(label .. ": pop audio non posizionato (API AppendToTimeline). Marker aggiunto comunque.")
+  audioFail = audioFail + 1
+  bad(label .. ": audio non posizionato a " .. framesToTc(frame, r) .. " (AppendToTimeline). Il marker c'e' comunque.")
   return false
 end
 
-local function marker(frame, color, name, note, tag)
-  local ok = tl:AddMarker(frame - tl:GetStartFrame(), color, name, note, 1, PREFIX .. ":" .. tag)
-  if not ok then warn("Marker '" .. name .. "' non aggiunto a " .. framesToTc(frame, r)) end
+local function marker(frame, color, name, note, tag, duration)
+  local okm = tl:AddMarker(frame - tl:GetStartFrame(), color, name, note, duration or 1, PREFIX .. ":" .. tag)
+  if not okm then bad("Marker '" .. name .. "' non aggiunto a " .. framesToTc(frame, r) .. " (fotogramma gia' occupato?).") end
 end
 
--- 4) Testa: 2-pop (solo Cinema/DCP)
-local popTc = "—"
-if preset == 0 then
+local leaderStart = head:GetStart()
+local syncTc, popTc = "—", "—"
+if barsSec > 0 then
+  local lvl = P.bars_dbfs or -18
+  placeAudio(toneClip(lvl, 30, 30), leaderStart, math.floor(barsSec * n + 0.5), "Tono di line-up")
+  marker(leaderStart, "Purple", "BARS", string.format("Barre 100%% + tono 1 kHz %d dBFS", lvl), "bars")
+end
+local slateStart = leaderStart + math.floor(barsSec * n + 0.5)
+if slateSec > 0 then
+  marker(slateStart, "Purple", P.clock and "CLOCK" or "SLATE", (P.clock and "Clock/ident " or "Slate ") ..
+    framesToTc(slateStart, r) .. " (silenzio)", "slate")
+end
+if countFrom > 0 and P.pop then
   local pop = ffoa - 2 * n
   popTc = framesToTc(pop, r)
-  placePop(pop, "2-pop")
+  placeAudio(toneClip(popLevel, 0.25, 1), pop, 1, "2-pop")
   marker(pop, "Cyan", "2-POP", string.format("2-pop %s — 1 kHz %d dBFS", popTc, popLevel), "pop")
   if beepEach then
-    for d = countFrom, 3, -1 do placePop(ffoa - d * n, "Bip " .. d) end
+    for d = countFrom, 3, -1 do placeAudio(toneClip(popLevel, 0.25, 1), ffoa - d * n, 1, "Bip " .. d) end
   end
+end
+if P.sync_flash then
+  local before = math.floor(P.sync_flash.before_s * n + 0.5)
+  local sf = ffoa - before
+  syncTc = framesToTc(sf, r)
+  placeAudio(toneClip(P.sync_flash.dbfs or popLevel, 0.25, 1), sf, 1, "Sync")
+  marker(sf, "Cyan", "SYNC", "Sync " .. syncTc .. ": bianco + 1 fotogramma di tono", "sync")
 end
 marker(ffoa, "Blue", "FFOA", "First frame of action " .. framesToTc(ffoa, r), "ffoa")
 
--- 5) Coda + marker di programma
+-- ---------------------------------------------------------------- 5) contenitore, coda, marker
 if lfoa then
+  if slotFrames then
+    marker(ffoa + 1, "Green", "CONTENITORE", "Programma " .. slotLabel .. ": " .. framesToTc(ffoa, r) .. " → " ..
+      framesToTc(lfoa, r), "slot", math.max(1, slotFrames - 2))
+  end
   marker(lfoa, "Blue", "LFOA", "Last frame of action " .. framesToTc(lfoa, r), "lfoa")
-  if tailOn then
+  local contentPastEnd = lastContent and lastContent > lfoa
+  if tailOn and not contentPastEnd then
     local playhead = tl:GetCurrentTimecode()
     local tail, exact = insertExact(TAIL_NAME, lfoa + 1, tailLen)
     if playhead then tl:SetCurrentTimecode(playhead) end
     if tail then
-      if tail:GetStart() ~= lfoa + 1 then
-        warn("La coda e' stata inserita a " .. framesToTc(tail:GetStart(), r) .. " invece che a " .. framesToTc(lfoa + 1, r))
-      end
-      if not exact then
-        warn("La coda dura " .. framesToTc(tail:GetDuration(), r) .. " invece di " .. framesToTc(tailLen, r) .. ": allungala a mano.")
-      end
+      if tail:GetStart() ~= lfoa + 1 then bad("La coda e' stata inserita a " .. framesToTc(tail:GetStart(), r) .. " invece che a " .. framesToTc(lfoa + 1, r) .. ".") end
+      if not exact then bad("La coda dura " .. framesToTc(tail:GetDuration(), r) .. " invece di " .. framesToTc(tailLen, r) .. ": allungala a mano.") end
       local tlk = lkOf(tail)
-      set(tlk, "Preset", preset)
+      set(tlk, "TailPop", P.tail_pop and 1 or 0)
+      set(tlk, "TailFlash", P.tail_flash and 1 or 0)
+      set(tlk, "CardFrom", P.card_from or 0)
+      set(tlk, "CardTo", P.card_to or 0)
+      set(tlk, "CardText", P.card_text or "")
       set(tlk, "Info", "LFOA " .. framesToTc(lfoa, r) .. "  ·  DURATION " .. durTc)
       for _, k in ipairs(COLORS) do set(tlk, k, get(k, nil)) end
-      local tt = trackOf(tail)
-      if headTrack and tt and tt ~= headTrack then warn("La coda e' sulla traccia V" .. tt .. " invece di V" .. headTrack) end
-      log(string.format("Coda: %s → %s", framesToTc(tail:GetStart(), r),
-        framesToTc(tail:GetStart() + tail:GetDuration() - 1, r)))
-      if preset == 0 then
-        if tail:GetDuration() >= 2 * n then
-          local tp = lfoa + 2 * n
-          placePop(tp, "Tail pop")
-          marker(tp, "Cyan", "TAIL POP", "Tail pop " .. framesToTc(tp, r), "tailpop")
-        else
-          warn("Coda troppo corta per il tail pop a LFOA +2\"")
-        end
+      ok("Coda " .. framesToTc(tail:GetStart(), r) .. " → " .. framesToTc(tail:GetStart() + tail:GetDuration() - 1, r) .. ".")
+      if (P.tail_pop or P.tail_flash) and tail:GetDuration() >= 2 * n then
+        local tp = lfoa + 2 * n
+        placeAudio(toneClip(popLevel, 0.25, 1), tp, 1, "Tail pop")
+        marker(tp, "Cyan", P.tail_flash and "TAIL CLAP" or "TAIL POP", "Tail " .. framesToTc(tp, r), "tailpop")
       end
     else
-      warn("Non riesco a inserire il generatore '" .. TAIL_NAME .. "' (e' installato?)")
+      bad("Non riesco a inserire il generatore '" .. TAIL_NAME .. "': e' installato?")
     end
+  elseif tailOn and contentPastEnd then
+    bad("Coda non inserita: il montato va oltre la fine del contenitore (" .. framesToTc(lfoa, r) .. ").")
   end
-  if markersOn and markerEvery and markerEvery > 0 then
+  if markersOn and markerKind ~= "none" and markerEvery and markerEvery > 0 then
     local step = math.floor(markerEvery * 60 * n + 0.5)
     local k, frame = 1, ffoa + step
     while frame < lfoa do
-      if markerKind == 0 then
+      if markerKind == "reel" then
         marker(frame, "Red", "Fine rullo " .. k, string.format("Cambio rullo %d → %d a %s", k, k + 1, framesToTc(frame, r)), "reel:" .. k)
       else
         marker(frame, "Yellow", "Break " .. k, "Break " .. k .. " a " .. framesToTc(frame, r), "break:" .. k)
@@ -546,22 +646,39 @@ if lfoa then
       k = k + 1
       frame = frame + step
     end
-    log(string.format("Marker %s ogni %g': %d", markerKind == 0 and "fine rullo" or "break", markerEvery, k - 1))
+    ok(string.format("Marker %s ogni %g': %d.", markerKind == "reel" and "fine rullo" or "break", markerEvery, k - 1))
   end
 end
+if audioOk > 0 then ok(audioOk .. " clip audio posizionati sulla traccia '" .. POP_TRACK .. "'.") end
 
--- 6) Dati calcolati nella slate
-set(lk, "Duration", durTc)
+-- ---------------------------------------------------------------- 6) slate, guida, note
+local tokens = { ffoa = framesToTc(ffoa, r), lfoa = lfoa and framesToTc(lfoa, r) or "—",
+  ps = countFrom > 0 and framesToTc(ffoa - countFrom * n, r) or "—", sync = syncTc, pop = popTc }
+local lines = {}
+for _, l in ipairs(P.slate_lines or {}) do
+  if string.find(l, "{", 1, true) then
+    lines[#lines + 1] = (string.gsub(l, "{(%w+)}", function(k) return tokens[k] or "" end))
+  end
+end
 local info = "FFOA " .. framesToTc(ffoa, r)
-if preset == 0 then info = info .. "  ·  2-POP " .. popTc end
+if popTc ~= "—" then info = info .. "  ·  2-POP " .. popTc end
 if lfoa then info = info .. "  ·  LFOA " .. framesToTc(lfoa, r) end
 if r.df then info = info .. "  ·  DROP-FRAME" end
+if #lines > 0 then info = info .. "\n" .. table.concat(lines, "\n") end
+set(lk, "Duration", durTc)
 set(lk, "Info", info)
 
 local guide = "Start timeline " .. tl:GetStartTimecode() .. "\nLeader " .. framesToTc(head:GetStart(), r) ..
   " → programma da " .. framesToTc(ffoa, r) .. " (FFOA)"
-if preset == 0 then guide = guide .. "\n2-pop " .. popTc end
-if lfoa then guide = guide .. "\nLFOA " .. framesToTc(lfoa, r) .. " · coda fino a " .. framesToTc(lfoa + tailLen, r) end
+if popTc ~= "—" then guide = guide .. "\n2-pop " .. popTc end
+if syncTc ~= "—" then guide = guide .. "\nSync " .. syncTc end
+if lfoa then guide = guide .. "\nLFOA " .. framesToTc(lfoa, r) .. (tailOn and (" · coda fino a " .. framesToTc(lfoa + tailLen, r)) or "") end
+if slotFrames then guide = guide .. "\nContenitore " .. slotLabel end
 set(lk, "Guide", guide)
 
+log(string.format("Timeline %s — %s fps%s, %sx%s", tl:GetName(), rateLabel, r.df and " DF" or "", W, H))
+log(guide)
+report[#report + 1] = "\nCONTROLLI\n" .. table.concat(checks, "\n")
+if P.notes and #P.notes > 0 then report[#report + 1] = "\nNOTE DELLO STANDARD\n- " .. table.concat(P.notes, "\n- ") end
+warnings = {}   -- gia' elencati nei controlli
 show("LeaderKit — Genera")

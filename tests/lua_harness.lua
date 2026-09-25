@@ -22,6 +22,8 @@ local LK = { Preset = preset, CountFrom = cd, Reel = 1, Title = textval("Il film
   Director = textval("Regista"), Editor = textval("Montatore"), Colorist = textval("Colorista"),
   Version = textval("v1"), Date = textval("2026-09-25"), Duration = textval("00:01:00:00"),
   Info = textval("FFOA 01:00:08:00"), Note = textval("nota"), SlateSec = 8, GapSec = 2, TailSec = 8,
+  Custom = 0, BarsSec = 0, TailPop = tonumber(arg[8] or "1"), TailFlash = tonumber(arg[9] or "0"),
+  CardFrom = tonumber(arg[10] or "4"), CardTo = tonumber(arg[11] or "7"), CardText = textval("END OF PROGRAM"),
   TextRed = 1, TextGreen = 1, TextBlue = 1, BgRed = 0, BgGreen = 0, BgBlue = 0,
   AccentRed = 0.85, AccentGreen = 0.85, AccentBlue = 0.85 }
 local comp = { RenderStart = 0, RenderEnd = N - 1 }
