@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "id": "cinema_dcp",
+  "name": "Cinema / DCP",
+  "description": "Leader Universal da 8\" (countdown 8→3, Picture Start, 2-pop a FFOA −2\"), slate prima del Picture Start, tail leader da 8\" con tail pop simmetrico e card END OF PROGRAM. Rullo N: Picture Start N:00:00:00, FFOA N:00:08:00.",
+  "sources": [
+    "docs/industry-standards.md §A (SMPTE Universal Leader, Deluxe DCP v5.11: leader 8\" testa/coda, rulli a ora TC)",
+    "docs/industry-standards.md Recommendations, riga Cinema/DCP"
+  ],
+  "ffoa_tc": "01:00:08:00",
+  "ffoa_hour_per_reel": true,
+  "head": [
+    {"type": "slate", "start": "-18s", "duration": "8s"},
+    {"type": "countdown", "from": 8, "to": 3, "picture_start_frames": 1, "sweep": true},
+    {"type": "pop", "at": "-2s", "frames": 1, "video": "two", "tone_hz": 1000, "level_dbfs": -20}
+  ],
+  "tail_duration": "8s",
+  "tail": [
+    {"type": "pop", "at": "+2s", "frames": 1, "video": "two", "tone_hz": 1000, "level_dbfs": -20},
+    {"type": "card", "text": "END OF PROGRAM", "start": "+4s", "duration": "3s"}
+  ],
+  "markers": {
+    "ffoa_lfoa": {"enabled": true, "color": "Blue"},
+    "sync": {"enabled": true, "color": "Cyan"},
+    "interval": {"enabled": true, "kind": "reel", "every": "20m", "color": "Red"}
+  },
+  "slate": {
+    "heading": "LEADERKIT — CINEMA / DCP",
+    "fields": ["title", "director", "editor", "colorist", "date", "version", "duration", "fps", "resolution"],
+    "extra_lines": ["FFOA {ffoa_tc}  ·  2-POP {pop_tc}  ·  LFOA {lfoa_tc}"]
+  },
+  "checks": {
+    "warn_drop_frame": "Il digital cinema non supporta frequenze NTSC (23.976/29.97): per il DCP vanno convertite (docs/industry-standards.md §A).",
+    "expected_rates": ["24", "25", "30", "48", "50", "60"]
+  }
+}
