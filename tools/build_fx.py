@@ -66,9 +66,13 @@ class G(object):
     CREATOR = [("GlobalOut", "100000"), ("Width", "1920"), ("Height", "1080"),
                ("UseFrameFormatSettings", "1")]
 
-    def background(self, name, grey=0.0, mask=None, alpha=1.0):
-        ins = self.CREATOR + [("TopLeftRed", repr(grey)), ("TopLeftGreen", repr(grey)),
-                              ("TopLeftBlue", repr(grey)), ("TopLeftAlpha", repr(alpha))]
+    def background(self, name, grey=0.0, mask=None, alpha=1.0, color=None, scale=1.0):
+        if color:
+            rgb = [("expr", "LK.%s%s * %s" % (color, ch, scale)) for ch in ("Red", "Green", "Blue")]
+        else:
+            rgb = [repr(grey)] * 3
+        ins = self.CREATOR + [("TopLeftRed", rgb[0]), ("TopLeftGreen", rgb[1]),
+                              ("TopLeftBlue", rgb[2]), ("TopLeftAlpha", repr(alpha))]
         if mask:
             ins.append(("EffectMask", ("link", mask, "Mask")))
         return self._add(name, "Background", ins)
@@ -85,10 +89,11 @@ class G(object):
         return self._add(name, kind, ins)
 
     def text(self, name, styled, size, y=0.5, grey=1.0, style="Bold", spacing=None):
+        rgb = [("expr", "LK.Text%s * %s" % (ch, grey)) for ch in ("Red", "Green", "Blue")]
         ins = self.CREATOR + [
             ("Center", "{ 0.5, %s }" % y), ("Font", '"Open Sans"'), ("Style", lua_string(style)),
             ("Size", repr(size)), ("StyledText", styled),
-            ("Red1", repr(grey)), ("Green1", repr(grey)), ("Blue1", repr(grey)),
+            ("Red1", rgb[0]), ("Green1", rgb[1]), ("Blue1", rgb[2]),
             ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")]
         if spacing:
             ins.append(("LineSpacing", repr(spacing)))
@@ -137,6 +142,36 @@ def uc_check(name, label, default):
             % (name, default, lua_string(label)))
 
 
+def uc_color(prefix, label, group, default):
+    out = ""
+    for i, ch in enumerate(("Red", "Green", "Blue")):
+        out += ("\t\t\t\t\t\t%s%s = { LINKID_DataType = \"Number\", INPID_InputControl = \"ColorControl\", "
+                "LINKS_Name = %s, IC_ControlGroup = %d, IC_ControlID = %d, INP_Default = %s, "
+                "INP_MinScale = 0, INP_MaxScale = 1, },\n"
+                % (prefix, ch, lua_string(label), group, i, repr(default[i])))
+    return out
+
+
+COLOR_DEFAULTS = [("Text", "Colore testo", (1.0, 1.0, 1.0)), ("Bg", "Colore sfondo", (0.0, 0.0, 0.0)),
+                  ("Accent", "Colore grafica leader", (0.85, 0.85, 0.85))]
+
+
+def color_controls():
+    return "".join(uc_color(p, label, i + 1, d) for i, (p, label, d) in enumerate(COLOR_DEFAULTS))
+
+
+def color_values():
+    vals = []
+    for p, _, d in COLOR_DEFAULTS:
+        for ch, v in zip(("Red", "Green", "Blue"), d):
+            vals.append((p + ch, repr(v)))
+    return vals
+
+
+def color_inputs():
+    return [p + ch for p, _, _ in COLOR_DEFAULTS for ch in ("Red", "Green", "Blue")]
+
+
 def uc_label(name, label):
     return ("\t\t\t\t\t\t%s = { LINKID_DataType = \"Number\", INPID_InputControl = \"LabelControl\", "
             "LBLC_DropDownButton = false, INP_External = false, INP_Passive = true, LINKS_Name = %s, },\n"
@@ -156,17 +191,17 @@ def leader_stack(g, prefix, digit_expr, sweep_vis=None):
     g.mask(prefix + "RingI", "EllipseMask", repr(RING_D * 0.86), repr(RING_D * 0.86), border=repr(LINE_W))
     g.mask(prefix + "LineH", "RectangleMask", "1", repr(LINE_W))
     g.mask(prefix + "LineV", "RectangleMask", repr(LINE_W), ("expr", e("1 / ASPECT")))
-    g.background(prefix + "RingOBg", 0.85, prefix + "RingO", )
-    g.background(prefix + "RingIBg", 0.85, prefix + "RingI")
-    g.background(prefix + "LineHBg", 0.6, prefix + "LineH")
-    g.background(prefix + "LineVBg", 0.6, prefix + "LineV")
+    g.background(prefix + "RingOBg", mask=prefix + "RingO", color="Accent")
+    g.background(prefix + "RingIBg", mask=prefix + "RingI", color="Accent")
+    g.background(prefix + "LineHBg", mask=prefix + "LineH", color="Accent", scale=0.7)
+    g.background(prefix + "LineVBg", mask=prefix + "LineV", color="Accent", scale=0.7)
     top = g.merge(prefix + "M1", prefix + "RingOBg", prefix + "RingIBg")
     top = g.merge(prefix + "M2", top, prefix + "LineHBg")
     top = g.merge(prefix + "M3", top, prefix + "LineVBg")
     if sweep_vis:
         g.mask(prefix + "Arm", "RectangleMask", repr(LINE_W * 1.6), repr(r),
                center=("expr", e("Point(0.5, 0.5 + %s * ASPECT)" % (r / 2.0))))
-        g.background(prefix + "ArmBg", 0.95, prefix + "Arm")
+        g.background(prefix + "ArmBg", mask=prefix + "Arm", color="Accent")
         g.transform(prefix + "Sweep", prefix + "ArmBg",
                     e("-360 * math.fmod(CD * FPS - REM, FPS) / FPS"))
         top = g.merge(prefix + "M4", top, prefix + "Sweep", e(sweep_vis))
@@ -194,9 +229,10 @@ def engine(mode):
 
 
 HEAD_INPUTS = [
-    "SecPreset", "Preset", "Reel", "CountFrom",
-    "SecSlate", "Title", "Director", "Editor", "Colorist", "Version", "Date", "Duration", "Info",
-    "SecTimeline", "MarkersOn", "MarkerKind", "MarkerEvery", "TailOn", "Generate", "Remove",
+    "SecPreset", "Preset", "Reel", "CountFrom", "SlateSec", "GapSec", "TailSec",
+    "SecSlate", "Title", "Director", "Editor", "Colorist", "Version", "Date", "Note", "Duration", "Info",
+    "SecLook"] + color_inputs() + [
+    "SecTimeline", "MarkersOn", "MarkerKind", "MarkerEvery", "TailOn", "Generate", "Remove", "Guide",
 ]
 
 
@@ -206,71 +242,80 @@ def head():
           + uc_combo("Preset", "Preset", ["Cinema / DCP", "Spot RAI"])
           + uc_slider("Reel", "Rullo (FFOA a N:00:08:00)", 1, 23, 1)
           + uc_slider("CountFrom", "Countdown da", 3, 11, 8)
+          + uc_slider("SlateSec", "Durata slate (s)", 3, 30, 8)
+          + uc_slider("GapSec", "Nero dopo la slate (s)", 0, 5, 2)
+          + uc_slider("TailSec", "Durata coda (s)", 3, 15, 8)
           + uc_label("SecSlate", "Slate")
           + uc_text("Title", "Titolo") + uc_text("Director", "Regia")
           + uc_text("Editor", "Montaggio") + uc_text("Colorist", "Color")
           + uc_text("Version", "Versione") + uc_text("Date", "Data")
+          + uc_text("Note", "Note (riga libera)")
           + uc_text("Duration", "Durata (da Genera)", read_only=True)
           + uc_text("Info", "TC (da Genera)", read_only=True)
+          + uc_label("SecLook", "Aspetto") + color_controls()
           + uc_label("SecTimeline", "Timeline")
           + uc_check("MarkersOn", "Marker a intervalli", 1)
           + uc_combo("MarkerKind", "Tipo marker", ["Fine rullo", "Break"])
           + uc_slider("MarkerEvery", "Ogni (minuti)", 1, 60, 20, integer=False)
           + uc_check("TailOn", "Inserisci la coda", 1)
           + uc_button("Generate", "Genera sulla timeline", engine("generate"))
-          + uc_button("Remove", "Rimuovi elementi generati", engine("remove")))
-    g.controls([("Preset", "0"), ("Reel", "1"), ("CountFrom", "8"),
+          + uc_button("Remove", "Rimuovi elementi generati", engine("remove"))
+          + uc_text("Guide", "Guida timecode (da Genera)", lines=4, read_only=True))
+    g.controls([("Preset", "0"), ("Reel", "1"), ("CountFrom", "8"), ("SlateSec", "8"),
+                ("GapSec", "2"), ("TailSec", "8"), ("Note", '""'),
+                ("Guide", '"Metti il blocco dove inizia il leader e premi Genera"')] + color_values() + [
                 ("Title", '"TITOLO"'), ("Director", '""'), ("Editor", '""'),
                 ("Colorist", '""'), ("Version", '"v1"'), ("Date", '""'),
                 ("Duration", '"premi Genera"'), ("Info", '""'),
                 ("MarkersOn", "1"), ("MarkerKind", "0"), ("MarkerEvery", "20"), ("TailOn", "1")], uc)
 
-    g.background("Bg", 0.0)
+    g.background("Bg", color="Bg")
     # Slate
     g.text("SHeading", ("expr", 'Text(iif(LK.Preset == 0, "CINEMA / DCP", "SPOT RAI") .. "  ·  LEADERKIT")'),
            0.026, y=0.86, grey=0.65)
     g.text("STitle", ("expr", "string.upper(LK.Title.Value)"), 0.065, y=0.75)
     g.mask("SRule", "RectangleMask", "0.6", repr(LINE_W), center="{ 0.5, 0.665 }")
-    g.background("SRuleBg", 0.5, "SRule")
+    g.background("SRuleBg", mask="SRule", color="Accent", scale=0.6)
     details = ('"DIRECTOR   " .. LK.Director.Value .. "\\nEDITOR   " .. LK.Editor.Value'
                ' .. "\\nCOLORIST   " .. LK.Colorist.Value .. "\\nDATE   " .. LK.Date.Value'
                ' .. "\\nVERSION   " .. LK.Version.Value .. "\\nDURATION   " .. LK.Duration.Value'
                ' .. "\\nFRAME RATE   " .. string.format("%g fps", comp:GetPrefs("Comp.FrameFormat.Rate"))'
                ' .. "\\nRESOLUTION   " .. comp:GetPrefs("Comp.FrameFormat.Width") .. " x "'
-               ' .. comp:GetPrefs("Comp.FrameFormat.Height") .. "\\n\\n" .. LK.Info.Value'
+               ' .. comp:GetPrefs("Comp.FrameFormat.Height") .. "\\n" .. LK.Note.Value .. "\\n" .. LK.Info.Value'
                ' .. iif(LK.Preset == 1, "\\nLOUDNESS -23 LUFS +/-0,2  ·  MAX ST -18 LUFS  ·  TP -2 dBTP", "")')
     g.text("SDetails", ("expr", "Text(%s)" % details), 0.024, y=0.38, style="Regular", spacing=1.1)
     s = g.merge("SM1", "SHeading", "STitle")
     s = g.merge("SM2", s, "SRuleBg")
     s = g.merge("SM3", s, "SDetails")
-    top = g.merge("MSlate", "Bg", s, e("iif(LK.Preset == 0, iif(REM > (CD + 2) * FPS, 1, 0), iif(REM > 3 * FPS, 1, 0))"))
+    top = g.merge("MSlate", "Bg", s, e("iif(LK.Preset == 0, iif(REM > (CD + LK.GapSec) * FPS, 1, 0), iif(REM > 3 * FPS, 1, 0))"))
     # Leader (countdown + 2-pop)
     lead = leader_stack(g, "L", 'Text(iif(REM < CD * FPS and REM >= 2 * FPS, tostring(math.ceil(REM / FPS)), ""))',
                         sweep_vis="iif(REM < CD * FPS and REM > 2 * FPS, 1, 0)")
     top = g.merge("MLeader", top, lead, e("iif(LK.Preset == 0 and REM <= CD * FPS and REM >= 2 * FPS, 1, 0)"))
     g.text("PicStart", ("expr", 'Text("PICTURE\\nSTART")'), 0.075, spacing=1.0)
     top = g.merge("MPicStart", top, "PicStart", e("iif(LK.Preset == 0 and REM == CD * FPS, 1, 0)"))
-    # Avviso se il clip e' troppo corto per il preset
-    g.text("Warn", ("expr", e('Text("ALLUNGA IL CLIP: servono almeno " .. iif(LK.Preset == 0, CD, 8) .. " secondi")')),
+    # Prima di "Genera" (o se la durata non torna) indica la durata che il blocco avra'
+    need = "iif(LK.Preset == 0, LK.SlateSec + LK.GapSec + CD, LK.SlateSec + 3)"
+    g.text("Warn", ("expr", e('Text("Premi GENERA nell\'Inspector: il blocco diventa di " .. %s .. " secondi")' % need)),
            0.03, y=0.08, grey=1.0)
     top = g.merge("MWarn", top, "Warn",
-                  e("iif((comp.RenderEnd - comp.RenderStart + 1) < iif(LK.Preset == 0, CD, 8) * FPS, 1, 0)"))
+                  e("iif(math.abs((comp.RenderEnd - comp.RenderStart + 1) - %s * FPS) > 0.5, 1, 0)" % need))
     return group("LeaderKit Head", g, top, HEAD_INPUTS)
 
 
 def tail():
     g = G()
     uc = (uc_combo("Preset", "Preset", ["Cinema / DCP", "Spot RAI"])
-          + uc_text("Info", "Info (da Genera)"))
-    g.controls([("Preset", "0"), ("Info", '""')], uc)
-    g.background("Bg", 0.0)
+          + uc_text("Info", "Info (da Genera)") + color_controls())
+    g.controls([("Preset", "0"), ("Info", '""')] + color_values(), uc)
+    g.background("Bg", color="Bg")
     lead = leader_stack(g, "T", 'Text("2")')
     top = g.merge("MPop", "Bg", lead, e("iif(LK.Preset == 0 and ELAPSED == 2 * FPS - 1, 1, 0)"))
     g.text("CardText", ("expr", 'Text("END OF PROGRAM")'), 0.07)
     g.text("CardSub", ("expr", "Text(LK.Info.Value)"), 0.024, y=0.36, grey=0.7, style="Regular")
     card = g.merge("CM1", "CardText", "CardSub")
     top = g.merge("MCard", top, card, e("iif(LK.Preset == 0 and ELAPSED >= 3 * FPS, 1, 0)"))
-    return group("LeaderKit Tail", g, top, ["Preset", "Info"])
+    return group("LeaderKit Tail", g, top, ["Preset", "Info"] + color_inputs())
 
 
 def build():

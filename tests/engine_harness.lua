@@ -2,8 +2,8 @@
 -- fps, df, preset, head (secondi), program (secondi), variant (1-4: quale variante
 -- di AppendToTimeline produce 1 fotogramma), runs, usermarker, remove.
 local enginePath = arg[1]
-local opt = { fps = "24", df = "0", preset = "0", head = "18", program = "60", variant = "1",
-  runs = "1", usermarker = "0", remove = "0" }
+local opt = { fps = "24", df = "0", preset = "0", head = "5", progstart = "30", program = "60",
+  variant = "1", runs = "1", usermarker = "0", remove = "0", marks = "abs_incl" }
 for i = 2, #arg do local k, v = arg[i]:match("([^=]+)=(.*)"); opt[k] = v end
 local fps = tonumber(opt.fps)
 local nominal = math.floor(fps + 0.5)
@@ -56,14 +56,16 @@ local function newComp(tool) local c = { tool = tool }
   return c end
 
 local headTool = newTool()
-headTool.inputs = { Preset = tonumber(opt.preset), Reel = 1, CountFrom = 8, MarkersOn = 1, MarkerKind = 0,
-  MarkerEvery = 20, TailOn = 1 }
+headTool.inputs = { Preset = tonumber(opt.preset), Reel = 1, CountFrom = 8, SlateSec = 8, GapSec = 2,
+  TailSec = tonumber(opt.preset) == 0 and 8 or 3, MarkersOn = 1, MarkerKind = 0, MarkerEvery = 20, TailOn = 1,
+  Title = "Il film", TextRed = 0.5 }
 local head = setmetatable({ off = 0, dur = tonumber(opt.head) * nominal, name = "LeaderKit Head",
   comp = newComp(headTool) }, Item)
 table.insert(tracks.video[1].items, head)
 local progDur = math.floor(tonumber(opt.program) * nominal)
-table.insert(tracks.video[1].items, setmetatable({ off = head.dur, dur = progDur, name = "A001.mov" }, Item))
-table.insert(tracks.audio[1].items, setmetatable({ off = head.dur, dur = progDur, name = "A001.mov" }, Item))
+local progOff = math.floor(tonumber(opt.progstart) * nominal)
+table.insert(tracks.video[1].items, setmetatable({ off = progOff, dur = progDur, name = "A001.mov" }, Item))
+table.insert(tracks.audio[1].items, setmetatable({ off = progOff, dur = progDur, name = "A001.mov" }, Item))
 if opt.usermarker == "1" then markers[5] = { name = "nota utente", customData = "" } end
 
 local tl = {}
@@ -96,12 +98,32 @@ function tl:AddMarker(f, color, name, note, d, cd)
 end
 function tl:DeleteMarkerAtFrame(f) local had = markers[f] ~= nil; markers[f] = nil; return had end
 function tl:GetCurrentVideoItem() return head end
+function head_of() return head end
 function tl:GetCurrentTimecode() return playhead end
 function tl:SetCurrentTimecode(s) playhead = s; return true end
+local marks = nil
+function tl:SetMarkInOut(i, o)
+  if opt.marks == "none" then return false end
+  marks = { i, o }; return true
+end
+function tl:ClearMarkInOut() marks = nil; return true end
 function tl:InsertFusionGeneratorIntoTimeline(name)
-  local t = newTool(); t.inputs = { Preset = 0, Info = "" }
-  local it = setmetatable({ off = tcf(playhead) - tlStart, dur = 5 * nominal, name = name, comp = newComp(t) }, Item)
+  local t = newTool()
+  t.inputs = { Preset = 0, Info = "", CountFrom = 8, SlateSec = 8, GapSec = 2, TailSec = 8, MarkersOn = 1,
+    MarkerKind = 0, MarkerEvery = 20, TailOn = 1, Reel = 1 }
+  local off, dur = tcf(playhead) - tlStart, 5 * nominal
+  if marks then
+    -- convenzione simulata: in/out assoluti con out incluso (abs_incl) o relativi (rel_incl)
+    local base = (opt.marks == "rel_incl") and 0 or tlStart
+    off = marks[1] - base + ((opt.marks == "rel_incl") and 0 or 0)
+    dur = marks[2] - marks[1] + 1
+    if opt.marks == "rel_incl" and marks[1] > 1000000 then off, dur = -1, 5 * nominal end
+    if opt.marks == "abs_incl" and marks[1] < tlStart then off, dur = -1, 5 * nominal end
+    if off < 0 then off = tcf(playhead) - tlStart end
+  end
+  local it = setmetatable({ off = off, dur = dur, name = name, comp = newComp(t) }, Item)
   table.insert(tracks.video[1].items, it)
+  if name == "LeaderKit Head" then head = it; comp = it.comp end
   return it
 end
 
@@ -164,4 +186,10 @@ for _, it in ipairs(tracks.video[1].items) do
       " info=" .. tostring(it.comp.tool.inputs.Info))
   end
 end
-print("RESULT duration=" .. tostring(headTool.inputs.Duration))
+for _, it in ipairs(tracks.video[1].items) do
+  if it.name == "LeaderKit Head" then
+    print("RESULT head=" .. tc(it:GetStart()) .. "|" .. it:GetDuration() .. "|" .. tostring(it.comp.tool.inputs.Title))
+    print("RESULT duration=" .. tostring(it.comp.tool.inputs.Duration))
+    print("RESULT guide=" .. tostring(it.comp.tool.inputs.Guide):gsub("\n", " / "))
+  end
+end

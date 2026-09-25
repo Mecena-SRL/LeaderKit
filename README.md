@@ -5,20 +5,31 @@ pop, coda e marker di rullo/break, con preset per contesto (cinema/DCP, spot
 RAI, …). Tutto si adatta al **frame rate e alla risoluzione reali della
 timeline**. Valori di riferimento: [`docs/industry-standards.md`](docs/industry-standards.md).
 
-## v0.2 — generatori nella libreria Effetti (consigliato)
+## Generatori nella libreria Effetti (consigliato)
 
 Si installa solo con **`LeaderKit.drfx`** (doppio clic): niente installer, niente Python.
 
-1. Effetti › Generators › LeaderKit › **LeaderKit Head**: trascinalo prima del
-   programma, come un solido, e allungalo (Cinema/DCP: 18" = slate 8" + nero
-   2" + leader 8"; Spot RAI: almeno 8"). **La fine del clip è il FFOA.**
-2. Nell'Inspector: preset, rullo, countdown, campi slate, marker.
-3. **Genera sulla timeline**: imposta lo start TC (FFOA a 01:00:08:00 o N:00:08:00
-   per il rullo N; 10:00:00:00 per RAI), mette il 2-pop audio a FFOA −2", inserisce
-   **LeaderKit Tail** dopo il programma con il tail pop a LFOA +2", aggiunge i
-   marker FFOA/LFOA/pop/fine rullo (con `customData` "leaderkit:…") e scrive
-   durata e TC nella slate.
+1. Effetti › Generators › LeaderKit › **LeaderKit Head**: trascinalo dove deve
+   iniziare il leader (di solito a inizio timeline). La lunghezza non conta.
+2. Nell'Inspector: preset, rullo, countdown, durate (slate, nero, coda), campi
+   slate, nota libera, colori (testo, sfondo, grafica), marker.
+3. **Genera sulla timeline**:
+   - ricrea il blocco alla **lunghezza esatta del preset**, ancorato al punto in
+     cui l'hai messo (Cinema/DCP: slate + nero + countdown = 18" di default;
+     RAI: slate ≥5" + 3" di nero), ricopiando tutti i parametri;
+   - se il programma è troppo vicino, non tocca nulla e dice dove spostarlo;
+   - imposta lo start TC (FFOA a 01:00:08:00 o N:00:08:00 per il rullo N;
+     10:00:00:00 per RAI) e scrive nella **Guida timecode** dell'Inspector dove
+     cadono start, FFOA, 2-pop, LFOA e fine coda;
+   - mette il 2-pop audio a FFOA −2", inserisce **LeaderKit Tail** sulla stessa
+     traccia dopo il programma alla durata esatta, con tail pop a LFOA +2";
+   - aggiunge i marker FFOA/LFOA/pop/fine rullo con `customData` "leaderkit:…".
 4. **Rimuovi elementi generati** cancella solo marker, pop e coda di LeaderKit.
+
+La lunghezza esatta si ottiene impostando In/Out della timeline prima di
+inserire il blocco (l'API non permette di rifilare un clip esistente); il
+motore verifica il risultato e, se la versione di Resolve si comporta in
+modo diverso, lo segnala nel riepilogo.
 
 Il countdown non è pre-renderizzato: cifre, Picture Start, braccio e 2-pop sono
 calcolati a ogni fotogramma dal frame rate della timeline (48 fotogrammi a

@@ -145,51 +145,156 @@ end
 -- ---------------------------------------------------------------- generate
 local head = tl:GetCurrentVideoItem()
 if not head or head:GetName() ~= HEAD_NAME then
-  -- ripiego: il primo LeaderKit Head sulla timeline
   head = nil
   for _, e in ipairs(allItems("video")) do
     if e.item:GetName() == HEAD_NAME then head = e.item; break end
   end
 end
 if not head then
-  log("Non trovo il clip LeaderKit Head: mettici sopra la testina e riprova.")
+  log("Non trovo il blocco LeaderKit Head: mettici sopra la testina e riprova.")
   show("LeaderKit"); return
 end
 
 local preset = math.floor(get("Preset", 0) + 0.5)   -- 0 Cinema/DCP, 1 Spot RAI
 local reel = math.floor(get("Reel", 1) + 0.5)
 local countFrom = math.floor(get("CountFrom", 8) + 0.5)
+local slateSec = get("SlateSec", 8)
+local gapSec = get("GapSec", 2)
+local tailSec = get("TailSec", preset == 0 and 8 or 3)
 local markersOn = get("MarkersOn", preset == 0 and 1 or 0) > 0.5
 local markerKind = math.floor(get("MarkerKind", 0) + 0.5)   -- 0 rullo, 1 break
 local markerEvery = get("MarkerEvery", 20)
 local tailOn = get("TailOn", 1) > 0.5
 local n = r.nominal
+if preset == 1 then
+  if slateSec < 5 then warn("RAI chiede un ident di almeno 5\": uso 5\"."); slateSec = 5 end
+  gapSec = 3                                          -- RAI: 3" di nero prima dello spot
+  tailSec = math.max(tailSec, 3)                      -- RAI: almeno 3" di nero in coda
+end
+local headLen = math.floor(((preset == 0) and (slateSec + gapSec + countFrom) or (slateSec + gapSec)) * n + 0.5)
+local tailLen = math.floor(tailSec * n + 0.5)
+
+-- Parametri del pannello da ricopiare quando il blocco viene ricreato.
+local PARAMS = { "Preset", "Reel", "CountFrom", "SlateSec", "GapSec", "TailSec", "Title", "Director",
+  "Editor", "Colorist", "Version", "Date", "Note", "MarkersOn", "MarkerKind", "MarkerEvery", "TailOn",
+  "TextRed", "TextGreen", "TextBlue", "BgRed", "BgGreen", "BgBlue", "AccentRed", "AccentGreen", "AccentBlue" }
+local COLORS = { "TextRed", "TextGreen", "TextBlue", "BgRed", "BgGreen", "BgBlue", "AccentRed", "AccentGreen", "AccentBlue" }
 
 local nm, ni = cleanup()
 if nm + ni > 0 then log(string.format("Pulizia: tolti %d marker e %d clip della generazione precedente.", nm, ni)) end
 
--- 1) Start timecode: la fine del clip Head e' il FFOA del preset.
+local function trackOf(item)
+  for t = 1, tl:GetTrackCount("video") do
+    for _, it in pairs(tl:GetItemListInTrack("video", t) or {}) do
+      if it:GetStart() == item:GetStart() and it:GetName() == item:GetName() then return t end
+    end
+  end
+  return nil
+end
+
+-- Inserisce un generatore LeaderKit a [start, start+len) usando In/Out della timeline.
+-- Prova le convenzioni possibili dei marker (assoluti/relativi, out incluso/escluso)
+-- e tiene quella che produce la durata esatta.
+local markMode = nil
+local function insertExact(name, start, len)
+  local modes = markMode and { markMode } or {
+    { rel = false, incl = true }, { rel = true, incl = true },
+    { rel = false, incl = false }, { rel = true, incl = false } }
+  local last = nil
+  for _, m in ipairs(modes) do
+    local base = m.rel and tl:GetStartFrame() or 0
+    local inF, outF = start - base, start + len - base - (m.incl and 1 or 0)
+    pcall(function() tl:ClearMarkInOut("all") end)
+    local okMarks = false
+    pcall(function() okMarks = tl:SetMarkInOut(inF, outF, "all") end)
+    tl:SetCurrentTimecode(framesToTc(start, r))
+    local it = tl:InsertFusionGeneratorIntoTimeline(name)
+    pcall(function() tl:ClearMarkInOut("all") end)
+    if it then
+      if it:GetStart() == start and it:GetDuration() == len then markMode = m; return it, true end
+      last = it
+      if not okMarks then return it, false end        -- marker non supportati: inutile riprovare
+      tl:DeleteClips({ it }, false)
+      last = nil
+    end
+  end
+  if last then return last, false end
+  -- ultimo tentativo senza marker, alla durata predefinita
+  tl:SetCurrentTimecode(framesToTc(start, r))
+  local it = tl:InsertFusionGeneratorIntoTimeline(name)
+  return it, false
+end
+
+local function lkOf(item)
+  local ok, cmp = pcall(function() return item:GetFusionCompByIndex(1) end)
+  if ok then return findTool(cmp, "LK") end
+  return nil
+end
+
+-- 1) Blocco Head alla durata esatta, ancorato al suo punto di inizio.
+local S = head:GetStart()
+local headTrack = trackOf(head)
+local programFirst = nil
+for _, kind in ipairs({ "video", "audio" }) do
+  for _, e in ipairs(allItems(kind)) do
+    local st = e.item:GetStart()
+    if not isLeaderKit(e, kind) and st >= S and (not programFirst or st < programFirst) then programFirst = st end
+  end
+end
+local ffoa = S + headLen
+if programFirst and programFirst < ffoa then
+  local missing = ffoa - programFirst
+  log(string.format("Il leader %s dura %s: va da %s a %s (FFOA).", (preset == 0) and "Cinema/DCP" or "RAI",
+    framesToTc(headLen, r), framesToTc(S, r), framesToTc(ffoa - 1, r)))
+  log(string.format("Il programma inizia a %s: servono altri %s. Sposta il programma a %s (o piu' avanti) e premi di nuovo Genera.",
+    framesToTc(programFirst, r), framesToTc(missing, r), framesToTc(ffoa, r)))
+  set(lk, "Guide", "Sposta il programma a " .. framesToTc(ffoa, r) .. " (mancano " .. framesToTc(missing, r) .. ")")
+  show("LeaderKit — spazio insufficiente"); return
+end
+
+local panel = lk
+if head:GetDuration() ~= headLen then
+  local saved = {}
+  for _, k in ipairs(PARAMS) do saved[k] = get(k, nil) end
+  tl:DeleteClips({ head }, false)
+  local newHead, exact = insertExact(HEAD_NAME, S, headLen)
+  if not newHead then
+    warn("Non riesco a ricreare il blocco LeaderKit Head.")
+    show("LeaderKit"); return
+  end
+  head = newHead
+  pcall(function() local nc = head:GetFusionCompByIndex(1); if nc then c = nc end end)
+  panel = lkOf(head)
+  if panel then
+    for k, v in pairs(saved) do set(panel, k, v) end
+  else
+    warn("Parametri non ricopiati nel nuovo blocco (pannello non trovato).")
+  end
+  if exact then
+    log("Blocco Head allungato a " .. framesToTc(headLen, r) .. " da " .. framesToTc(S, r))
+  else
+    warn(string.format("Il blocco e' stato ricreato a %s invece di %s: questa versione di Resolve ignora In/Out. Allungalo a mano fino a %s.",
+      framesToTc(head:GetDuration(), r), framesToTc(headLen, r), framesToTc(ffoa, r)))
+  end
+  local t2 = trackOf(head)
+  if headTrack and t2 and t2 ~= headTrack then warn("Il blocco e' finito sulla traccia V" .. t2 .. " invece di V" .. headTrack) end
+end
+lk = panel or lk
+ffoa = head:GetStart() + head:GetDuration()
+
+-- 2) Start timecode: FFOA del preset.
 local ffoaTc = (preset == 0) and string.format("%02d:00:08:00", reel) or "10:00:00:00"
 local ffoaTarget = tcToFrames(ffoaTc, r)
-local offset = head:GetStart() + head:GetDuration() - tl:GetStartFrame()
-local newStart = ffoaTarget - offset
+local newStart = ffoaTarget - (ffoa - tl:GetStartFrame())
 if newStart < 0 then
-  warn("Il clip Head e' troppo lontano dall'inizio timeline per portare il FFOA a " .. framesToTc(ffoaTarget, r))
+  warn("Il blocco e' troppo lontano dall'inizio timeline per portare il FFOA a " .. ffoaTc)
 else
-  local ok = tl:SetStartTimecode(framesToTc(newStart, r))
-  if not ok then warn("SetStartTimecode non riuscito: start TC non modificato") end
+  if not tl:SetStartTimecode(framesToTc(newStart, r)) then warn("SetStartTimecode non riuscito") end
 end
-local ffoa = head:GetStart() + head:GetDuration()
+ffoa = head:GetStart() + head:GetDuration()
 log(string.format("Timeline %s — %s fps%s, %sx%s", tl:GetName(), tostring(r.fps), r.df and " DF" or "", W, H))
-log("FFOA " .. framesToTc(ffoa, r) .. "  (start timeline " .. tl:GetStartTimecode() .. ")")
-
-local headSec = head:GetDuration() / n
-if preset == 0 and head:GetDuration() < countFrom * n then
-  warn(string.format("Il clip Head dura %.1f\": servono almeno %d\" per il countdown (meglio %d\" con la slate).",
-    headSec, countFrom, countFrom + 10))
-elseif preset == 1 and head:GetDuration() < 8 * n then
-  warn(string.format("Il clip Head dura %.1f\": RAI chiede ident >= 5\" + 3\" di nero (almeno 8\").", headSec))
-end
+log("Leader " .. framesToTc(head:GetStart(), r) .. " → FFOA " .. framesToTc(ffoa, r) ..
+  "  (start timeline " .. tl:GetStartTimecode() .. ")")
 if preset == 0 and r.ntsc then
   warn("Il digital cinema non supporta frequenze NTSC (23.976/29.97): per il DCP vanno convertite.")
 end
@@ -197,22 +302,29 @@ if preset == 1 and (n ~= 25 or tostring(W) ~= "1920" or tostring(H) ~= "1080") t
   warn("RAI richiede 1920x1080 a 25 fps (1080i25).")
 end
 
--- 2) Programma: i clip dopo il FFOA che non sono LeaderKit.
-local lfoa = nil
+-- Programma: clip non LeaderKit dal FFOA in poi.
+local lfoa, first = nil, nil
 for _, kind in ipairs({ "video", "audio" }) do
   for _, e in ipairs(allItems(kind)) do
-    if not isLeaderKit(e, kind) and e.item:GetStart() >= ffoa then
-      local last = e.item:GetStart() + e.item:GetDuration() - 1
+    local st = e.item:GetStart()
+    if not isLeaderKit(e, kind) and st >= ffoa then
+      local last = st + e.item:GetDuration() - 1
       if not lfoa or last > lfoa then lfoa = last end
+      if not first or st < first then first = st end
     end
   end
 end
 local durTc = "—"
 if lfoa then
+  if first ~= ffoa then
+    warn("Il programma inizia a " .. framesToTc(first, r) .. ", non al FFOA " .. framesToTc(ffoa, r) ..
+      ": spostalo a " .. framesToTc(ffoa, r))
+  end
   durTc = framesToTc(lfoa - ffoa + 1, r)
   log("LFOA " .. framesToTc(lfoa, r) .. "  durata programma " .. durTc)
 else
-  warn("Nessun clip dopo il LeaderKit Head: coda, LFOA e marker di rullo non generati.")
+  warn("Nessun clip dopo il leader: metti il programma a " .. framesToTc(ffoa, r) ..
+    " e premi di nuovo Genera per coda, LFOA e marker.")
 end
 
 -- 3) Pop audio (WAV generato, 1 kHz -20 dBFS, rifilato a 1 fotogramma).
@@ -339,20 +451,23 @@ if lfoa then
   marker(lfoa, "Blue", "LFOA", "Last frame of action " .. framesToTc(lfoa, r), "lfoa")
   if tailOn then
     local playhead = tl:GetCurrentTimecode()
-    tl:SetCurrentTimecode(framesToTc(lfoa + 1, r))
-    local tail = tl:InsertFusionGeneratorIntoTimeline(TAIL_NAME)
+    local tail, exact = insertExact(TAIL_NAME, lfoa + 1, tailLen)
     if playhead then tl:SetCurrentTimecode(playhead) end
     if tail then
       if tail:GetStart() ~= lfoa + 1 then
         warn("La coda e' stata inserita a " .. framesToTc(tail:GetStart(), r) .. " invece che a " .. framesToTc(lfoa + 1, r))
       end
-      local tc = tail:GetFusionCompByIndex(1)
-      local tlk = findTool(tc, "LK")
+      if not exact then
+        warn("La coda dura " .. framesToTc(tail:GetDuration(), r) .. " invece di " .. framesToTc(tailLen, r) .. ": allungala a mano.")
+      end
+      local tlk = lkOf(tail)
       set(tlk, "Preset", preset)
       set(tlk, "Info", "LFOA " .. framesToTc(lfoa, r) .. "  ·  DURATION " .. durTc)
-      log(string.format("Coda: %s → %s (%d\"; allunga il clip per una coda piu' lunga)",
-        framesToTc(tail:GetStart(), r), framesToTc(tail:GetStart() + tail:GetDuration() - 1, r),
-        math.floor(tail:GetDuration() / n)))
+      for _, k in ipairs(COLORS) do set(tlk, k, get(k, nil)) end
+      local tt = trackOf(tail)
+      if headTrack and tt and tt ~= headTrack then warn("La coda e' sulla traccia V" .. tt .. " invece di V" .. headTrack) end
+      log(string.format("Coda: %s → %s", framesToTc(tail:GetStart(), r),
+        framesToTc(tail:GetStart() + tail:GetDuration() - 1, r)))
       if preset == 0 then
         if tail:GetDuration() >= 2 * n then
           local tp = lfoa + 2 * n
@@ -389,5 +504,11 @@ if preset == 0 then info = info .. "  ·  2-POP " .. popTc end
 if lfoa then info = info .. "  ·  LFOA " .. framesToTc(lfoa, r) end
 if r.df then info = info .. "  ·  DROP-FRAME" end
 set(lk, "Info", info)
+
+local guide = "Start timeline " .. tl:GetStartTimecode() .. "\nLeader " .. framesToTc(head:GetStart(), r) ..
+  " → programma da " .. framesToTc(ffoa, r) .. " (FFOA)"
+if preset == 0 then guide = guide .. "\n2-pop " .. popTc end
+if lfoa then guide = guide .. "\nLFOA " .. framesToTc(lfoa, r) .. " · coda fino a " .. framesToTc(lfoa + tailLen, r) end
+set(lk, "Guide", guide)
 
 show("LeaderKit — Genera")

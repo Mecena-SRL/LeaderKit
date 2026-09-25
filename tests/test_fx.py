@@ -84,9 +84,13 @@ def test_head_rai(built):
     assert "25 fps" in rows[0]["SDetails.StyledText"]
 
 
-def test_head_short_clip_warns(built):
+def test_head_length_hint(built):
+    # blocco appena trascinato (5"): mostra la durata che avra' dopo Genera
     rows = frames(os.path.join(built, "LeaderKit Head.setting"), 24, 1920, 1080, 120, 0)
     assert all(on(r, "MWarn.Blend") for r in rows)
+    assert "diventa di 18 secondi" in rows[0]["Warn.StyledText"]
+    rows = frames(os.path.join(built, "LeaderKit Head.setting"), 24, 1920, 1080, 18 * 24, 0)
+    assert not any(on(r, "MWarn.Blend") for r in rows)
 
 
 def test_slate_text(built):
@@ -122,38 +126,58 @@ def run_engine(**kw):
     return result, out.stdout.decode()
 
 
-@pytest.mark.parametrize("fps,df,variant", [("24", "0", 1), ("25", "0", 2), ("29.97", "1", 3)])
-def test_engine_cinema(fps, df, variant):
-    res, log = run_engine(fps=fps, df=df, preset=0, head=18, program=125, variant=variant)
+@pytest.mark.parametrize("fps,df,variant,marks", [("24", "0", 1, "abs_incl"), ("25", "0", 2, "rel_incl"),
+                                                   ("29.97", "1", 3, "abs_incl")])
+def test_engine_cinema(fps, df, variant, marks):
+    # blocco da 5" a inizio timeline, programma lasciato a 18" (spazio giusto)
+    res, log = run_engine(fps=fps, df=df, preset=0, head=5, progstart=18, program=125,
+                          variant=variant, marks=marks)
     sep = ";" if df == "1" else ":"
-    assert res["starttc"] == ["00:59:50%s00" % sep], log
+    nominal = {"24": 24, "25": 25, "29.97": 30}[fps]
+    assert res["starttc"][-1] == "00:59:50%s00" % sep, log
+    start, dur, title = res["head"][0].split("|")
+    assert start == "00:59:50%s00" % sep and int(dur) == 18 * nominal   # allungato da 5" a 18"
+    assert title == "Il film"                                         # parametri ricopiati
     markers = dict(m.split("|", 1) for m in res["marker"])
-    assert markers["FFOA"].startswith("01:00:08%s00" % sep)
-    assert markers["2-POP"].startswith("01:00:06%s00" % sep)
-    pops = res["pop"]
-    assert pops[0] == "01:00:06%s00|1" % sep, pops
-    assert len(pops) == 2                           # 2-pop + tail pop
-    assert "Fine rullo 1" not in markers            # 125" < 20'
-    assert res["tail"][0].startswith("preset=0"), res
+    assert markers["FFOA"] == "01:00:08%s00" % sep
+    assert markers["2-POP"] == "01:00:06%s00" % sep
+    assert res["pop"][0] == "01:00:06%s00|1" % sep and len(res["pop"]) == 2
+    assert "Fine rullo 1" not in markers
+    tail = res["tail"][0]
+    assert tail.startswith("preset=0")
+    assert "Coda: " in log and "allungala a mano" not in log
     # 125" nominali; in drop-frame 3750 fotogrammi si scrivono 00:02:05;04
     assert res["duration"] == (["00:02:05;04"] if df == "1" else ["00:02:05:00"])
+    assert "programma da 01:00:08%s00" % sep in res["guide"][0]
+
+
+def test_engine_not_enough_space():
+    res, log = run_engine(fps="24", df="0", preset=0, head=5, progstart=5, program=60)
+    assert "servono altri 00:00:13:00" in log
+    assert "Sposta il programma a 01:00:18:00" in log
+    assert "pop" not in res and "tail" not in res
+    assert res["head"][0].split("|")[1] == str(5 * 24)              # blocco non toccato
+
+
+def test_engine_marks_not_supported():
+    res, log = run_engine(fps="25", df="0", preset=0, head=5, progstart=20, program=60, marks="none")
+    assert "ignora In/Out" in log                                     # avviso onesto, nessun crash
 
 
 def test_engine_reels_and_regenerate():
-    res, log = run_engine(fps="24", df="0", preset=0, head=18, program=45 * 60, runs=2, usermarker=1)
+    res, log = run_engine(fps="24", df="0", preset=0, head=5, progstart=18, program=45 * 60,
+                          runs=2, usermarker=1)
     names = [m.split("|", 1)[0] for m in res["marker"]]
     assert names.count("Fine rullo 1") == 1 and names.count("Fine rullo 2") == 1
     assert names.count("FFOA") == 1 and "nota utente" in names
-    assert len(res["pop"]) == 2                    # rigenerato senza doppioni
+    assert len(res["pop"]) == 2 and len(res["tail"]) == 1            # rigenerato senza doppioni
+    assert len(res["head"]) == 1
 
 
 def test_engine_rai_and_remove():
-    res, log = run_engine(fps="25", df="0", preset=1, head=8, program=30, remove=1)
-    assert res["starttc"] == ["09:59:52:00"], log
+    # slate di default 8" (RAI chiede almeno 5") + 3" di nero = 11"
+    res, log = run_engine(fps="25", df="0", preset=1, head=5, progstart=11, program=30, remove=1)
+    assert res["starttc"][-1] == "09:59:49:00", log
+    assert res["head"][0].split("|")[1] == str(11 * 25)
     assert res.get("pop", []) == []
     assert res["after_remove_markers"] == ["0"]
-
-
-def test_engine_head_too_short():
-    res, log = run_engine(fps="24", df="0", preset=0, head=5, program=30)
-    assert "servono almeno 8" in log
