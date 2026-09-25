@@ -154,7 +154,7 @@ local function isLeaderKit(entry, kind)
   if kind == "audio" and tl:GetTrackName("audio", entry.track) == POP_TRACK then return true end
   if kind == "video" then
     local tn = tl:GetTrackName("video", entry.track)
-    if tn == LOGO_TRACK or tn == GFX_TRACK or tn == BURN_TRACK then return true end
+    if tn == LOGO_TRACK or tn == LOGO_TRACK .. " 2" or tn == GFX_TRACK or tn == BURN_TRACK then return true end
   end
   return false
 end
@@ -172,7 +172,8 @@ local function cleanup()
   end
   for _, e in ipairs(allItems("video")) do
     local tn = tl:GetTrackName("video", e.track)
-    if e.item:GetName() == TAIL_NAME or tn == LOGO_TRACK or tn == GFX_TRACK or tn == BURN_TRACK then
+    if e.item:GetName() == TAIL_NAME or tn == LOGO_TRACK or tn == LOGO_TRACK .. " 2" or tn == GFX_TRACK
+      or tn == BURN_TRACK then
       doomed[#doomed + 1] = e.item
     end
   end
@@ -1023,38 +1024,42 @@ if slateSec > 0 and get("GuidesSlate", 0) > 0.5 and (#frameLines > 0 or safeA or
   end
 end
 
-local logoPath = tostring(get("Logo", "") or "")
-logoPath = string.gsub(string.gsub(logoPath, "^%s+", ""), "%s+$", "")
-logoPath = string.gsub(logoPath, "^[\"']", ""); logoPath = string.gsub(logoPath, "[\"']$", "")
-if logoPath ~= "" then
-  local fh = io.open(logoPath, "rb")
-  if not fh then
-    bad("Logo non trovato: " .. logoPath .. " (sceglilo di nuovo con il selettore nella scheda Aspetto).")
-  else
-    fh:close()
-    local clip = importImage(logoPath)
-    if not clip then
-      bad("Resolve non ha importato il logo " .. logoPath .. ".")
+local LOGOS = { { "Logo", "LogoPos", "LogoSize", LOGO_TRACK, "Logo" },
+  { "Logo2", "LogoPos2", "LogoSize2", LOGO_TRACK .. " 2", "Secondo logo" } }
+for _, L in ipairs(LOGOS) do
+  local logoPath = tostring(get(L[1], "") or "")
+  logoPath = string.gsub(string.gsub(logoPath, "^%s+", ""), "%s+$", "")
+  logoPath = string.gsub(logoPath, "^[\"']", ""); logoPath = string.gsub(logoPath, "[\"']$", "")
+  if logoPath ~= "" then
+    local fh = io.open(logoPath, "rb")
+    if not fh then
+      bad(L[5] .. " non trovato: " .. logoPath .. " (sceglilo di nuovo con il selettore nella scheda Aspetto).")
     else
-      local size = (get("LogoSize", 20) or 20) / 100
-      local pos = math.floor(get("LogoPos", 0) + 0.5)
-      local mx, my = w * (0.5 - size / 2 - 0.04), h * (0.5 - size / 2 - 0.06)
-      local pan, tilt = ({ mx, -mx, mx, -mx, 0 })[pos + 1], ({ my, my, -my, -my, 0 })[pos + 1]
-      local track = videoTrack(LOGO_TRACK)
-      local spans = {}
-      local slateAt = head:GetStart() + math.floor(barsSec * n + 0.5)
-      if slateSec > 0 then spans[#spans + 1] = { slateAt, math.floor(slateSec * n + 0.5), "slate" } end
-      if get("LogoOnTail", 0) > 0.5 and lfoa and tailOn then spans[#spans + 1] = { lfoa + 1, tailLen, "coda" } end
-      if #spans == 0 then bad("Logo: lo standard non ha slate; attiva 'Anche sulla coda' per vederlo.") end
-      for _, sp in ipairs(spans) do
-        local pieces = placeStill(clip, sp[1], sp[2], track)
-        for _, it in ipairs(pieces) do
-          pcall(function()
-            it:SetProperty("ZoomX", size); it:SetProperty("ZoomY", size)
-            it:SetProperty("Pan", pan); it:SetProperty("Tilt", tilt)
-          end)
+      fh:close()
+      local clip = importImage(logoPath)
+      if not clip then
+        bad("Resolve non ha importato " .. logoPath .. ".")
+      else
+        local size = (get(L[3], 12) or 12) / 100
+        local pos = math.floor(get(L[2], L[1] == "Logo" and 0 or 1) + 0.5)
+        local mx, my = w * (0.5 - size / 2 - 0.035), h * (0.5 - size / 2 - 0.04)
+        local pan, tilt = ({ mx, -mx, mx, -mx, 0 })[pos + 1], ({ my, my, -my, -my, 0 })[pos + 1]
+        local track = videoTrack(L[4])
+        local spans = {}
+        local slateAt = head:GetStart() + math.floor(barsSec * n + 0.5)
+        if slateSec > 0 then spans[#spans + 1] = { slateAt, math.floor(slateSec * n + 0.5), "slate" } end
+        if get("LogoOnTail", 0) > 0.5 and lfoa and tailOn then spans[#spans + 1] = { lfoa + 1, tailLen, "coda" } end
+        if #spans == 0 then bad(L[5] .. ": lo standard non ha slate; attiva 'Anche sulla coda' per vederlo.") end
+        for _, sp in ipairs(spans) do
+          local pieces = placeStill(clip, sp[1], sp[2], track)
+          for _, it in ipairs(pieces) do
+            pcall(function()
+              it:SetProperty("ZoomX", size); it:SetProperty("ZoomY", size)
+              it:SetProperty("Pan", pan); it:SetProperty("Tilt", tilt)
+            end)
+          end
+          describe(pieces, L[5] .. " sulla " .. sp[3], L[4])
         end
-        describe(pieces, "Logo sulla " .. sp[3], LOGO_TRACK)
       end
     end
   end
@@ -1142,10 +1147,10 @@ do
     local okk, v = pcall(function() return project:GetSetting(key) end)
     if okk and v and tostring(v) ~= "" then parts[#parts + 1] = label .. " " .. tostring(v) end
   end
-  add("COLOR", "colorScienceMode")
-  add("TIMELINE", "colorSpaceTimeline")
-  add("OUTPUT", "colorSpaceOutput")
-  if #parts > 0 then set(lk, "ColorInfo", table.concat(parts, "  ·  ")) end
+  -- sulla slate va lo spazio colore di uscita (quello del file consegnato)
+  add("", "colorSpaceOutput")
+  if #parts == 0 then add("", "colorScienceMode") end
+  if #parts > 0 then set(lk, "ColorInfo", (string.gsub(parts[1], "^%s+", ""))) end
 end
 local tokens = { ffoa = framesToTc(ffoa, r), lfoa = lfoa and framesToTc(lfoa, r) or "—",
   ps = countFrom > 0 and framesToTc(ffoa - countFrom * n, r) or "—", sync = syncTc, pop = popTc }
