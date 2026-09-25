@@ -18,14 +18,21 @@ for name, tool in pairs(grp.Tools) do
 end
 setmetatable(_G, nil)
 local function textval(v) return { Value = v } end
-local LK = { Preset = preset, CountFrom = cd, Reel = 1, Title = textval("Il film"),
+-- Valori predefiniti letti dal pannello (nodo LK) del generatore, poi i valori del test.
+local LK = {}
+local lkTool = grp.Tools.LK
+for k, v in pairs((lkTool and lkTool.Inputs) or {}) do
+  if type(v) == "table" and v.Value ~= nil then
+    if type(v.Value) == "string" then LK[k] = textval(v.Value) else LK[k] = v.Value end
+  end
+end
+local over = { Preset = preset, CountFrom = cd, Reel = 1, Title = textval("Il film"),
   Director = textval("Regista"), Editor = textval("Montatore"), Colorist = textval("Colorista"),
   Version = textval("v1"), Date = textval("2026-09-25"), Duration = textval("00:01:00:00"),
-  Info = textval("FFOA 01:00:08:00"), Note = textval("nota"), SlateSec = 8, GapSec = 2, TailSec = 8,
-  Custom = 0, BarsSec = 0, TailPop = tonumber(arg[8] or "1"), TailFlash = tonumber(arg[9] or "0"),
-  CardFrom = tonumber(arg[10] or "4"), CardTo = tonumber(arg[11] or "7"), CardText = textval("END OF PROGRAM"),
-  TextRed = 1, TextGreen = 1, TextBlue = 1, BgRed = 0, BgGreen = 0, BgBlue = 0,
-  AccentRed = 0.85, AccentGreen = 0.85, AccentBlue = 0.85 }
+  Info = textval("FFOA 01:00:08:00"), Note = textval("nota"),
+  TailPop = tonumber(arg[8] or "1"), TailFlash = tonumber(arg[9] or "0"),
+  CardFrom = tonumber(arg[10] or "4"), CardTo = tonumber(arg[11] or "7"), CardText = textval("END OF PROGRAM") }
+for k, v in pairs(over) do LK[k] = v end
 local comp = { RenderStart = 0, RenderEnd = N - 1 }
 function comp:GetPrefs(k)
   if k == "Comp.FrameFormat.Rate" then return fps end

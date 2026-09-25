@@ -31,6 +31,20 @@ Si installa solo con **`LeaderKit-<versione>.drfx`** (doppio clic): niente insta
 | **LeaderKit Videoclip** | Videoclip / Live | libera, personalizzata | no (standard fisso) |
 | **LeaderKit Personalizzato** | Review / lavorazione, Cinema / DCP, Broadcast UK / DPP, Spot Italia — RAI, Streaming — Netflix / IMF, Videoclip / Live | libera, Spot 10", Spot 15", Spot 20", Spot 30", Spot 45", Spot 60", Spot 90", Spot 120", TV 13' (parte), TV 26' (slot mezz'ora), TV 45', TV 50', Documentario TV 52', Cortometraggio 15', Cortometraggio 30', Lungometraggio 90', Lungometraggio 100', Lungometraggio 120', personalizzata | sì |
 
+### Schede dell'Inspector
+
+| Scheda | Contenuto |
+|---|---|
+| **Progetto** | standard, rullo, durata del programma, marker, coda, **Genera** / **Rimuovi**, guida timecode e timecode calcolati |
+| **Produzione** | titolo, produzione, produttore, regia, cliente, agenzia, codice (Ad-ID/Clock/Auditel), episodio/rullo, lingua, data |
+| **Post** | montaggio, color, suono, VFX, versione, fase di lavorazione, stato color/suono/VFX/musica/titoli (TEMP/FINAL), note |
+| **Tecnico** | frame lines 1.33 / 1.66 / 1.78 / 1.85 / 2.00 / 2.20 / 2.39, safe area 93% e 90%, spazio colore (letto dal progetto), formato audio, livello pop |
+| **Aspetto** | colori di testo, sfondo e grafica; logo (file, posizione, dimensione, anche sulla coda) |
+| **Taratura** | strumenti sul countdown, ispirati al leader digitale SMPTE RP 428-6: stelle di fuoco negli angoli, mirino centrale, scala di grigi, patch RGBCMY, rampe B/N-R-G-B, verifica del blu (Wratten 47B), sfera sfumata per il contouring, bianco di picco, etichette fps/risoluzione |
+
+La slate mostra solo i campi compilati. Il logo viene inserito da Genera su
+una traccia "LeaderKit Logo" sopra la slate (e sulla coda, se richiesto).
+
 ### Standard inclusi
 
 Fonte dei valori: `docs/industry-standards.md` (sezione indicata in ogni

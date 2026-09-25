@@ -6,6 +6,7 @@ local MODE = LK_MODE or "generate"
 local PREFIX = "leaderkit"
 local POP_TRACK = "LeaderKit Pop"
 local TAIL_NAME = "LeaderKit Tail"
+local LOGO_TRACK = "LeaderKit Logo"
 HEAD_NAME = "LeaderKit Head"
 
 local report, warnings = {}, {}
@@ -148,6 +149,7 @@ local function isLeaderKit(entry, kind)
   if name == TAIL_NAME or name == HEAD_NAME then return true end
   if string.sub(name, 1, 10) == "LeaderKit_" then return true end
   if kind == "audio" and tl:GetTrackName("audio", entry.track) == POP_TRACK then return true end
+  if kind == "video" and tl:GetTrackName("video", entry.track) == LOGO_TRACK then return true end
   return false
 end
 
@@ -163,7 +165,9 @@ local function cleanup()
     if isLeaderKit(e, "audio") then doomed[#doomed + 1] = e.item end
   end
   for _, e in ipairs(allItems("video")) do
-    if e.item:GetName() == TAIL_NAME then doomed[#doomed + 1] = e.item end
+    if e.item:GetName() == TAIL_NAME or tl:GetTrackName("video", e.track) == LOGO_TRACK then
+      doomed[#doomed + 1] = e.item
+    end
   end
   if #doomed > 0 then tl:DeleteClips(doomed, false) end
   return nm, #doomed
@@ -240,10 +244,9 @@ if headLen < 1 then
   headLen = 1
 end
 
-local PARAMS = { "Preset", "Reel", "DurSel", "ProgramTC", "Custom", "BarsSec", "SlateSec", "GapSec",
-  "CountFrom", "TailSec", "Title", "Director", "Editor", "Colorist", "Version", "Date", "Note", "MarkersOn",
-  "MarkerKind", "MarkerEvery", "TailOn", "PopLevel", "BeepEach",
-  "TextRed", "TextGreen", "TextBlue", "BgRed", "BgGreen", "BgBlue", "AccentRed", "AccentGreen", "AccentBlue" }
+local PARAMS = LK_PARAMS or { "Preset", "Reel", "DurSel", "ProgramTC", "Title", "Director", "Editor",
+  "Colorist", "Version", "Date", "Note", "TextRed", "TextGreen", "TextBlue", "BgRed", "BgGreen", "BgBlue",
+  "AccentRed", "AccentGreen", "AccentBlue" }
 local COLORS = { "TextRed", "TextGreen", "TextBlue", "BgRed", "BgGreen", "BgBlue", "AccentRed", "AccentGreen", "AccentBlue" }
 
 local nm, ni = cleanup()
@@ -541,6 +544,22 @@ end
 local VARIANTS = { { extra = 1, mediaType = 2 }, { extra = 0, mediaType = 2 }, { extra = 1 }, { extra = 0 } }
 local goodVariant = nil
 local audioOk, audioFail = 0, 0
+local function placeOn(clip, frame, len, track, mediaType)
+  local list = goodVariant and { goodVariant } or VARIANTS
+  for _, v in ipairs(list) do
+    local info = { mediaPoolItem = clip, recordFrame = frame, trackIndex = track, startFrame = 0,
+      endFrame = len - 1 + v.extra, mediaType = v.mediaType and mediaType or nil }
+    local placed = listOf(pool:AppendToTimeline({ info }))
+    if placed[1] then
+      local good = placed[1]:GetStart() == frame and placed[1]:GetDuration() == len
+      if good then goodVariant = v; return placed[1] end
+      if placed[1]:GetStart() == frame and placed[1]:GetDuration() > 0 and mediaType == 1 then return placed[1] end
+      tl:DeleteClips(placed, false)
+    end
+  end
+  return nil
+end
+
 local function placeAudio(clip, frame, len, label)
   if not clip then audioFail = audioFail + 1; bad(label .. ": file audio non creato (" .. cacheDir .. ")."); return false end
   local track = ensurePopTrack()
@@ -651,7 +670,87 @@ end
 if audioOk == 1 then ok("1 clip audio posizionato sulla traccia '" .. POP_TRACK .. "'.")
 elseif audioOk > 1 then ok(audioOk .. " clip audio posizionati sulla traccia '" .. POP_TRACK .. "'.") end
 
+-- ---------------------------------------------------------------- 5b) logo
+local function importImage(path)
+  local folder = mediaFolder()
+  local name = string.match(path, "[^/\\]+$") or path
+  if folder then
+    for _, clip in ipairs(listOf(folder:GetClipList())) do
+      if clip:GetName() == name then return clip end
+    end
+  end
+  local prev = pool:GetCurrentFolder()
+  if folder then pool:SetCurrentFolder(folder) end
+  local items = pool:ImportMedia({ path })
+  if prev then pool:SetCurrentFolder(prev) end
+  return listOf(items)[1]
+end
+
+local function logoTrack()
+  for t = 1, tl:GetTrackCount("video") do
+    if tl:GetTrackName("video", t) == LOGO_TRACK then return t end
+  end
+  tl:AddTrack("video")
+  local t = tl:GetTrackCount("video")
+  tl:SetTrackName("video", t, LOGO_TRACK)
+  return t
+end
+
+local logoPath = tostring(get("Logo", "") or "")
+logoPath = string.gsub(string.gsub(logoPath, "^%s+", ""), "%s+$", "")
+logoPath = string.gsub(logoPath, "^[\"']", ""); logoPath = string.gsub(logoPath, "[\"']$", "")
+if logoPath ~= "" then
+  local fh = io.open(logoPath, "rb")
+  if not fh then
+    bad("Logo non trovato: " .. logoPath .. " (scrivi il percorso completo del file, es. /Users/nome/logo.png).")
+  else
+    fh:close()
+    local clip = importImage(logoPath)
+    if not clip then
+      bad("Resolve non ha importato il logo " .. logoPath .. ".")
+    else
+      local size = (get("LogoSize", 20) or 20) / 100
+      local pos = math.floor(get("LogoPos", 0) + 0.5)
+      local w, h = tonumber(W) or 1920, tonumber(H) or 1080
+      local mx, my = w * (0.5 - size / 2 - 0.04), h * (0.5 - size / 2 - 0.06)
+      local pan, tilt = ({ mx, -mx, mx, -mx, 0 })[pos + 1], ({ my, my, -my, -my, 0 })[pos + 1]
+      local track = logoTrack()
+      local spans = {}
+      if slateSec > 0 then spans[#spans + 1] = { slateStart, math.floor(slateSec * n + 0.5), "slate" } end
+      if get("LogoOnTail", 0) > 0.5 and lfoa and tailOn then spans[#spans + 1] = { lfoa + 1, tailLen, "coda" } end
+      for _, sp in ipairs(spans) do
+        local it = placeOn(clip, sp[1], sp[2], track, 1)
+        if it then
+          pcall(function()
+            it:SetProperty("ZoomX", size); it:SetProperty("ZoomY", size)
+            it:SetProperty("Pan", pan); it:SetProperty("Tilt", tilt)
+          end)
+          if it:GetDuration() ~= sp[2] then
+            bad("Il logo sulla " .. sp[3] .. " dura " .. framesToTc(it:GetDuration(), r) ..
+              ": allungalo a mano (le immagini fisse hanno la durata standard delle preferenze).")
+          else
+            ok("Logo sulla " .. sp[3] .. " (traccia '" .. LOGO_TRACK .. "').")
+          end
+        else
+          bad("Logo non posizionato sulla " .. sp[3] .. ".")
+        end
+      end
+    end
+  end
+end
+
 -- ---------------------------------------------------------------- 6) slate, guida, note
+do
+  local parts = {}
+  local function add(label, key)
+    local okk, v = pcall(function() return project:GetSetting(key) end)
+    if okk and v and tostring(v) ~= "" then parts[#parts + 1] = label .. " " .. tostring(v) end
+  end
+  add("COLOR", "colorScienceMode")
+  add("TIMELINE", "colorSpaceTimeline")
+  add("OUTPUT", "colorSpaceOutput")
+  if #parts > 0 then set(lk, "ColorInfo", table.concat(parts, "  ·  ")) end
+end
 local tokens = { ffoa = framesToTc(ffoa, r), lfoa = lfoa and framesToTc(lfoa, r) or "—",
   ps = countFrom > 0 and framesToTc(ffoa - countFrom * n, r) or "—", sync = syncTc, pop = popTc }
 local lines = {}

@@ -4,7 +4,7 @@
 local enginePath = arg[1]
 local opt = { fps = "24", df = "0", preset = "0", head = "5", progstart = "30", program = "60",
   variant = "1", runs = "1", usermarker = "0", remove = "0", marks = "abs_incl", beep = "0",
-  dursel = "0", programtc = "00:00:30:00", removecode = "" }
+  dursel = "0", programtc = "00:00:30:00", removecode = "", logo = "" }
 for i = 2, #arg do local k, v = arg[i]:match("([^=]+)=(.*)"); opt[k] = v end
 local fps = tonumber(opt.fps)
 local nominal = math.floor(fps + 0.5)
@@ -43,6 +43,7 @@ function Item:GetStart() return tlStart + self.off end
 function Item:GetDuration() return self.dur end
 function Item:GetName() return self.name end
 function Item:GetFusionCompByIndex() return self.comp end
+function Item:SetProperty(k, v) self.props = self.props or {}; self.props[k] = v; return true end
 
 local tracks = { video = { { name = "Video 1", items = {} } }, audio = { { name = "Audio 1", items = {} } } }
 local markers = {}
@@ -61,7 +62,8 @@ local headTool = newTool()
 headTool.inputs = { Preset = tonumber(opt.preset), Reel = 1, Custom = 0, BarsSec = 0, CountFrom = 8, SlateSec = 8,
   GapSec = 2, TailSec = 8, MarkersOn = 1, MarkerKind = 0, MarkerEvery = 0, TailOn = 1,
   DurSel = tonumber(opt.dursel), ProgramTC = opt.programtc,
-  Title = "Il film", TextRed = 0.5, BeepEach = tonumber(opt.beep), PopLevel = 0 }
+  Title = "Il film", TextRed = 0.5, BeepEach = tonumber(opt.beep), PopLevel = 0,
+  Logo = opt.logo, LogoPos = 0, LogoSize = 20, LogoOnTail = 1 }
 local head = setmetatable({ off = 0, dur = tonumber(opt.head) * nominal, name = "LeaderKit Head",
   comp = newComp(headTool) }, Item)
 table.insert(tracks.video[1].items, head)
@@ -159,7 +161,11 @@ function pool:AppendToTimeline(infos)
   return counted({ it })
 end
 
-local project = { GetCurrentTimeline = function() return tl end, GetMediaPool = function() return pool end }
+local project = { GetCurrentTimeline = function() return tl end, GetMediaPool = function() return pool end,
+  GetSetting = function(_, k)
+    return ({ colorScienceMode = "davinciYRGBColorManagedv2", colorSpaceTimeline = "DaVinci WG/Intermediate",
+      colorSpaceOutput = "Rec.709 Gamma 2.4" })[k]
+  end }
 local resolveObj = { GetProjectManager = function() return { GetCurrentProject = function() return project end } end }
 
 -- globali attesi dal motore
@@ -190,6 +196,13 @@ for _, t in ipairs(tracks.audio) do
     for _, it in ipairs(t.items) do print("RESULT pop=" .. tc(it:GetStart()) .. "|" .. it:GetDuration()) end
   end
 end
+for _, t in ipairs(tracks.video) do
+  if t.name == "LeaderKit Logo" then
+    for _, it in ipairs(t.items) do
+      print("RESULT logo=" .. tc(it:GetStart()) .. "|" .. it:GetDuration() .. "|" .. tostring((it.props or {}).ZoomX))
+    end
+  end
+end
 for _, it in ipairs(tracks.video[1].items) do
   if it.name == "LeaderKit Tail" then
     local ti = it.comp.tool.inputs
@@ -201,6 +214,7 @@ for _, it in ipairs(tracks.video[1].items) do
   if it.name == "LeaderKit Head" then
     print("RESULT head=" .. tc(it:GetStart()) .. "|" .. it:GetDuration() .. "|" .. tostring(it.comp.tool.inputs.Title))
     print("RESULT duration=" .. tostring(it.comp.tool.inputs.Duration))
+    print("RESULT colorinfo=" .. tostring(it.comp.tool.inputs.ColorInfo))
     print("RESULT info=" .. tostring(it.comp.tool.inputs.Info):gsub("\n", " / "))
     print("RESULT guide=" .. tostring(it.comp.tool.inputs.Guide):gsub("\n", " / "))
   end

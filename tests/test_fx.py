@@ -325,3 +325,50 @@ def test_spot_empty_timeline_container(code):
     assert m["FFOA"][0] == "10:00:00:00" and m["LFOA"][0] == "10:00:29:24"
     assert m["CONTENITORE"][1] > 700
     assert "Contenitore vuoto" in log and "dur=75" in res["tail"][0]
+
+
+def test_slate_only_filled_fields(built):
+    rows = frames(HEAD(built), 24, 1920, 1080, 18 * 24, idx("cinema", "cinema_dcp"))
+    d = rows[0]["SDetails.StyledText"]
+    assert "DIRECTOR   Regista" in d and "EDITOR   Montatore" in d
+    assert "PRODUCER" not in d and "CLIENT" not in d and "PHASE" not in d
+
+
+def test_calibration_only_on_countdown(built):
+    n = 18 * 24
+    rows = frames(HEAD(built), 24, 1920, 1080, n, idx("cinema", "cinema_dcp"))
+    for r in rows:
+        rem = n - r["t"]
+        leader = 2 * 24 <= rem <= 8 * 24
+        assert on(r, "MCal.Blend") == leader
+        assert on(r, "MGuides.Blend") == leader            # frame lines sul countdown
+    r0 = rows[-100]
+    assert on(r0, "FL185X.Blend") and on(r0, "FL239X.Blend") and not on(r0, "FL133X.Blend")
+    assert r0["CalLab.StyledText"] == "24/SEC   2K / HD"
+    # frame line 2.39 su 16:9: larghezza piena, altezza 1/2.39
+    assert r0["FL239M.Width"] == "1" and r0["FL239M.Height"].startswith("0.418")
+    # 1.33 su 16:9: altezza piena, larghezza 1.33/1.78
+    assert r0["FL133M.Width"].startswith("0.75")
+
+
+def test_inspector_pages(built):
+    text = open(HEAD(built, "cinema")).read()
+    for page in ("Progetto", "Produzione", "Post", "Tecnico", "Aspetto", "Taratura"):
+        assert 'Page = "%s"' % page in text and 'ICS_ControlPage = "%s"' % page in text
+    import re
+    inst = re.findall(r"InstanceInput \{[^}]*\}", text)
+    assert inst and all("Page = " in i for i in inst)
+
+
+def test_engine_logo_and_colorinfo(code, tmp_path):
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(b"\x89PNG fake")
+    res, log = run_engine(code, fps="24", df="0", preset="cinema_dcp", head=5, progstart=18, program=60,
+                          logo=str(logo))
+    logos = res["logo"]
+    assert logos[0] == "00:59:50:00|192|0.2"                 # sopra la slate, 8"
+    assert len(logos) == 2                                    # anche sulla coda
+    assert "Rec.709 Gamma 2.4" in res["colorinfo"][0]
+    res, log = run_engine(code, fps="24", df="0", preset="cinema_dcp", head=5, progstart=18, program=60,
+                          logo="/non/esiste.png")
+    assert "Logo non trovato" in log

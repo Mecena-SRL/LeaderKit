@@ -14,6 +14,7 @@ comp:GetPrefs / comp.RenderStart / comp.RenderEnd / time.
 """
 
 import os
+import re
 import sys
 import zipfile
 
@@ -221,13 +222,18 @@ def leader_stack(g, prefix, digit_expr, sweep_vis=None, cd=CD):
 
 
 def group(name, g, output, inputs):
+    """inputs: lista di nomi o di (nome, scheda dell'Inspector)."""
     gid = "".join(ch for ch in name if ch.isalnum())
-    def inst(i, src):
+
+    def inst(i, item):
+        src, page = item if isinstance(item, tuple) else (item, None)
         grp = control_group(src)
         extra = (" ControlGroup = %d," % grp) if grp else ""
+        if page:
+            extra += " Page = %s," % lua_string(page)
         return ("\t\t\t\tInput%d = InstanceInput { SourceOp = \"LK\", Source = %s,%s },"
                 % (i, lua_string(src), extra))
-    ins = "\n".join(inst(i, src) for i, src in enumerate(inputs, 1))
+    ins = "\n".join(inst(i, item) for i, item in enumerate(inputs, 1))
     return ("{\n\tTools = ordered() {\n\t\t%s = GroupOperator {\n\t\t\tCtrlWZoom = false,\n"
             "\t\t\tInputs = ordered() {\n%s\n\t\t\t},\n"
             "\t\t\tOutputs = {\n\t\t\t\tMainOutput1 = InstanceOutput { SourceOp = %s, Source = \"Output\", },\n\t\t\t},\n"
@@ -236,6 +242,11 @@ def group(name, g, output, inputs):
             "PipeStyle = \"Direct\", Scale = 1, Offset = { 0, 0 } },\n"
             "\t\t\tTools = ordered() {\n%s\t\t\t},\n\t\t},\n\t},\n\tActiveTool = %s\n}\n"
             % (gid, ins, lua_string(output), "".join(g.tools), lua_string(gid)))
+
+
+def on_page(page, controls_text):
+    """Mette i controlli (testo UserControls) nella scheda indicata."""
+    return re.sub(r"LINKS_Name = ", 'ICS_ControlPage = %s, LINKS_Name = ' % lua_string(page), controls_text)
 
 
 def family_tables(std, family):
@@ -264,6 +275,7 @@ def engine(mode, std=None, family=None):
             + "LK_PRESETS = %s\n" % lua_literal(presets)
             + "LK_DURATIONS = %s\n" % lua_literal(durations)
             + "LK_DUR_DEFAULT = %d\n" % family.get("default_duration", 0)
+            + "LK_PARAMS = %s\n" % lua_literal(param_names(family))
             + "local function __leaderkit_main()\n" + body + "\nend\n"
             + "local __ok, __err = xpcall(__leaderkit_main, debug and debug.traceback or tostring)\n"
             + "if not __ok then\n"
@@ -327,24 +339,218 @@ def field(presets, key, custom=False):
     return pv(presets, key)
 
 
+# ---------------------------------------------------------------- schede e campi
+
+PAGES = ["Progetto", "Produzione", "Post", "Tecnico", "Aspetto", "Taratura"]
+
+PRODUCTION_FIELDS = [("Title", "Titolo", None), ("Production", "Produzione", "PRODUCTION"),
+                     ("Producer", "Produttore", "PRODUCER"), ("Director", "Regia", "DIRECTOR"),
+                     ("Client", "Cliente / inserzionista", "CLIENT"), ("Agency", "Agenzia", "AGENCY"),
+                     ("Code", "Codice (Ad-ID / Clock / Auditel)", "CODE"),
+                     ("Episode", "Episodio / rullo", "EPISODE"), ("Language", "Lingua / versione", "LANGUAGE"),
+                     ("Date", "Data", "DATE")]
+POST_FIELDS = [("Editor", "Montaggio", "EDITOR"), ("Colorist", "Color", "COLORIST"),
+               ("Sound", "Suono / mix", "SOUND"), ("VFXBy", "VFX", "VFX"), ("Version", "Versione", "VERSION")]
+PHASES = ["—", "OFFLINE", "ONLINE / CONFORM", "GRADING", "MIX", "MASTER", "CONSEGNA"]
+STATUSES = [("StColor", "Stato color", "COLOR"), ("StSound", "Stato suono", "SOUND"),
+            ("StVFX", "Stato VFX", "VFX"), ("StMusic", "Stato musica", "MUSIC"), ("StTitles", "Stato titoli", "TITLES")]
+STATUS_VALUES = ["—", "TEMP", "FINAL"]
+FRAMELINES = [("FL133", "1.33", 4.0 / 3.0), ("FL166", "1.66", 1.66), ("FL178", "1.78", 16.0 / 9.0),
+              ("FL185", "1.85", 1.85), ("FL200", "2.00", 2.0), ("FL220", "2.20", 2.2), ("FL239", "2.39", 2.39)]
+CALIBRATION = [("CalStars", "Stelle di fuoco negli angoli", 1), ("CalCenter", "Mirino centrale", 1),
+               ("CalGrey", "Scala di grigi", 1), ("CalColor", "Patch di colore RGBCMY", 1),
+               ("CalRamps", "Rampe B/N, R, G, B", 1), ("CalBlue", "Verifica blu (filtro Wratten 47B)", 1),
+               ("CalContour", "Sfera sfumata (contouring)", 1), ("CalPeak", "Bianco di picco", 1),
+               ("CalLabels", "Etichette fps / risoluzione", 1)]
+LOGO_POS = ["In alto a destra", "In alto a sinistra", "In basso a destra", "In basso a sinistra", "Al centro"]
+
+
+def param_names(family):
+    """Parametri del pannello da ricopiare quando Genera ricrea il blocco."""
+    skip = ("Generate", "Remove", "Guide", "Duration", "Info", "ColorInfo")
+    return [src for src, _ in head_inputs(family, True) if not src.startswith("Sec") and src not in skip]
+
+
 def head_inputs(family, has_pop=True):
     durs = family["durations"]
-    out = ["SecPreset", "Preset"]
+    out = [("SecPreset", "Progetto"), ("Preset", "Progetto")]
     if family.get("reel"):
-        out.append("Reel")
-    out.append("DurSel")
+        out.append(("Reel", "Progetto"))
+    out.append(("DurSel", "Progetto"))
     if "custom" in durs:
-        out.append("ProgramTC")
+        out.append(("ProgramTC", "Progetto"))
     if family.get("custom_leader"):
-        out += ["Custom", "BarsSec", "SlateSec", "GapSec", "CountFrom", "TailSec"]
-    out += ["SecSlate", "Title", "Director", "Editor", "Colorist", "Version", "Date", "Note", "Duration", "Info",
-            "SecLook"] + color_inputs() + ["SecAudio"] + (["PopLevel", "BeepEach"] if has_pop else []) + ["SecTimeline"]
+        out += [(x, "Progetto") for x in ("Custom", "BarsSec", "SlateSec", "GapSec", "CountFrom", "TailSec")]
     if family.get("markers"):
-        out += ["MarkersOn", "MarkerEvery"]
+        out += [("MarkersOn", "Progetto"), ("MarkerEvery", "Progetto")]
         if len(family["markers"]) > 1:
-            out.append("MarkerKind")
-    out += ["TailOn", "Generate", "Remove", "Guide"]
+            out.append(("MarkerKind", "Progetto"))
+    out += [(x, "Progetto") for x in ("TailOn", "Generate", "Remove", "Guide", "Duration", "Info")]
+    out += [(f, "Produzione") for f, _, _ in PRODUCTION_FIELDS]
+    out += [(f, "Post") for f, _, _ in POST_FIELDS] + [("Phase", "Post")]
+    out += [(f, "Post") for f, _, _ in STATUSES] + [("Note", "Post")]
+    out += [(x, "Tecnico") for x in ("SecGuides", "Guides", "GuidesSlate")] + [(f, "Tecnico") for f, _, _ in FRAMELINES]
+    out += [(x, "Tecnico") for x in ("SafeAction", "SafeTitle", "SecTech", "ColorInfo", "AudioFormat", "SecAudio")]
+    if has_pop:
+        out += [("PopLevel", "Tecnico"), ("BeepEach", "Tecnico")]
+    out += [("SecLook", "Aspetto")] + [(c, "Aspetto") for c in color_inputs()]
+    out += [(x, "Aspetto") for x in ("SecLogo", "Logo", "LogoPos", "LogoSize", "LogoOnTail")]
+    out += [("CalOn", "Taratura")] + [(f, "Taratura") for f, _, _ in CALIBRATION]
     return out
+
+
+def rect(g, name, cx, cy, w, hfrac, color=None, rgb=None, border=None):
+    """Rettangolo: w in frazione di larghezza, hfrac in frazione di altezza, centro (cx, cy)."""
+    g.mask(name + "M", "RectangleMask", repr(w), ("expr", e("%s / ASPECT" % repr(hfrac))),
+           center="{ %s, %s }" % (repr(cx), repr(cy)), border=border)
+    if rgb is not None:
+        return g._add(name, "Background", G.CREATOR + [
+            ("TopLeftRed", repr(float(rgb[0]))), ("TopLeftGreen", repr(float(rgb[1]))),
+            ("TopLeftBlue", repr(float(rgb[2]))), ("TopLeftAlpha", "1.0"),
+            ("EffectMask", ("link", name + "M", "Mask"))])
+    return g.background(name, mask=name + "M", color=color or "Accent")
+
+
+def chain(g, prefix, names):
+    top = names[0]
+    for i, n_ in enumerate(names[1:]):
+        top = g.merge("%s%d" % (prefix, i), top, n_)
+    return top
+
+
+def transparent(g, name):
+    return g._add(name, "Background", G.CREATOR + [("TopLeftRed", "0"), ("TopLeftGreen", "0"),
+                                                  ("TopLeftBlue", "0"), ("TopLeftAlpha", "0")])
+
+
+def layer(g, base, fg, name, blend):
+    return g.merge(name, base, fg, blend)
+
+
+def calibration_stack(g):
+    """Strumenti di taratura del leader digitale (ispirati a SMPTE RP 428-6)."""
+    top = transparent(g, "CalBase")
+    # stelle di fuoco: 12 raggi, poi copiate nei 4 angoli
+    prev = None
+    for k in range(12):
+        nm = "StarR%d" % k
+        ins = [("Filter", 'FuID { "Fast Gaussian" }'), ("SoftEdge", "0"), ("MaskWidth", "1920"),
+               ("MaskHeight", "1080"), ("PixelAspect", "{ 1, 1 }"), ("UseFrameFormatSettings", "1"),
+               ("ClippingMode", 'FuID { "None" }'), ("Width", "0.0022"), ("Height", "0.075"),
+               ("Angle", repr(k * 15.0))]
+        if prev:
+            ins.append(("EffectMask", ("link", prev, "Mask")))
+        g._add(nm, "RectangleMask", ins)
+        prev = nm
+    g.background("StarBg", mask=prev, color="Text", scale=0.9)
+    stars = None
+    for i, (x, y) in enumerate([(0.05, 0.88), (0.95, 0.88), (0.05, 0.12), (0.95, 0.12)]):
+        t = g._add("StarT%d" % i, "Transform", [("Input", ("link", "StarBg", "Output")),
+                                               ("Center", "{ %s, %s }" % (x, y))])
+        stars = t if stars is None else g.merge("StarsM%d" % i, stars, t)
+    top = layer(g, top, stars, "CalL1", "iif(LK.CalStars > 0.5, 1, 0)")
+    # mirino centrale
+    c1 = rect(g, "CtrBox", 0.5, 0.5, 0.03, 0.053, color="Accent", border=repr(LINE_W))
+    c2 = rect(g, "CtrIn", 0.5, 0.5, 0.012, 0.021, color="Accent", border=repr(LINE_W))
+    top = layer(g, top, g.merge("CtrM", c1, c2), "CalL2", "iif(LK.CalCenter > 0.5, 1, 0)")
+    # scala di grigi (11 gradini)
+    greys = [rect(g, "Grey%d" % i, 0.735 + i * 0.02, 0.66, 0.02, 0.05, rgb=(i / 10.0,) * 3) for i in range(11)]
+    top = layer(g, top, chain(g, "GreyM", greys), "CalL3", "iif(LK.CalGrey > 0.5, 1, 0)")
+    # patch di colore
+    cols = [(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0), (0, 1, 1), (1, 0, 1)]
+    patches = [rect(g, "Col%d" % i, 0.75 + i * 0.037, 0.52, 0.035, 0.07, rgb=c) for i, c in enumerate(cols)]
+    top = layer(g, top, chain(g, "ColM", patches), "CalL4", "iif(LK.CalColor > 0.5, 1, 0)")
+    # rampe (Background orizzontale nero -> colore)
+    ramps = []
+    for i, c in enumerate([(1, 1, 1), (1, 0, 0), (0, 1, 0), (0, 0, 1)]):
+        nm = "Ramp%d" % i
+        g.mask(nm + "M", "RectangleMask", "0.22", ("expr", e("0.045 / ASPECT")),
+               center="{ 0.155, %s }" % repr(0.66 - i * 0.055))
+        g._add(nm, "Background", G.CREATOR + [
+            ("Type", 'FuID { "Horizontal" }'),
+            ("TopLeftRed", "0"), ("TopLeftGreen", "0"), ("TopLeftBlue", "0"), ("TopLeftAlpha", "1"),
+            ("TopRightRed", repr(float(c[0]))), ("TopRightGreen", repr(float(c[1]))),
+            ("TopRightBlue", repr(float(c[2]))), ("TopRightAlpha", "1"),
+            ("EffectMask", ("link", nm + "M", "Mask"))])
+        ramps.append(nm)
+    top = layer(g, top, chain(g, "RampM", ramps), "CalL5", "iif(LK.CalRamps > 0.5, 1, 0)")
+    # verifica del blu: blu, magenta, ciano, bianco hanno lo stesso canale blu
+    blue = [rect(g, "Blu%d" % i, 0.80 + (i % 2) * 0.03, 0.86 - (i // 2) * 0.053, 0.03, 0.053, rgb=c)
+            for i, c in enumerate([(1, 0, 1), (0, 1, 1), (1, 1, 1), (0, 0, 1)])]
+    top = layer(g, top, chain(g, "BluM", blue), "CalL6", "iif(LK.CalBlue > 0.5, 1, 0)")
+    # sfera sfumata (contouring)
+    g._add("SphM", "EllipseMask", [("Filter", 'FuID { "Fast Gaussian" }'), ("SoftEdge", "0.035"),
+                                   ("MaskWidth", "1920"), ("MaskHeight", "1080"), ("PixelAspect", "{ 1, 1 }"),
+                                   ("UseFrameFormatSettings", "1"), ("ClippingMode", 'FuID { "None" }'),
+                                   ("Width", "0.06"), ("Height", "0.06"), ("Center", "{ 0.16, 0.86 }")])
+    g._add("Sph", "Background", G.CREATOR + [("TopLeftRed", "1"), ("TopLeftGreen", "1"), ("TopLeftBlue", "1"),
+                                             ("TopLeftAlpha", "1"), ("EffectMask", ("link", "SphM", "Mask"))])
+    top = layer(g, top, "Sph", "CalL7", "iif(LK.CalContour > 0.5, 1, 0)")
+    # bianco di picco
+    pk = rect(g, "Peak", 0.24, 0.86, 0.03, 0.053, rgb=(1, 1, 1))
+    top = layer(g, top, pk, "CalL8", "iif(LK.CalPeak > 0.5, 1, 0)")
+    # etichette: fps e classe di risoluzione
+    lab = ('Text(string.format("%g/SEC", comp:GetPrefs("Comp.FrameFormat.Rate")) .. "   " .. '
+           'iif(comp:GetPrefs("Comp.FrameFormat.Width") >= 7680, "8K", iif(comp:GetPrefs("Comp.FrameFormat.Width") >= 3800, "4K", '
+           'iif(comp:GetPrefs("Comp.FrameFormat.Width") >= 1900, "2K / HD", "SD"))))')
+    g._add("CalLab", "TextPlus", G.CREATOR + [
+        ("Center", "{ 0.155, 0.36 }"), ("Font", '"Open Sans"'), ("Style", '"Bold"'), ("Size", "0.022"),
+        ("StyledText", ("expr", lab)), ("Red1", ("expr", "LK.TextRed")), ("Green1", ("expr", "LK.TextGreen")),
+        ("Blue1", ("expr", "LK.TextBlue")), ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")])
+    top = layer(g, top, "CalLab", "CalL9", "iif(LK.CalLabels > 0.5, 1, 0)")
+    return top
+
+
+def guides_stack(g):
+    """Frame lines dei rapporti d'aspetto e safe area, calcolate sul raster reale."""
+    top = transparent(g, "GdBase")
+    for key, label, ar in FRAMELINES:
+        a = repr(ar)
+        ww = "iif(%s >= ASPECT, 1, %s / ASPECT)" % (a, a)
+        hw = "iif(%s >= ASPECT, 1 / %s, 1 / ASPECT)" % (a, a)
+        g._add(key + "M", "RectangleMask", [
+            ("Filter", 'FuID { "Fast Gaussian" }'), ("SoftEdge", "0"), ("MaskWidth", "1920"),
+            ("MaskHeight", "1080"), ("PixelAspect", "{ 1, 1 }"), ("UseFrameFormatSettings", "1"),
+            ("ClippingMode", 'FuID { "None" }'), ("Width", ("expr", e(ww))), ("Height", ("expr", e(hw))),
+            ("Solid", "0"), ("BorderWidth", repr(LINE_W))])
+        g.background(key + "Bg", mask=key + "M", color="Accent")
+        g._add(key + "T", "TextPlus", G.CREATOR + [
+            ("Center", ("expr", e("Point(0.5 - (%s) / 2 + 0.025, 0.5 + (%s) * ASPECT / 2 - 0.03)" % (ww, hw)))),
+            ("Font", '"Open Sans"'), ("Style", '"Bold"'), ("Size", "0.014"), ("StyledText", lua_string(label + ":1")),
+            ("Red1", ("expr", "LK.AccentRed")), ("Green1", ("expr", "LK.AccentGreen")), ("Blue1", ("expr", "LK.AccentBlue")),
+            ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")])
+        one = g.merge(key + "L", key + "Bg", key + "T")
+        top = layer(g, top, one, key + "X", "iif(LK.%s > 0.5, 1, 0)" % key)
+    for key, pct in (("SafeAction", 0.93), ("SafeTitle", 0.90)):
+        g._add(key + "M", "RectangleMask", [
+            ("Filter", 'FuID { "Fast Gaussian" }'), ("SoftEdge", "0"), ("MaskWidth", "1920"),
+            ("MaskHeight", "1080"), ("PixelAspect", "{ 1, 1 }"), ("UseFrameFormatSettings", "1"),
+            ("ClippingMode", 'FuID { "None" }'), ("Width", repr(pct)), ("Height", ("expr", e("%s / ASPECT" % pct))),
+            ("Solid", "0"), ("BorderWidth", repr(LINE_W * 0.7))])
+        g.background(key + "Bg", mask=key + "M", color="Accent", scale=0.6)
+        top = layer(g, top, key + "Bg", key + "X", "iif(LK.%s > 0.5, 1, 0)" % key)
+    return top
+
+
+def slate_details():
+    """Righe della slate: solo i campi compilati (+ dati tecnici calcolati)."""
+    parts = []
+    for f, _, lab in PRODUCTION_FIELDS + POST_FIELDS:
+        if lab:
+            parts.append('iif(LK.%s.Value == "", "", "%s   " .. LK.%s.Value .. "\\n")' % (f, lab, f))
+    phase = "({ %s })[math.floor(LK.Phase + 1.5)]" % ", ".join(lua_string(x) for x in PHASES)
+    parts.append('iif(LK.Phase < 0.5, "", "PHASE   " .. %s .. "\\n")' % phase)
+    st = " .. ".join('iif(LK.%s < 0.5, "", "%s " .. ({ "—", "TEMP", "FINAL" })[math.floor(LK.%s + 1.5)] .. "   ")'
+                     % (f, lab, f) for f, _, lab in STATUSES)
+    parts.append("(%s) .. \"\\n\"" % st)
+    parts.append('"DURATION   " .. LK.Duration.Value .. "\\n"')
+    parts.append('"FRAME RATE   " .. string.format("%g fps", comp:GetPrefs("Comp.FrameFormat.Rate")) .. '
+                 '"   ·   " .. comp:GetPrefs("Comp.FrameFormat.Width") .. " x " .. comp:GetPrefs("Comp.FrameFormat.Height") .. "\\n"')
+    parts.append('iif(LK.ColorInfo.Value == "", "", LK.ColorInfo.Value .. "\\n")')
+    parts.append('iif(LK.AudioFormat.Value == "", "", "AUDIO   " .. LK.AudioFormat.Value .. "\\n")')
+    parts.append('iif(LK.Note.Value == "", "", LK.Note.Value .. "\\n")')
+    parts.append('"\\n" .. LK.Info.Value')
+    return " .. ".join(parts)
 
 
 def bars_stack(g):
@@ -365,19 +571,19 @@ def bars_stack(g):
 
 def clock_stack(g, remaining_expr):
     """Orologio ident (DPP): cerchio, lancetta a scatti di 1\", secondi al FFOA."""
-    cx, d = 0.80, 0.20
+    cx, d = 0.88, 0.14
     r = d / 2.0
-    g.mask("CkRing", "EllipseMask", repr(d), repr(d), center="{ %s, 0.5 }" % cx, border=repr(LINE_W * 1.6))
+    g.mask("CkRing", "EllipseMask", repr(d), repr(d), center="{ %s, 0.2 }" % cx, border=repr(LINE_W * 1.6))
     g.background("CkRingBg", mask="CkRing", color="Accent")
     g.mask("CkArm", "RectangleMask", repr(LINE_W * 2), repr(r * 0.9),
-           center=("expr", e("Point(%s, 0.5 + %s * ASPECT)" % (cx, r * 0.45))))
+           center=("expr", e("Point(%s, 0.2 + %s * ASPECT)" % (cx, r * 0.45))))
     g.background("CkArmBg", mask="CkArm", color="Accent")
     g._add("CkSweep", "Transform", [("Input", ("link", "CkArmBg", "Output")),
-                                    ("Center", "{ %s, 0.5 }" % cx), ("Pivot", "{ %s, 0.5 }" % cx),
+                                    ("Center", "{ %s, 0.2 }" % cx), ("Pivot", "{ %s, 0.2 }" % cx),
                                     ("Angle", ("expr", e("-6 * math.floor((REM - 1) / FPS)")))])
     top = g.merge("CkM1", "CkRingBg", "CkSweep")
     g._add("CkDigit", "TextPlus", G.CREATOR + [
-        ("Center", "{ %s, 0.5 }" % cx), ("Font", '"Open Sans"'), ("Style", '"Bold"'), ("Size", "0.06"),
+        ("Center", "{ %s, 0.2 }" % cx), ("Font", '"Open Sans"'), ("Style", '"Bold"'), ("Size", "0.045"),
         ("StyledText", ("expr", e(remaining_expr))),
         ("Red1", ("expr", "LK.TextRed")), ("Green1", ("expr", "LK.TextGreen")), ("Blue1", ("expr", "LK.TextBlue")),
         ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")])
@@ -398,91 +604,104 @@ def head(std=None, family=None):
     HEADLEN = "(%s + %s + %s + %s)" % (B, S, GP, C)
     SYNCREM = "math.floor(%s * FPS + 0.5)" % FL_BEFORE
     SYNCFR = "math.max(1, math.floor(%s * FPS / 25 + 0.5))" % FL_FR
-
-    g = G()
     has_pop = any(p.get("pop") or p.get("sync_flash") or p.get("tail_pop") or p.get("tail_flash") for p in P)
-    uc = (uc_label("SecPreset", "%s %s" % (family["name"], __version__))
-          + uc_combo("Preset", "Standard", [p["name"] for p in P]))
+
+    # --- controlli, per scheda
+    prog = (uc_label("SecPreset", "%s %s" % (family["name"], __version__))
+            + uc_combo("Preset", "Standard", [p["name"] for p in P]))
     if family.get("reel"):
-        uc += uc_slider("Reel", "Rullo (FFOA a N:00:08:00)", 1, 23, 1)
-    uc += uc_combo("DurSel", "Durata programma", [d["label"] for d in DUR])
+        prog += uc_slider("Reel", "Rullo (FFOA a N:00:08:00)", 1, 23, 1)
+    prog += uc_combo("DurSel", "Durata programma", [d["label"] for d in DUR])
     if "custom" in family["durations"]:
-        uc += uc_text("ProgramTC", "Durata personalizzata (HH:MM:SS:FF)")
+        prog += uc_text("ProgramTC", "Durata personalizzata (HH:MM:SS:FF)")
     if CUST:
-        uc += (uc_check("Custom", "Personalizza le durate del leader", 0)
-               + uc_slider("BarsSec", "Barre (s)", 0, 60, 0)
-               + uc_slider("SlateSec", "Slate (s)", 0, 30, 8)
-               + uc_slider("GapSec", "Nero prima del programma (s)", 0, 10, 2)
-               + uc_slider("CountFrom", "Countdown da (0 = nessuno)", 0, 11, 8)
-               + uc_slider("TailSec", "Coda (s)", 0, 30, 8))
-    uc += (uc_label("SecSlate", "Slate")
-           + uc_text("Title", "Titolo") + uc_text("Director", "Regia")
-           + uc_text("Editor", "Montaggio") + uc_text("Colorist", "Color")
-           + uc_text("Version", "Versione") + uc_text("Date", "Data")
-           + uc_text("Note", "Note (riga libera)")
-           + uc_text("Duration", "Durata (da Genera)", read_only=True)
-           + uc_text("Info", "TC (da Genera)", read_only=True)
-           + uc_label("SecLook", "Aspetto") + color_controls()
-           + uc_label("SecAudio", "Audio (tono 1 kHz)" if has_pop else "Audio: questo standard non prevede sync pop"))
-    if has_pop:
-        uc += (uc_combo("PopLevel", "Livello pop", ["Dallo standard", "-20 dBFS (SMPTE / USA)", "-18 dBFS (EBU / Europa)"])
-               + uc_check("BeepEach", "Bip anche su 8..3 (non standard)", 0))
-    uc += uc_label("SecTimeline", "Timeline")
+        prog += (uc_check("Custom", "Personalizza le durate del leader", 0)
+                 + uc_slider("BarsSec", "Barre (s)", 0, 60, 0) + uc_slider("SlateSec", "Slate (s)", 0, 30, 8)
+                 + uc_slider("GapSec", "Nero prima del programma (s)", 0, 10, 2)
+                 + uc_slider("CountFrom", "Countdown da (0 = nessuno)", 0, 11, 8)
+                 + uc_slider("TailSec", "Coda (s)", 0, 30, 8))
     kinds = family.get("markers", [])
     if kinds:
         label = {"reel": "Marker di fine rullo", "break": "Marker di break"}[kinds[0]] if len(kinds) == 1 else "Marker a intervalli"
-        uc += (uc_check("MarkersOn", label, 1)
-               + uc_slider("MarkerEvery", "Ogni (minuti, 0 = dallo standard)", 0, 60, 0, integer=False))
+        prog += (uc_check("MarkersOn", label, 1)
+                 + uc_slider("MarkerEvery", "Ogni (minuti, 0 = dallo standard)", 0, 60, 0, integer=False))
         if len(kinds) > 1:
-            uc += uc_combo("MarkerKind", "Tipo marker", ["Dallo standard", "Fine rullo", "Break"])
-    uc += (uc_check("TailOn", "Inserisci la coda", 1)
-           + uc_button("Generate", "Genera sulla timeline", engine("generate", std, family))
-           + uc_button("Remove", "Rimuovi elementi generati", engine("remove", std, family))
-           + uc_text("Guide", "Guida timecode (da Genera)", lines=6, read_only=True))
-    g.controls([("Preset", "0"), ("Reel", "1"), ("DurSel", str(family.get("default_duration", 0))),
-                ("ProgramTC", '"00:00:30:00"'),
-                ("Custom", "0"), ("BarsSec", "0"), ("SlateSec", "8"), ("GapSec", "2"), ("CountFrom", "8"),
-                ("TailSec", "8"), ("Note", '""'),
-                ("Guide", '"Metti il blocco dove inizia il leader (anche a timeline vuota) e premi Genera"')]
-               + color_values() + [
-                ("Title", '"TITOLO"'), ("Director", '""'), ("Editor", '""'),
-                ("Colorist", '""'), ("Version", '"v1"'), ("Date", '""'),
-                ("Duration", '"premi Genera"'), ("Info", '""'),
-                ("PopLevel", "0"), ("BeepEach", "0"),
-                ("MarkersOn", "1"), ("MarkerKind", "0"), ("MarkerEvery", "0"), ("TailOn", "1")], uc)
+            prog += uc_combo("MarkerKind", "Tipo marker", ["Dallo standard", "Fine rullo", "Break"])
+    prog += (uc_check("TailOn", "Inserisci la coda", 1)
+             + uc_button("Generate", "Genera sulla timeline", engine("generate", std, family))
+             + uc_button("Remove", "Rimuovi elementi generati", engine("remove", std, family))
+             + uc_text("Guide", "Guida timecode", lines=6, read_only=True)
+             + uc_text("Duration", "Durata programma (calcolata)", read_only=True)
+             + uc_text("Info", "Timecode (calcolati)", lines=2, read_only=True))
+    prod = "".join(uc_text(f, label) for f, label, _ in PRODUCTION_FIELDS)
+    post = "".join(uc_text(f, label) for f, label, _ in POST_FIELDS)
+    post += uc_combo("Phase", "Fase di lavorazione", PHASES)
+    post += "".join(uc_combo(f, label, STATUS_VALUES) for f, label, _ in STATUSES)
+    post += uc_text("Note", "Note (riga libera)")
+    tech = (uc_label("SecGuides", "Frame lines e safe area (sul countdown)")
+            + uc_check("Guides", "Mostra le frame lines", 1) + uc_check("GuidesSlate", "Anche sulla slate", 0)
+            + "".join(uc_check(f, "Frame line " + lab + ":1", 1 if f in ("FL185", "FL239") else 0) for f, lab, _ in FRAMELINES)
+            + uc_check("SafeAction", "Safe action 93% (EBU R95)", 0) + uc_check("SafeTitle", "Safe graphics 90%", 0)
+            + uc_label("SecTech", "Dati tecnici")
+            + uc_text("ColorInfo", "Spazio colore (letto da Genera)", read_only=True)
+            + uc_text("AudioFormat", "Formato audio (es. 5.1 + stereo, 24 bit 48 kHz)")
+            + uc_label("SecAudio", "Audio (tono 1 kHz)" if has_pop else "Audio: questo standard non prevede sync pop"))
+    if has_pop:
+        tech += (uc_combo("PopLevel", "Livello pop", ["Dallo standard", "-20 dBFS (SMPTE / USA)", "-18 dBFS (EBU / Europa)"])
+                 + uc_check("BeepEach", "Bip anche su 8..3 (non standard)", 0))
+    look = (uc_label("SecLook", "Colori") + color_controls()
+            + uc_label("SecLogo", "Logo (inserito da Genera sopra la slate)")
+            + uc_text("Logo", "File del logo (percorso PNG/TIFF/JPG)")
+            + uc_combo("LogoPos", "Posizione", LOGO_POS)
+            + uc_slider("LogoSize", "Dimensione (%)", 5, 100, 20, integer=False)
+            + uc_check("LogoOnTail", "Anche sulla coda", 0))
+    cal = (uc_check("CalOn", "Strumenti di taratura sul countdown", 1)
+           + "".join(uc_check(f, label, d) for f, label, d in CALIBRATION))
+    uc = (on_page("Progetto", prog) + on_page("Produzione", prod) + on_page("Post", post)
+          + on_page("Tecnico", tech) + on_page("Aspetto", look) + on_page("Taratura", cal))
 
+    values = [("Preset", "0"), ("Reel", "1"), ("DurSel", str(family.get("default_duration", 0))),
+              ("ProgramTC", '"00:00:30:00"'), ("Custom", "0"), ("BarsSec", "0"), ("SlateSec", "8"),
+              ("GapSec", "2"), ("CountFrom", "8"), ("TailSec", "8"),
+              ("MarkersOn", "1"), ("MarkerKind", "0"), ("MarkerEvery", "0"), ("TailOn", "1"),
+              ("Guide", '"Metti il blocco dove inizia il leader (anche a timeline vuota) e premi Genera"'),
+              ("Duration", '"premi Genera"'), ("Info", '""'), ("Title", '"TITOLO"'), ("Version", '"v1"'),
+              ("Phase", "0"), ("Note", '""'), ("Guides", "1"), ("GuidesSlate", "0"),
+              ("SafeAction", "0"), ("SafeTitle", "0"), ("ColorInfo", '""'), ("AudioFormat", '""'),
+              ("PopLevel", "0"), ("BeepEach", "0"), ("Logo", '""'), ("LogoPos", "0"), ("LogoSize", "20"),
+              ("LogoOnTail", "0"), ("CalOn", "1")]
+    values += [(f, '""') for f, _, _ in PRODUCTION_FIELDS + POST_FIELDS if f not in ("Title", "Version")]
+    values += [(f, "0") for f, _, _ in STATUSES]
+    values += [(f, "1" if f in ("FL185", "FL239") else "0") for f, _, _ in FRAMELINES]
+    values += [(f, str(d)) for f, _, d in CALIBRATION]
+    values += color_values()
+
+    g = G()
+    g.controls(values, uc)
     g.background("Bg", color="Bg")
-    # Barre
+    # barre
     bars = bars_stack(g)
     top = g.merge("MBars", "Bg", bars, e("iif(REM > (%s + %s + %s) * FPS, 1, 0)" % (S, GP, C)))
-    # Slate (con orologio opzionale)
-    slate_x = "iif(%s > 0.5, 0.40, 0.5)" % CLOCK
+    # slate
     heading = pv(P, "heading")
-    # righe fisse dello standard; quelle con {ffoa}, {sync}... le compila Genera in LK.Info
     lines = pv(P, "slate_lines", fn=lambda p: "\n".join(l for l in p.get("slate_lines", []) if "{" not in l))
     g._add("SHeading", "TextPlus", G.CREATOR + [
-        ("Center", ("expr", "Point(%s, 0.86)" % slate_x)), ("Font", '"Open Sans"'), ("Style", '"Bold"'),
-        ("Size", "0.026"), ("StyledText", ("expr", 'Text(%s .. "  ·  LEADERKIT")' % heading)),
+        ("Center", "{ 0.5, 0.88 }"), ("Font", '"Open Sans"'), ("Style", '"Bold"'), ("Size", "0.024"),
+        ("StyledText", ("expr", 'Text(%s .. "  ·  LEADERKIT")' % heading)),
         ("Red1", ("expr", "LK.TextRed * 0.65")), ("Green1", ("expr", "LK.TextGreen * 0.65")),
         ("Blue1", ("expr", "LK.TextBlue * 0.65")),
         ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")])
     g._add("STitle", "TextPlus", G.CREATOR + [
-        ("Center", ("expr", "Point(%s, 0.75)" % slate_x)), ("Font", '"Open Sans"'), ("Style", '"Bold"'),
-        ("Size", "0.065"), ("StyledText", ("expr", "string.upper(LK.Title.Value)")),
+        ("Center", "{ 0.5, 0.78 }"), ("Font", '"Open Sans"'), ("Style", '"Bold"'),
+        ("Size", "0.06"), ("StyledText", ("expr", "string.upper(LK.Title.Value)")),
         ("Red1", ("expr", "LK.TextRed")), ("Green1", ("expr", "LK.TextGreen")), ("Blue1", ("expr", "LK.TextBlue")),
         ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")])
-    g.mask("SRule", "RectangleMask", "0.6", repr(LINE_W), center=("expr", "Point(%s, 0.665)" % slate_x))
+    g.mask("SRule", "RectangleMask", "0.6", repr(LINE_W), center="{ 0.5, 0.705 }")
     g.background("SRuleBg", mask="SRule", color="Accent", scale=0.6)
-    details = ('"DIRECTOR   " .. LK.Director.Value .. "\\nEDITOR   " .. LK.Editor.Value'
-               ' .. "\\nCOLORIST   " .. LK.Colorist.Value .. "\\nDATE   " .. LK.Date.Value'
-               ' .. "\\nVERSION   " .. LK.Version.Value .. "\\nDURATION   " .. LK.Duration.Value'
-               ' .. "\\nFRAME RATE   " .. string.format("%g fps", comp:GetPrefs("Comp.FrameFormat.Rate"))'
-               ' .. "\\nRESOLUTION   " .. comp:GetPrefs("Comp.FrameFormat.Width") .. " x "'
-               ' .. comp:GetPrefs("Comp.FrameFormat.Height") .. "\\n" .. LK.Note.Value'
-               ' .. "\\n\\n" .. LK.Info.Value .. "\\n" .. ' + lines)
     g._add("SDetails", "TextPlus", G.CREATOR + [
-        ("Center", ("expr", "Point(%s, 0.38)" % slate_x)), ("Font", '"Open Sans"'), ("Style", '"Regular"'),
-        ("Size", "0.022"), ("StyledText", ("expr", "Text(%s)" % details)), ("LineSpacing", "1.1"),
+        ("Center", "{ 0.5, 0.40 }"), ("Font", '"Open Sans"'), ("Style", '"Regular"'),
+        ("Size", "0.019"), ("StyledText", ("expr", "Text(%s .. \"\\n\" .. %s)" % (slate_details(), lines))),
+        ("LineSpacing", "1.05"),
         ("Red1", ("expr", "LK.TextRed")), ("Green1", ("expr", "LK.TextGreen")), ("Blue1", ("expr", "LK.TextBlue")),
         ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")])
     s_ = g.merge("SM1", "SHeading", "STitle")
@@ -490,23 +709,27 @@ def head(std=None, family=None):
     s_ = g.merge("SM3", s_, "SDetails")
     clock = clock_stack(g, 'Text(tostring(math.ceil(REM / FPS)))')
     s_ = g.merge("SM4", s_, clock, "iif(%s > 0.5, 1, 0)" % CLOCK)
-    top = g.merge("MSlate", top, s_, e("iif(REM <= (%s + %s + %s) * FPS and REM > (%s + %s) * FPS, 1, 0)"
-                                        % (S, GP, C, GP, C)))
-    # Countdown + 2-pop
-    CDX = C
-    lead = leader_stack(g, "L", 'Text(iif(REM < %s * FPS and REM >= 2 * FPS, tostring(math.ceil(REM / FPS)), ""))' % CDX,
-                        sweep_vis="iif(REM < %s * FPS and REM > 2 * FPS, 1, 0)" % CDX, cd=CDX)
-    top = g.merge("MLeader", top, lead,
-                  e("iif(%s > 0 and REM <= %s * FPS and (REM > 2 * FPS or (REM == 2 * FPS and %s > 0.5)), 1, 0)"
-                    % (CDX, CDX, POP)))
+    SLATEVIS = "(REM <= (%s + %s + %s) * FPS and REM > (%s + %s) * FPS)" % (S, GP, C, GP, C)
+    top = g.merge("MSlate", top, s_, e("iif(%s, 1, 0)" % SLATEVIS))
+    # countdown + 2-pop, sopra gli strumenti di taratura
+    LEADVIS = "(%s > 0 and REM <= %s * FPS and (REM > 2 * FPS or (REM == 2 * FPS and %s > 0.5)))" % (C, C, POP)
+    cal = calibration_stack(g)
+    top = g.merge("MCal", top, cal, e("iif(LK.CalOn > 0.5 and %s, 1, 0)" % LEADVIS))
+    lead = leader_stack(g, "L", 'Text(iif(REM < %s * FPS and REM >= 2 * FPS, tostring(math.ceil(REM / FPS)), ""))' % C,
+                        sweep_vis="iif(REM < %s * FPS and REM > 2 * FPS, 1, 0)" % C, cd=C)
+    top = g.merge("MLeader", top, lead, e("iif(%s, 1, 0)" % LEADVIS))
     g.text("PicStart", ("expr", 'Text("PICTURE\\nSTART")'), 0.075, spacing=1.0)
-    top = g.merge("MPicStart", top, "PicStart", e("iif(%s > 0 and REM == %s * FPS, 1, 0)" % (CDX, CDX)))
-    # Sync flash (DPP / Sky / digital clap)
+    top = g.merge("MPicStart", top, "PicStart", e("iif(%s > 0 and REM == %s * FPS, 1, 0)" % (C, C)))
+    # frame lines e safe area
+    guides = guides_stack(g)
+    top = g.merge("MGuides", top, guides, e("iif(LK.Guides > 0.5 and (%s or (LK.GuidesSlate > 0.5 and %s)), 1, 0)"
+                                            % (LEADVIS, SLATEVIS)))
+    # sync flash
     g._add("Flash", "Background", G.CREATOR + [("TopLeftRed", "1.0"), ("TopLeftGreen", "1.0"),
                                                ("TopLeftBlue", "1.0"), ("TopLeftAlpha", "1.0")])
     top = g.merge("MFlash", top, "Flash", e("iif(%s > 0.5 and REM <= %s and REM > %s - %s, 1, 0)"
                                             % (FL_ON, SYNCREM, SYNCREM, SYNCFR)))
-    # Indicazione della durata prima di Genera
+    # durata prima di Genera
     g.text("Warn", ("expr", e("Text(\"Premi GENERA nell'Inspector: il blocco diventa di \" .. %s .. \" secondi\")"
                               % HEADLEN)), 0.03, y=0.08, grey=1.0)
     top = g.merge("MWarn", top, "Warn",
