@@ -9,7 +9,8 @@ local fps = tonumber(opt.fps)
 local nominal = math.floor(fps + 0.5)
 local df = opt.df == "1"
 
-local function R(v) return v end
+-- Come Resolve: le liste restituite contengono anche un contatore numerico.
+local function counted(t) local c = {}; for i, v in ipairs(t) do c[i] = v end; c.n = #t; return c end
 -- timecode di verifica (indipendente dal motore)
 local drop = df and (nominal == 30 and 2 or 4) or 0
 local function tc(frames)
@@ -83,7 +84,7 @@ function tl:GetTrackCount(k) return #tracks[k] end
 function tl:GetTrackName(k, i) return tracks[k][i].name end
 function tl:SetTrackName(k, i, n) tracks[k][i].name = n; return true end
 function tl:AddTrack(k) table.insert(tracks[k], { name = k .. " " .. (#tracks[k] + 1), items = {} }); return true end
-function tl:GetItemListInTrack(k, i) return tracks[k][i].items end
+function tl:GetItemListInTrack(k, i) return counted(tracks[k][i].items) end
 function tl:DeleteClips(list)
   local dead = {}; for _, it in ipairs(list) do dead[it] = true end
   for _, k in ipairs({ "video", "audio" }) do for _, t in ipairs(tracks[k]) do
@@ -130,14 +131,14 @@ end
 local wavClip = { GetName = function() return "LeaderKit_pop_1kHz_-20dBFS.wav" end }
 local folder = { clips = {} }
 function folder:GetName() return "LeaderKit" end
-function folder:GetClipList() return self.clips end
-local rootFolder = { GetSubFolderList = function() return { folder } end }
+function folder:GetClipList() return counted(self.clips) end
+local rootFolder = { GetSubFolderList = function() return counted({ folder }) end }
 local pool = {}
 function pool:GetRootFolder() return rootFolder end
 function pool:AddSubFolder() return folder end
 function pool:GetCurrentFolder() return folder end
 function pool:SetCurrentFolder() return true end
-function pool:ImportMedia() folder.clips = { wavClip }; return { wavClip } end
+function pool:ImportMedia() folder.clips = { wavClip }; return counted({ wavClip }) end
 local variantCalls = 0
 function pool:AppendToTimeline(infos)
   local info = infos[1]
@@ -147,7 +148,7 @@ function pool:AppendToTimeline(infos)
     ((info.mediaType ~= nil) == (tonumber(opt.variant) <= 2))
   local it = setmetatable({ off = info.recordFrame - tlStart, dur = isGood and 1 or 2, name = wavClip:GetName() }, Item)
   table.insert(tracks.audio[info.trackIndex].items, it)
-  return { it }
+  return counted({ it })
 end
 
 local project = { GetCurrentTimeline = function() return tl end, GetMediaPool = function() return pool end }

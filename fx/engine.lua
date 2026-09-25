@@ -77,12 +77,34 @@ local function framesToTc(frames, r)
     math.floor(frames / (n * 60)) % 60, math.floor(frames / n) % 60, sep, frames % n)
 end
 
+-- Le liste restituite dall'API di Resolve possono contenere anche campi
+-- numerici (contatori): si tengono solo gli oggetti.
+local function listOf(t)
+  local out = {}
+  if type(t) ~= "table" then return out end
+  local keys = {}
+  for k in pairs(t) do keys[#keys + 1] = k end
+  table.sort(keys, function(a, b)
+    if type(a) == type(b) and (type(a) == "number" or type(a) == "string") then return a < b end
+    return type(a) < type(b)
+  end)
+  for _, k in ipairs(keys) do
+    local v = t[k]
+    if type(v) == "userdata" or type(v) == "table" then
+      out[#out + 1] = v
+    elseif type(k) == "userdata" or type(k) == "table" then
+      out[#out + 1] = k
+    end
+  end
+  return out
+end
+
 -- ---------------------------------------------------------------- controlli
 local function findTool(cmp, name)
   if not cmp then return nil end
   local t = cmp:FindTool(name)
   if t then return t end
-  for _, x in pairs(cmp:GetToolList(false) or {}) do
+  for _, x in ipairs(listOf(cmp:GetToolList(false))) do
     if x.Name == name then return x end
   end
   return nil
@@ -116,7 +138,7 @@ local W, H = tl:GetSetting("timelineResolutionWidth"), tl:GetSetting("timelineRe
 local function allItems(kind)
   local out = {}
   for t = 1, tl:GetTrackCount(kind) do
-    for _, it in pairs(tl:GetItemListInTrack(kind, t) or {}) do out[#out + 1] = { item = it, track = t } end
+    for _, it in ipairs(listOf(tl:GetItemListInTrack(kind, t))) do out[#out + 1] = { item = it, track = t } end
   end
   return out
 end
@@ -132,7 +154,7 @@ end
 local function cleanup()
   local nm = 0
   for frame, info in pairs(tl:GetMarkers() or {}) do
-    if string.sub(tostring(info.customData or ""), 1, #PREFIX) == PREFIX then
+    if type(info) == "table" and string.sub(tostring(info.customData or ""), 1, #PREFIX) == PREFIX then
       if tl:DeleteMarkerAtFrame(frame) then nm = nm + 1 end
     end
   end
@@ -212,7 +234,7 @@ if nm + ni > 0 then log(string.format("Pulizia: tolti %d marker e %d clip della 
 
 local function trackOf(item)
   for t = 1, tl:GetTrackCount("video") do
-    for _, it in pairs(tl:GetItemListInTrack("video", t) or {}) do
+    for _, it in ipairs(listOf(tl:GetItemListInTrack("video", t))) do
       if it:GetStart() == item:GetStart() and it:GetName() == item:GetName() then return t end
     end
   end
@@ -399,12 +421,12 @@ local function popClip()
   if not writeWav(wavPath) then return nil end
   local root = pool:GetRootFolder()
   local folder = nil
-  for _, sub in pairs(root:GetSubFolderList() or {}) do
+  for _, sub in ipairs(listOf(root:GetSubFolderList())) do
     if sub:GetName() == "LeaderKit" then folder = sub end
   end
   if not folder then folder = pool:AddSubFolder(root, "LeaderKit") end
   if folder then
-    for _, clip in pairs(folder:GetClipList() or {}) do
+    for _, clip in ipairs(listOf(folder:GetClipList())) do
       if clip:GetName() == WAV_NAME then return clip end
     end
   end
@@ -412,7 +434,7 @@ local function popClip()
   if folder then pool:SetCurrentFolder(folder) end
   local items = pool:ImportMedia({ wavPath })
   if prev then pool:SetCurrentFolder(prev) end
-  return items and items[1]
+  return listOf(items)[1]
 end
 
 local popTrack = nil
@@ -446,13 +468,13 @@ local function placePop(frame, label)
     local info = { mediaPoolItem = clip, recordFrame = frame, trackIndex = track }
     for k, val in pairs(v) do info[k] = val end
     local res = pool:AppendToTimeline({ info })
-    if res and res[1] then
+    if listOf(res)[1] then
       local ok = true
-      for _, it in pairs(res) do
+      for _, it in ipairs(listOf(res)) do
         if it:GetStart() ~= frame or it:GetDuration() ~= 1 then ok = false end
       end
       if ok then goodVariant = v; log(label .. " " .. framesToTc(frame, r)); return true end
-      tl:DeleteClips(res, false)
+      tl:DeleteClips(listOf(res), false)
     end
   end
   warn(label .. ": pop audio non posizionato (API AppendToTimeline). Marker aggiunto comunque.")
