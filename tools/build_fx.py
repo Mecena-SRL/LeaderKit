@@ -238,13 +238,32 @@ def group(name, g, output, inputs):
             % (gid, ins, lua_string(output), "".join(g.tools), lua_string(gid)))
 
 
-def engine(mode, std=None):
+def family_tables(std, family):
+    """Preset e durate della famiglia (tabelle Lua del motore)."""
+    by_id = dict((p["id"], p) for p in std["presets"])
+    slots = dict((s_[0], s_[1]) for s_ in std["slots"])
+    presets = [by_id[i] for i in family["presets"]]
+    durations = []
+    for d in family["durations"]:
+        if d == "free":
+            durations.append({"kind": "free", "label": "Libera (fine dei tuoi clip)"})
+        elif d == "custom":
+            durations.append({"kind": "custom", "label": "Personalizzata (HH:MM:SS:FF)"})
+        else:
+            durations.append({"kind": "slot", "label": d, "seconds": slots[d]})
+    return presets, durations
+
+
+def engine(mode, std=None, family=None):
     std = std or load_standards()
+    family = family or std["families"][0]
+    presets, durations = family_tables(std, family)
     with open(os.path.join(ROOT, "fx", "engine.lua")) as fh:
         body = fh.read()
     return ('LK_MODE = "%s"\n' % mode
-            + "LK_PRESETS = %s\n" % lua_literal(std["presets"])
-            + "LK_SLOTS = %s\n" % lua_literal(std["slots"])
+            + "LK_PRESETS = %s\n" % lua_literal(presets)
+            + "LK_DURATIONS = %s\n" % lua_literal(durations)
+            + "LK_DUR_DEFAULT = %d\n" % family.get("default_duration", 0)
             + "local function __leaderkit_main()\n" + body + "\nend\n"
             + "local __ok, __err = xpcall(__leaderkit_main, debug and debug.traceback or tostring)\n"
             + "if not __ok then\n"
@@ -299,22 +318,33 @@ CUSTOM_FIELDS = [("bars", "BarsSec"), ("slate", "SlateSec"), ("gap", "GapSec"),
                  ("countdown", "CountFrom"), ("tail", "TailSec")]
 
 
-def field(presets, key):
-    """Valore effettivo: preset o personalizzato."""
-    for k, inp in CUSTOM_FIELDS:
-        if k == key:
-            return "iif(LK.Custom > 0.5, LK.%s, %s)" % (inp, pv(presets, key))
+def field(presets, key, custom=False):
+    """Valore effettivo: preset o (se la famiglia lo consente) personalizzato."""
+    if custom:
+        for k, inp in CUSTOM_FIELDS:
+            if k == key:
+                return "iif(LK.Custom > 0.5, LK.%s, %s)" % (inp, pv(presets, key))
     return pv(presets, key)
 
 
-HEAD_INPUTS = [
-    "SecPreset", "Preset", "Reel", "DurMode", "Slot", "ProgramTC",
-    "Custom", "BarsSec", "SlateSec", "GapSec", "CountFrom", "TailSec",
-    "SecSlate", "Title", "Director", "Editor", "Colorist", "Version", "Date", "Note", "Duration", "Info",
-    "SecLook"] + color_inputs() + [
-    "SecAudio", "PopLevel", "BeepEach",
-    "SecTimeline", "MarkersOn", "MarkerKind", "MarkerEvery", "TailOn", "Generate", "Remove", "Guide",
-]
+def head_inputs(family, has_pop=True):
+    durs = family["durations"]
+    out = ["SecPreset", "Preset"]
+    if family.get("reel"):
+        out.append("Reel")
+    out.append("DurSel")
+    if "custom" in durs:
+        out.append("ProgramTC")
+    if family.get("custom_leader"):
+        out += ["Custom", "BarsSec", "SlateSec", "GapSec", "CountFrom", "TailSec"]
+    out += ["SecSlate", "Title", "Director", "Editor", "Colorist", "Version", "Date", "Note", "Duration", "Info",
+            "SecLook"] + color_inputs() + ["SecAudio"] + (["PopLevel", "BeepEach"] if has_pop else []) + ["SecTimeline"]
+    if family.get("markers"):
+        out += ["MarkersOn", "MarkerEvery"]
+        if len(family["markers"]) > 1:
+            out.append("MarkerKind")
+    out += ["TailOn", "Generate", "Remove", "Guide"]
+    return out
 
 
 def bars_stack(g):
@@ -354,10 +384,12 @@ def clock_stack(g, remaining_expr):
     return g.merge("CkM2", top, "CkDigit")
 
 
-def head(std=None):
+def head(std=None, family=None):
     std = std or load_standards()
-    P = std["presets"]
-    B, S, GP, C = (field(P, "bars"), field(P, "slate"), field(P, "gap"), field(P, "countdown"))
+    family = family or std["families"][0]
+    P, DUR = family_tables(std, family)
+    CUST = bool(family.get("custom_leader"))
+    B, S, GP, C = (field(P, "bars", CUST), field(P, "slate", CUST), field(P, "gap", CUST), field(P, "countdown", CUST))
     CLOCK = pv(P, "clock")
     POP = pv(P, "pop")
     FL_ON = pv(P, "sync_flash", fn=lambda p: 1 if p.get("sync_flash") else 0)
@@ -368,42 +400,51 @@ def head(std=None):
     SYNCFR = "math.max(1, math.floor(%s * FPS / 25 + 0.5))" % FL_FR
 
     g = G()
-    uc = (uc_label("SecPreset", "LeaderKit %s" % __version__)
-          + uc_combo("Preset", "Standard", [p["name"] for p in P])
-          + uc_slider("Reel", "Rullo (cinema: FFOA a N:00:08:00)", 1, 23, 1)
-          + uc_combo("DurMode", "Durata programma", ["Libera (fine dei tuoi clip)", "Fissa: slot standard",
-                                                     "Fissa: personalizzata"])
-          + uc_combo("Slot", "Slot standard", [s_[0] for s_ in std["slots"]])
-          + uc_text("ProgramTC", "Durata personalizzata (HH:MM:SS:FF)")
-          + uc_check("Custom", "Personalizza le durate del leader", 0)
-          + uc_slider("BarsSec", "Barre (s)", 0, 60, 0)
-          + uc_slider("SlateSec", "Slate (s)", 0, 30, 8)
-          + uc_slider("GapSec", "Nero prima del programma (s)", 0, 10, 2)
-          + uc_slider("CountFrom", "Countdown da (0 = nessuno)", 0, 11, 8)
-          + uc_slider("TailSec", "Coda (s)", 0, 30, 8)
-          + uc_label("SecSlate", "Slate")
-          + uc_text("Title", "Titolo") + uc_text("Director", "Regia")
-          + uc_text("Editor", "Montaggio") + uc_text("Colorist", "Color")
-          + uc_text("Version", "Versione") + uc_text("Date", "Data")
-          + uc_text("Note", "Note (riga libera)")
-          + uc_text("Duration", "Durata (da Genera)", read_only=True)
-          + uc_text("Info", "TC (da Genera)", read_only=True)
-          + uc_label("SecLook", "Aspetto") + color_controls()
-          + uc_label("SecAudio", "Audio (tono 1 kHz)")
-          + uc_combo("PopLevel", "Livello pop", ["Dallo standard", "-20 dBFS (SMPTE / USA)", "-18 dBFS (EBU / Europa)"])
-          + uc_check("BeepEach", "Bip anche su 8..3 (non standard)", 0)
-          + uc_label("SecTimeline", "Timeline")
-          + uc_check("MarkersOn", "Marker a intervalli", 1)
-          + uc_combo("MarkerKind", "Tipo marker", ["Dallo standard", "Fine rullo", "Break"])
-          + uc_slider("MarkerEvery", "Ogni (minuti, 0 = dallo standard)", 0, 60, 0, integer=False)
-          + uc_check("TailOn", "Inserisci la coda", 1)
-          + uc_button("Generate", "Genera sulla timeline", engine("generate", std))
-          + uc_button("Remove", "Rimuovi elementi generati", engine("remove", std))
-          + uc_text("Guide", "Guida timecode (da Genera)", lines=6, read_only=True))
-    g.controls([("Preset", "0"), ("Reel", "1"), ("DurMode", "0"), ("Slot", "3"), ("ProgramTC", '"00:00:30:00"'),
+    has_pop = any(p.get("pop") or p.get("sync_flash") or p.get("tail_pop") or p.get("tail_flash") for p in P)
+    uc = (uc_label("SecPreset", "%s %s" % (family["name"], __version__))
+          + uc_combo("Preset", "Standard", [p["name"] for p in P]))
+    if family.get("reel"):
+        uc += uc_slider("Reel", "Rullo (FFOA a N:00:08:00)", 1, 23, 1)
+    uc += uc_combo("DurSel", "Durata programma", [d["label"] for d in DUR])
+    if "custom" in family["durations"]:
+        uc += uc_text("ProgramTC", "Durata personalizzata (HH:MM:SS:FF)")
+    if CUST:
+        uc += (uc_check("Custom", "Personalizza le durate del leader", 0)
+               + uc_slider("BarsSec", "Barre (s)", 0, 60, 0)
+               + uc_slider("SlateSec", "Slate (s)", 0, 30, 8)
+               + uc_slider("GapSec", "Nero prima del programma (s)", 0, 10, 2)
+               + uc_slider("CountFrom", "Countdown da (0 = nessuno)", 0, 11, 8)
+               + uc_slider("TailSec", "Coda (s)", 0, 30, 8))
+    uc += (uc_label("SecSlate", "Slate")
+           + uc_text("Title", "Titolo") + uc_text("Director", "Regia")
+           + uc_text("Editor", "Montaggio") + uc_text("Colorist", "Color")
+           + uc_text("Version", "Versione") + uc_text("Date", "Data")
+           + uc_text("Note", "Note (riga libera)")
+           + uc_text("Duration", "Durata (da Genera)", read_only=True)
+           + uc_text("Info", "TC (da Genera)", read_only=True)
+           + uc_label("SecLook", "Aspetto") + color_controls()
+           + uc_label("SecAudio", "Audio (tono 1 kHz)" if has_pop else "Audio: questo standard non prevede sync pop"))
+    if has_pop:
+        uc += (uc_combo("PopLevel", "Livello pop", ["Dallo standard", "-20 dBFS (SMPTE / USA)", "-18 dBFS (EBU / Europa)"])
+               + uc_check("BeepEach", "Bip anche su 8..3 (non standard)", 0))
+    uc += uc_label("SecTimeline", "Timeline")
+    kinds = family.get("markers", [])
+    if kinds:
+        label = {"reel": "Marker di fine rullo", "break": "Marker di break"}[kinds[0]] if len(kinds) == 1 else "Marker a intervalli"
+        uc += (uc_check("MarkersOn", label, 1)
+               + uc_slider("MarkerEvery", "Ogni (minuti, 0 = dallo standard)", 0, 60, 0, integer=False))
+        if len(kinds) > 1:
+            uc += uc_combo("MarkerKind", "Tipo marker", ["Dallo standard", "Fine rullo", "Break"])
+    uc += (uc_check("TailOn", "Inserisci la coda", 1)
+           + uc_button("Generate", "Genera sulla timeline", engine("generate", std, family))
+           + uc_button("Remove", "Rimuovi elementi generati", engine("remove", std, family))
+           + uc_text("Guide", "Guida timecode (da Genera)", lines=6, read_only=True))
+    g.controls([("Preset", "0"), ("Reel", "1"), ("DurSel", str(family.get("default_duration", 0))),
+                ("ProgramTC", '"00:00:30:00"'),
                 ("Custom", "0"), ("BarsSec", "0"), ("SlateSec", "8"), ("GapSec", "2"), ("CountFrom", "8"),
                 ("TailSec", "8"), ("Note", '""'),
-                ("Guide", '"Metti il blocco dove inizia il leader e premi Genera"')] + color_values() + [
+                ("Guide", '"Metti il blocco dove inizia il leader (anche a timeline vuota) e premi Genera"')]
+               + color_values() + [
                 ("Title", '"TITOLO"'), ("Director", '""'), ("Editor", '""'),
                 ("Colorist", '""'), ("Version", '"v1"'), ("Date", '""'),
                 ("Duration", '"premi Genera"'), ("Info", '""'),
@@ -470,7 +511,7 @@ def head(std=None):
                               % HEADLEN)), 0.03, y=0.08, grey=1.0)
     top = g.merge("MWarn", top, "Warn",
                   e("iif(math.abs((comp.RenderEnd - comp.RenderStart + 1) - %s * FPS) > 0.5, 1, 0)" % HEADLEN))
-    return group("LeaderKit Head", g, top, HEAD_INPUTS)
+    return group(family["name"], g, top, head_inputs(family, has_pop))
 
 
 TAIL_INPUTS = ["TailPop", "TailFlash", "CardFrom", "CardTo", "CardText", "Info"]
@@ -500,7 +541,9 @@ def tail(std=None):
 def build():
     out = os.path.join(ROOT, "dist")
     os.makedirs(out, exist_ok=True)
-    files = [("LeaderKit Head.setting", head()), ("LeaderKit Tail.setting", tail())]
+    std = load_standards()
+    files = [("%s.setting" % f["name"], head(std, f)) for f in std["families"]]
+    files.append(("LeaderKit Tail.setting", tail(std)))
     path = os.path.join(out, "LeaderKit-%s.drfx" % __version__)
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
         for name, text in files:

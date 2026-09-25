@@ -27,7 +27,15 @@ def built(tmp_path_factory):
 
 
 STD = build_fx.load_standards()
-IDX = dict((p["id"], i) for i, p in enumerate(STD["presets"]))
+FAM = dict((f["id"], f) for f in STD["families"])
+
+
+def idx(family, preset_id):
+    return FAM[family]["presets"].index(preset_id)
+
+
+def dur_index(family, label):
+    return FAM[family]["durations"].index(label)
 
 
 def frames(setting, fps, w, h, n, preset, cd=8, tail=(1, 0, 4, 7)):
@@ -50,7 +58,7 @@ def on(row, key):
     return float(row[key]) > 0.5
 
 
-HEAD = lambda built: os.path.join(built, "LeaderKit Head.setting")  # noqa: E731
+HEAD = lambda built, fam="cinema": os.path.join(built, FAM[fam]["name"] + ".setting")  # noqa: E731
 TAIL = lambda built: os.path.join(built, "LeaderKit Tail.setting")  # noqa: E731
 
 
@@ -59,7 +67,7 @@ TAIL = lambda built: os.path.join(built, "LeaderKit Tail.setting")  # noqa: E731
                                              (59.94, 60, 1920, 1080)])
 def test_head_cinema(built, fps, nominal, w, h):
     n = 18 * nominal                       # slate 8" + nero 2" + countdown 8"
-    rows = frames(HEAD(built), fps, w, h, n, IDX["cinema_dcp"])
+    rows = frames(HEAD(built), fps, w, h, n, idx("cinema", "cinema_dcp"))
     for r in rows:
         rem = n - r["t"]
         assert on(r, "MSlate.Blend") == (10 * nominal < rem <= 18 * nominal)
@@ -80,7 +88,7 @@ def test_head_cinema(built, fps, nominal, w, h):
 
 def test_head_dpp(built):
     n = 30 * 25                            # barre 20" + clock 7" + nero 3"
-    rows = frames(HEAD(built), 25, 1920, 1080, n, IDX["dpp_uk"], cd=0)
+    rows = frames(HEAD(built, "broadcast"), 25, 1920, 1080, n, idx("broadcast", "dpp_uk"), cd=0)
     for r in rows:
         rem = n - r["t"]
         assert on(r, "MBars.Blend") == (rem > 250)
@@ -96,14 +104,14 @@ def test_head_dpp(built):
 
 def test_head_flash_scales_with_fps(built):
     n = 30 * 50
-    rows = frames(HEAD(built), 50, 1920, 1080, n, IDX["dpp_uk"], cd=0)
+    rows = frames(HEAD(built, "broadcast"), 50, 1920, 1080, n, idx("broadcast", "dpp_uk"), cd=0)
     flash = [n - r["t"] for r in rows if on(r, "MFlash.Blend")]
     assert flash == [138, 137, 136, 135]   # 09:59:57:12 @50, 4 fotogrammi (variante SVT)
 
 
 def test_head_rai(built):
     n = 8 * 25
-    rows = frames(HEAD(built), 25, 1920, 1080, n, IDX["rai_spot"], cd=0)
+    rows = frames(HEAD(built, "spot"), 25, 1920, 1080, n, idx("spot", "rai_spot"), cd=0)
     for r in rows:
         rem = n - r["t"]
         assert on(r, "MSlate.Blend") == (rem > 75)
@@ -113,15 +121,15 @@ def test_head_rai(built):
 
 
 def test_head_length_hint(built):
-    rows = frames(HEAD(built), 24, 1920, 1080, 120, IDX["cinema_dcp"])
+    rows = frames(HEAD(built), 24, 1920, 1080, 120, idx("cinema", "cinema_dcp"))
     assert all(on(r, "MWarn.Blend") for r in rows)
     assert "diventa di 18 secondi" in rows[0]["Warn.StyledText"]
-    rows = frames(HEAD(built), 25, 1920, 1080, 120, IDX["dpp_uk"], cd=0)
+    rows = frames(HEAD(built, "broadcast"), 25, 1920, 1080, 120, idx("broadcast", "dpp_uk"), cd=0)
     assert "diventa di 30 secondi" in rows[0]["Warn.StyledText"]
 
 
 def test_slate_text(built):
-    rows = frames(HEAD(built), 23.976, 1920, 1080, 480, IDX["cinema_dcp"])
+    rows = frames(HEAD(built), 23.976, 1920, 1080, 480, idx("cinema", "cinema_dcp"))
     d = rows[0]["SDetails.StyledText"]
     assert "DIRECTOR   Regista" in d and "23.976 fps" in d and "FFOA 01:00:08:00" in d
     assert rows[0]["STitle.StyledText"] == "IL FILM"
@@ -144,19 +152,24 @@ def test_tail(built, fps, nominal):
 def code(tmp_path_factory):
     d = tmp_path_factory.mktemp("code")
     paths = {}
-    for mode in ("generate", "remove"):
-        p = d / ("%s.lua" % mode)
-        p.write_text(build_fx.engine(mode))
-        paths[mode] = str(p)
+    for fam in STD["families"]:
+        for mode in ("generate", "remove"):
+            p = d / ("%s_%s.lua" % (fam["id"], mode))
+            p.write_text(build_fx.engine(mode, STD, fam))
+            paths[(fam["id"], mode)] = str(p)
     return paths
 
 
-def run_engine(code, **kw):
-    args = [LUA, os.path.join(ROOT, "tests", "engine_harness.lua"), code["generate"],
-            "removecode=%s" % code["remove"]]
+def run_engine(code, family="cinema", **kw):
+    args = [LUA, os.path.join(ROOT, "tests", "engine_harness.lua"), code[(family, "generate")],
+            "removecode=%s" % code[(family, "remove")]]
+    if "dursel" not in kw:
+        kw["dursel"] = FAM[family].get("default_duration", 0)
     for k, v in kw.items():
         if k == "preset":
-            v = IDX.get(v, v)
+            v = idx(family, v)
+        if k == "dursel" and isinstance(v, str) and not v.isdigit():
+            v = dur_index(family, v)
         args.append("%s=%s" % (k, v))
     out = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     text = out.stdout.decode()
@@ -202,7 +215,8 @@ def test_engine_cinema(code, fps, df, variant, marks):
 
 
 def test_engine_dpp_bars_sync(code):
-    res, log = run_engine(code, fps="25", df="0", preset="dpp_uk", head=5, progstart=30, program=600)
+    res, log = run_engine(code, "broadcast", fps="25", df="0", preset="dpp_uk", head=5, progstart=30, program=600,
+                          dursel="free")
     assert res["starttc"][-1] == "09:59:30:00", log
     m = markers_of(res)
     assert m["BARS"][0] == "09:59:30:00" and m["CLOCK"][0] == "09:59:50:00"
@@ -216,8 +230,8 @@ def test_engine_dpp_bars_sync(code):
 
 def test_engine_rai_slot(code):
     # contenitore 30" (slot index 3), montato esatto
-    res, log = run_engine(code, fps="25", df="0", preset="rai_spot", head=5, progstart=8, program=30,
-                          durmode=1, slot=3)
+    res, log = run_engine(code, "spot", fps="25", df="0", preset="rai_spot", head=5, progstart=8, program=30,
+                          dursel='Spot 30"')
     m = markers_of(res)
     assert res["starttc"][-1] == "09:59:52:00", log
     assert m["LFOA"][0] == "10:00:29:24" and m["CONTENITORE"][0] == "10:00:00:01"
@@ -226,16 +240,16 @@ def test_engine_rai_slot(code):
 
 
 def test_engine_rai_slot_too_long(code):
-    res, log = run_engine(code, fps="25", df="0", preset="rai_spot", head=5, progstart=8, program=31,
-                          durmode=1, slot=3)
+    res, log = run_engine(code, "spot", fps="25", df="0", preset="rai_spot", head=5, progstart=8, program=31,
+                          dursel='Spot 30"')
     assert "piu' lungo del contenitore di 25 fotogrammi" in log
     assert "Coda non inserita" in log and "tail" not in res
 
 
 def test_engine_custom_container_empty(code):
     # documentario 52' senza montato: si crea il contenitore da riempire
-    res, log = run_engine(code, fps="25", df="0", preset="review", head=5, progstart=0, program=0,
-                          durmode=2, programtc="00:52:00:00")
+    res, log = run_engine(code, "custom", fps="25", df="0", preset="review", head=5, progstart=0, program=0,
+                          dursel="custom", programtc="00:52:00:00")
     m = markers_of(res)
     assert m["LFOA"][0] == "01:51:59:24"
     assert "Contenitore vuoto" in log
@@ -243,14 +257,14 @@ def test_engine_custom_container_empty(code):
 
 
 def test_engine_netflix(code):
-    res, log = run_engine(code, fps="24", df="0", preset="netflix", head=5, progstart=1, program=60)
+    res, log = run_engine(code, "streaming", fps="24", df="0", preset="netflix", head=5, progstart=1, program=60)
     assert res["starttc"][-1] == "00:59:59:00", log
     assert res["head"][0].split("|")[1] == "24"                # 1" di nero
     assert "pop" not in res and "dur=24" in res["tail"][0]
 
 
 def test_engine_music_clap(code):
-    res, log = run_engine(code, fps="25", df="0", preset="music", head=5, progstart=11, program=200)
+    res, log = run_engine(code, "music", fps="25", df="0", preset="music", head=5, progstart=11, program=200)
     m = markers_of(res)
     assert m["SYNC"][0] == "00:59:58:00" and "TAIL CLAP" in m
     assert "flash=1" in res["tail"][0]
@@ -278,7 +292,7 @@ def test_engine_reels_and_regenerate(code):
 
 
 def test_engine_remove(code):
-    res, log = run_engine(code, fps="25", df="0", preset="rai_spot", head=5, progstart=8, program=30, remove=1)
+    res, log = run_engine(code, "spot", fps="25", df="0", preset="rai_spot", head=5, progstart=8, program=30, remove=1)
     assert res["after_remove_markers"] == ["0"]
 
 
@@ -288,3 +302,26 @@ def test_engine_beep_each_second(code):
     assert pops[:7] == ["01:00:00:00", "01:00:01:00", "01:00:02:00", "01:00:03:00",
                         "01:00:04:00", "01:00:05:00", "01:00:06:00"], pops
     assert len(pops) == 8
+
+
+def test_family_controls(built):
+    """Ogni generatore mostra solo le voci pertinenti."""
+    cinema = open(HEAD(built, "cinema")).read()
+    spot = open(HEAD(built, "spot")).read()
+    custom = open(HEAD(built, "custom")).read()
+    assert "TV 26'" not in cinema and "Lungometraggio 90'" in cinema
+    assert "Spot 30" in spot and "Lungometraggio" not in spot and "Libera" not in spot
+    for locked in ('Source = "SlateSec"', 'Source = "Custom"'):
+        assert locked not in cinema and locked not in spot
+        assert locked in custom
+    assert 'Source = "Reel"' in cinema and 'Source = "Reel"' not in spot
+    assert "non prevede sync pop" in spot and 'Source = "PopLevel"' not in spot
+
+
+def test_spot_empty_timeline_container(code):
+    # timeline vuota: il blocco Spot crea leader, contenitore 30" e coda
+    res, log = run_engine(code, "spot", fps="25", df="0", preset="rai_spot", head=5, progstart=0, program=0)
+    m = markers_of(res)
+    assert m["FFOA"][0] == "10:00:00:00" and m["LFOA"][0] == "10:00:29:24"
+    assert m["CONTENITORE"][1] > 700
+    assert "Contenitore vuoto" in log and "dur=75" in res["tail"][0]

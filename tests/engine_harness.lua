@@ -4,7 +4,7 @@
 local enginePath = arg[1]
 local opt = { fps = "24", df = "0", preset = "0", head = "5", progstart = "30", program = "60",
   variant = "1", runs = "1", usermarker = "0", remove = "0", marks = "abs_incl", beep = "0",
-  durmode = "0", slot = "3", programtc = "00:00:30:00", removecode = "" }
+  dursel = "0", programtc = "00:00:30:00", removecode = "" }
 for i = 2, #arg do local k, v = arg[i]:match("([^=]+)=(.*)"); opt[k] = v end
 local fps = tonumber(opt.fps)
 local nominal = math.floor(fps + 0.5)
@@ -60,7 +60,7 @@ local function newComp(tool) local c = { tool = tool }
 local headTool = newTool()
 headTool.inputs = { Preset = tonumber(opt.preset), Reel = 1, Custom = 0, BarsSec = 0, CountFrom = 8, SlateSec = 8,
   GapSec = 2, TailSec = 8, MarkersOn = 1, MarkerKind = 0, MarkerEvery = 0, TailOn = 1,
-  DurMode = tonumber(opt.durmode), Slot = tonumber(opt.slot), ProgramTC = opt.programtc,
+  DurSel = tonumber(opt.dursel), ProgramTC = opt.programtc,
   Title = "Il film", TextRed = 0.5, BeepEach = tonumber(opt.beep), PopLevel = 0 }
 local head = setmetatable({ off = 0, dur = tonumber(opt.head) * nominal, name = "LeaderKit Head",
   comp = newComp(headTool) }, Item)

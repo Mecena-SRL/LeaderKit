@@ -9,15 +9,27 @@ timeline**. Valori di riferimento: [`docs/industry-standards.md`](docs/industry-
 
 Si installa solo con **`LeaderKit-<versione>.drfx`** (doppio clic): niente installer, niente Python.
 
-1. Effetti › Generators › LeaderKit › **LeaderKit Head**: trascinalo dove deve
-   iniziare il leader (di solito a inizio timeline). La lunghezza non conta.
-2. Nell'Inspector scegli lo **standard**, la **durata del programma**
-   (libera, slot standard o personalizzata), i campi slate, i colori, l'audio.
+1. Effetti › Generators › LeaderKit: trascina il generatore della famiglia
+   che ti serve dove deve iniziare il leader, anche **a timeline vuota**.
+   La lunghezza non conta.
+2. Nell'Inspector scegli lo **standard** e la **durata del programma**; ogni
+   generatore mostra solo le voci pertinenti, e negli standard fissi le durate
+   del leader non si possono modificare.
 3. **Genera sulla timeline**: porta il blocco alla durata esatta dello standard,
-   imposta lo start TC, mette tono/pop/sync audio, inserisce la coda
-   (**LeaderKit Tail**) sulla stessa traccia, aggiunge i marker e mostra un
-   riepilogo con i **controlli** (✓/⚠) e cosa fare quando qualcosa non torna.
+   imposta lo start TC, mette tono/pop/sync audio, crea il **contenitore**
+   (con uno slot o una durata personalizzata anche senza montato), inserisce la
+   coda (**LeaderKit Tail**) sulla stessa traccia, aggiunge i marker e mostra
+   un riepilogo con i **controlli** (✓/⚠) e cosa fare.
 4. **Rimuovi elementi generati** cancella solo marker, audio e coda di LeaderKit.
+
+| Generatore | Standard | Durate del programma | Durate leader modificabili |
+|---|---|---|---|
+| **LeaderKit Cinema** | Cinema / DCP, Doppiaggio / M&E | libera, Cortometraggio 15', Cortometraggio 30', Lungometraggio 90', Lungometraggio 100', Lungometraggio 120', personalizzata | no (standard fisso) |
+| **LeaderKit Broadcast TV** | Broadcast UK / DPP, Broadcast UK / Sky | TV 13' (parte), TV 26' (slot mezz'ora), TV 45', TV 50', Documentario TV 52', personalizzata, libera | no (standard fisso) |
+| **LeaderKit Spot** | Spot Italia — RAI, Spot Italia — Publitalia, Spot USA | Spot 10", Spot 15", Spot 20", Spot 30", Spot 45", Spot 60", Spot 90", Spot 120", personalizzata | no (standard fisso) |
+| **LeaderKit Streaming** | Streaming — Netflix / IMF | libera, TV 26' (slot mezz'ora), TV 45', Documentario TV 52', Lungometraggio 90', Lungometraggio 100', Lungometraggio 120', personalizzata | no (standard fisso) |
+| **LeaderKit Videoclip** | Videoclip / Live | libera, personalizzata | no (standard fisso) |
+| **LeaderKit Personalizzato** | Review / lavorazione, Cinema / DCP, Broadcast UK / DPP, Spot Italia — RAI, Streaming — Netflix / IMF, Videoclip / Live | libera, Spot 10", Spot 15", Spot 20", Spot 30", Spot 45", Spot 60", Spot 90", Spot 120", TV 13' (parte), TV 26' (slot mezz'ora), TV 45', TV 50', Documentario TV 52', Cortometraggio 15', Cortometraggio 30', Lungometraggio 90', Lungometraggio 100', Lungometraggio 120', personalizzata | sì |
 
 ### Standard inclusi
 
@@ -50,7 +62,8 @@ capitolato del broadcaster.
 
 ### Aggiungere o modificare uno standard
 
-Modifica `fx/standards.json` (durate in secondi nominali, TC del FFOA, barre,
+Modifica `fx/standards.json` (sezioni `presets`, `slots` e `families`:
+quali standard e quali durate compaiono in ogni generatore) (durate in secondi nominali, TC del FFOA, barre,
 slate/clock, countdown, sync, coda, righe della slate, frame rate e risoluzioni
 ammesse, note) e ricostruisci con `python3 tools/build_fx.py`.
 

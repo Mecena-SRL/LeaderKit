@@ -186,10 +186,11 @@ local function isHeadItem(item)
   local okk, has = pcall(function()
     local cmp = item:GetFusionCompByIndex(1)
     local t = findTool(cmp, "LK")
-    return t ~= nil and t:GetInput("SlateSec") ~= nil
+    return t ~= nil and t:GetInput("DurSel") ~= nil
   end)
   if okk and has then return true end
-  return string.find(item:GetName() or "", "Head", 1, true) ~= nil
+  local nm = item:GetName() or ""
+  return string.find(nm, "LeaderKit", 1, true) ~= nil and nm ~= TAIL_NAME
 end
 
 local head = tl:GetCurrentVideoItem()
@@ -207,10 +208,10 @@ HEAD_NAME = head:GetName()   -- nome del template installato (serve per ricrearl
 
 -- ---------------------------------------------------------------- standard
 local presets = LK_PRESETS or {}
-local slots = LK_SLOTS or {}
+local durations = LK_DURATIONS or { { kind = "free" } }
 local presetIdx = math.floor(get("Preset", 0) + 0.5)
 local P = presets[presetIdx + 1] or presets[1] or {}
-local custom = get("Custom", 0) > 0.5
+local custom = (get("Custom", 0) or 0) > 0.5
 local function dur(key, input)
   if custom then return get(input, P[key] or 0) end
   return P[key] or 0
@@ -230,7 +231,7 @@ local pm = P.markers or {}
 local markerKind = (kindChoice == 1) and "reel" or ((kindChoice == 2) and "break" or (pm.kind or "none"))
 local markerEvery = get("MarkerEvery", 0)
 if not markerEvery or markerEvery <= 0 then markerEvery = pm.every_min or 0 end
-local durMode = math.floor(get("DurMode", 0) + 0.5)             -- 0 libera, 1 slot, 2 personalizzata
+local durSel = durations[math.floor(get("DurSel", LK_DUR_DEFAULT or 0) + 0.5) + 1] or durations[1]
 
 local headLen = math.floor((barsSec + slateSec + gapSec + countFrom) * n + 0.5)
 local tailLen = math.floor(tailSec * n + 0.5)
@@ -239,7 +240,7 @@ if headLen < 1 then
   headLen = 1
 end
 
-local PARAMS = { "Preset", "Reel", "DurMode", "Slot", "ProgramTC", "Custom", "BarsSec", "SlateSec", "GapSec",
+local PARAMS = { "Preset", "Reel", "DurSel", "ProgramTC", "Custom", "BarsSec", "SlateSec", "GapSec",
   "CountFrom", "TailSec", "Title", "Director", "Editor", "Colorist", "Version", "Date", "Note", "MarkersOn",
   "MarkerKind", "MarkerEvery", "TailOn", "PopLevel", "BeepEach",
   "TextRed", "TextGreen", "TextBlue", "BgRed", "BgGreen", "BgBlue", "AccentRed", "AccentGreen", "AccentBlue" }
@@ -408,14 +409,12 @@ elseif firstContent then
 end
 
 local slotFrames, slotLabel = nil, nil
-if durMode == 1 then
-  local sl = slots[math.floor(get("Slot", 0) + 0.5) + 1]
-  if sl then slotFrames, slotLabel = math.floor(sl[2] * n + 0.5), sl[1] end
-elseif durMode == 2 then
+if durSel.kind == "slot" then
+  slotFrames, slotLabel = math.floor(durSel.seconds * n + 0.5), durSel.label
+elseif durSel.kind == "custom" then
   local txt = tostring(get("ProgramTC", "") or "")
   if string.match(txt, "^%s*%d+[:;]%d+[:;]%d+[:;.]%d+%s*$") then
-    local plain = makeRate(tostring(r.fps), "0")
-    slotFrames = tcToFrames(txt, plain)
+    slotFrames = tcToFrames(txt, makeRate(tostring(r.fps), "0"))
     slotLabel = "personalizzata " .. txt
   else
     bad("Durata personalizzata non valida ('" .. txt .. "'): scrivila come HH:MM:SS:FF, per esempio 00:52:00:00.")
@@ -446,7 +445,7 @@ elseif lastContent then
   ok("Durata libera: il programma finisce con l'ultimo clip a " .. framesToTc(lfoa, r) .. ".")
 else
   bad("Nessun clip dopo il leader: monta il programma da " .. framesToTc(ffoa, r) ..
-    " e premi di nuovo Genera, oppure scegli una durata fissa per creare subito il contenitore.")
+    " e premi di nuovo Genera, oppure scegli una durata fissa (slot o personalizzata) per creare subito contenitore e coda.")
 end
 local durTc = lfoa and framesToTc(lfoa - ffoa + 1, r) or "—"
 
@@ -649,7 +648,8 @@ if lfoa then
     ok(string.format("Marker %s ogni %g': %d.", markerKind == "reel" and "fine rullo" or "break", markerEvery, k - 1))
   end
 end
-if audioOk > 0 then ok(audioOk .. " clip audio posizionati sulla traccia '" .. POP_TRACK .. "'.") end
+if audioOk == 1 then ok("1 clip audio posizionato sulla traccia '" .. POP_TRACK .. "'.")
+elseif audioOk > 1 then ok(audioOk .. " clip audio posizionati sulla traccia '" .. POP_TRACK .. "'.") end
 
 -- ---------------------------------------------------------------- 6) slate, guida, note
 local tokens = { ffoa = framesToTc(ffoa, r), lfoa = lfoa and framesToTc(lfoa, r) or "—",
