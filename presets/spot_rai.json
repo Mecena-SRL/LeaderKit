@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "id": "spot_rai",
+  "name": "Spot RAI",
+  "description": "Specifica RAI spot HD (feb. 2021, §8.2): coda di identificazione ≥5\", 3\" di nero e silenzio, spot a 10:00:00:00, ≥3\" di nero e silenzio in coda. Niente barre né countdown. Durata rigida.",
+  "sources": [
+    "docs/industry-standards.md §C (RAI — Specifiche tecniche spot HD, febbraio 2021, letta su mirror: da verificare su controllopubblicita.rai.it)"
+  ],
+  "ffoa_tc": "10:00:00:00",
+  "ffoa_hour_per_reel": false,
+  "head": [
+    {"type": "slate", "start": "-8s", "duration": "5s"}
+  ],
+  "tail_duration": "3s",
+  "tail": [],
+  "markers": {
+    "ffoa_lfoa": {"enabled": true, "color": "Blue"},
+    "sync": {"enabled": false, "color": "Cyan"},
+    "interval": {"enabled": false, "kind": "break", "every": "5m", "color": "Yellow"}
+  },
+  "target_durations": ["15s", "20s", "30s", "45s", "60s"],
+  "slate": {
+    "heading": "SPOT — RAI",
+    "fields": ["title", "director", "editor", "colorist", "date", "version", "duration", "fps", "resolution"],
+    "extra_lines": [
+      "LOUDNESS −23,0 LUFS ±0,2 LU  ·  MAX SHORT-TERM −18,0 LUFS  ·  TRUE PEAK −2,0 dBTP",
+      "SPOT {ffoa_tc} → {lfoa_tc}"
+    ]
+  },
+  "checks": {
+    "expected_rates": ["25"],
+    "expected_resolutions": [[1920, 1080]],
+    "rate_hint": "RAI richiede 1080i25 (XDCAM HD422 o ProRes 422 HQ).",
+    "strict_duration": true
+  }
+}
