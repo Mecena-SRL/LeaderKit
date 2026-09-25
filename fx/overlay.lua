@@ -204,6 +204,22 @@ LK_OVERLAY = (function()
     end)
   end
 
+  -- griglia di righe alternate bianco/nero larghe p pixel (verticali o orizzontali), pixel-esatta
+  function Canvas:grating(x0, y0, x1, y1, p, vertical, cw, cb)
+    x0, x1 = max(0, floor(x0 + 0.5)), min(self.W, floor(x1 + 0.5))
+    y0, y1 = floor(y0 + 0.5), floor(y1 + 0.5)
+    if x1 <= x0 or y1 <= y0 then return end
+    self:add(y0, y1 - 1, function(y, row)
+      local hy = floor((y - y0) / p) % 2
+      for x = x0, x1 - 1 do
+        local on
+        if vertical then on = floor((x - x0) / p) % 2 == 0 else on = hy == 0 end
+        local c = on and cw or cb
+        blend(row, x, c[1], c[2], c[3], 1)
+      end
+    end)
+  end
+
   -- anello di spessore t
   function Canvas:ring(cx, cy, rad, t, c)
     local ro, ri = rad + t / 2, rad - t / 2
@@ -337,8 +353,7 @@ LK_OVERLAY = (function()
     local W, H = self.W, self.H
     local w = pngWriter(path, W, H)
     if not w then return false end
-    table.sort(self.shapes, function(a, b) return a[1] < b[1] end)
-    local shapes = self.shapes
+    local shapes = self.shapes      -- nell'ordine di disegno (livelli)
     local row = {}
     local n4 = W * 4
     local empty = nil
@@ -346,8 +361,7 @@ LK_OVERLAY = (function()
       local any = false
       for i = 1, #shapes do
         local s = shapes[i]
-        if s[1] > y then break end
-        if s[2] >= y then
+        if s[1] <= y and s[2] >= y then
           if not any then for k = 1, n4 do row[k] = 0 end; any = true end
           s[3](y, row)
         end
@@ -482,12 +496,27 @@ LK_OVERLAY = (function()
         x, y = R(50, 100)
         cv:text(string.format("%.2f:1", W / H), x, y, gh, accent, "center")
       end
-      -- stelle di fuoco sopra e sotto i pannelli
+      -- griglie di risoluzione sopra e sotto i pannelli: righe di 1, 2, 3, 4 pixel,
+      -- verticali (fila in alto) e orizzontali (fila in basso). Al 100% devono essere nette:
+      -- se le righe da 1 px si impastano l'immagine e' stata scalata o e' morbida.
       if cal.stars then
-        local rad = 0.055 * H
-        for _, p in ipairs({ { 0.25, 0.11 }, { 0.75, 0.11 }, { 0.25, 0.89 }, { 0.75, 0.89 } }) do
-          cv:star(p[1] * W, p[2] * H, rad, 36, WHITE, BLACK)
-          cv:ring(p[1] * W, p[2] * H, rad * 1.08, lw, dim(0.6))
+        local sq = floor(0.042 * H + 0.5)
+        local gap = floor(0.008 * H + 0.5)
+        local lgh = max(8, floor(0.016 * H + 0.5))
+        local wTot = 4 * sq + 3 * gap
+        local hTot = lgh + gap + 2 * sq + gap
+        for _, p in ipairs({ { 0.25, 0.115 }, { 0.75, 0.115 }, { 0.25, 0.885 }, { 0.75, 0.885 } }) do
+          local x0 = floor(p[1] * W - wTot / 2 + 0.5)
+          local y0 = floor(p[2] * H - hTot / 2 + 0.5)
+          cv:rect(x0 - gap, y0 - gap, x0 + wTot + gap, y0 + hTot + gap, BLACK)
+          cv:frame(x0 - gap, y0 - gap, x0 + wTot + gap, y0 + hTot + gap, lw, dim(0.6))
+          for k = 1, 4 do
+            local gx = x0 + (k - 1) * (sq + gap)
+            cv:text(tostring(k), gx + sq / 2, y0, lgh, accent, "center")
+            local gy = y0 + lgh + gap
+            cv:grating(gx, gy, gx + sq, gy + sq, k, true, WHITE, BLACK)
+            cv:grating(gx, gy + sq + gap, gx + sq, gy + 2 * sq + gap, k, false, WHITE, BLACK)
+          end
         end
       end
       if cal.center then

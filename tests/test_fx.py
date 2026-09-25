@@ -72,10 +72,10 @@ def test_head_cinema(built, fps, nominal, w, h):
     rows = frames(HEAD(built), fps, w, h, n, idx("cinema", "cinema_dcp"))
     for r in rows:
         rem = n - r["t"]
-        assert on(r, "MSlate.Blend") == (10 * nominal < rem <= 18 * nominal)
+        assert on(r, "MSlate.Mix") == (10 * nominal < rem <= 18 * nominal)
         assert on(r, "MPicStart.Blend") == (rem == 8 * nominal)
-        assert on(r, "MLeader.Blend") == (2 * nominal <= rem <= 8 * nominal)
-        assert not on(r, "MBars.Blend") and not on(r, "MFlash.Blend")
+        assert on(r, "MLeader.Mix") == (2 * nominal <= rem <= 8 * nominal)
+        assert not on(r, "MBars.Mix") and not on(r, "MFlash.Blend")
         digit = r["LDigit.StyledText"]
         if 2 * nominal < rem < 8 * nominal:
             assert digit == str(-(-rem // nominal))
@@ -95,9 +95,9 @@ def test_head_dpp(built):
     rows = frames(HEAD(built, "broadcast"), 25, 1920, 1080, n, idx("broadcast", "dpp_uk"), cd=0)
     for r in rows:
         rem = n - r["t"]
-        assert on(r, "MBars.Blend") == (rem > 250)
-        assert on(r, "MSlate.Blend") == (75 < rem <= 250)
-        assert not on(r, "MLeader.Blend")
+        assert on(r, "MBars.Mix") == (rem > 250)
+        assert on(r, "MSlate.Mix") == (75 < rem <= 250)
+        assert not on(r, "MLeader.Mix")
         # sync DPP: 2 fotogrammi bianchi a 09:59:57:06 = 69 fotogrammi prima del FFOA
         assert on(r, "MFlash.Blend") == (rem in (69, 68)), rem
         assert not on(r, "MWarn.Blend")
@@ -118,10 +118,11 @@ def test_head_rai(built):
     rows = frames(HEAD(built, "spot"), 25, 1920, 1080, n, idx("spot", "rai_spot"), cd=0)
     for r in rows:
         rem = n - r["t"]
-        assert on(r, "MSlate.Blend") == (rem > 75)
-        assert not on(r, "MLeader.Blend") and not on(r, "MPicStart.Blend") and not on(r, "MFlash.Blend")
-    assert "LOUDNESS -23,0 LUFS" in rows[0]["SDetails.StyledText"]
-    assert "1920 x 1080" in rows[0]["SDetails.StyledText"]
+        assert on(r, "MSlate.Mix") == (rem > 75)
+        assert not on(r, "MLeader.Mix") and not on(r, "MPicStart.Blend") and not on(r, "MFlash.Blend")
+    assert "LOUDNESS -23,0 LUFS" in rows[0]["SFoot.StyledText"]
+    fmt = [v for k, v in rows[0].items() if k.startswith("SV2_") and k.endswith("StyledText") and "1920 x 1080" in v]
+    assert fmt and "1.78:1" in fmt[0]
 
 
 def test_head_length_hint(built):
@@ -134,9 +135,11 @@ def test_head_length_hint(built):
 
 def test_slate_text(built):
     rows = frames(HEAD(built), 23.976, 1920, 1080, 480, idx("cinema", "cinema_dcp"))
-    d = rows[0]["SDetails.StyledText"]
-    assert "DIRECTOR   Regista" in d and "23.976 fps" in d and "FFOA 01:00:08:00" in d
-    assert rows[0]["STitle.StyledText"] == "IL FILM"
+    r = rows[0]
+    assert r["SDirector.StyledText"] == "DIRECTED BY   REGISTA"
+    assert any(v == "23.976 fps" for k, v in r.items() if k.startswith("SV2_"))
+    assert "FFOA 01:00:08:00" in r["SFoot.StyledText"]
+    assert r["STitle.StyledText"] == "IL FILM"
 
 
 @pytest.mark.parametrize("fps,nominal", [(24, 24), (25, 25), (29.97, 30)])
@@ -334,16 +337,22 @@ def test_spot_empty_timeline_container(code):
 
 def test_slate_only_filled_fields(built):
     rows = frames(HEAD(built), 24, 1920, 1080, 18 * 24, idx("cinema", "cinema_dcp"))
-    d = rows[0]["SDetails.StyledText"]
-    assert "DIRECTOR   Regista" in d and "EDITOR   Montatore" in d
-    assert "PRODUCER" not in d and "CLIENT" not in d and "PHASE" not in d
+    r = rows[0]
+    labels = [v for k, v in r.items() if k.startswith("SL") and k.endswith("StyledText") and v]
+    assert "EDITOR" in labels and "PRODUCER" not in labels and "CLIENT" not in labels and "PHASE" not in labels
+    # i campi compilati sono impacchettati: il primo della colonna POST sta in alto a sinistra
+    ed = [k for k, v in r.items() if k.startswith("SV1_") and k.endswith("StyledText") and v == "Montatore"][0]
+    cx, cy = map(float, r[ed.replace("StyledText", "Center")].split(","))
+    assert abs(cx - (0.5 - 0.072)) < 1e-6 and abs(cy - (0.54 - 0.033)) < 1e-6
 
 
 def test_generator_is_light(built):
     """Taratura e frame lines non sono piu' nodi Fusion (erano la causa dei 2.5 fps)."""
     text = open(HEAD(built)).read()
     tools = [t for t in re.findall(r"^\t\t\t\t(\w+) = (\w+) \{", text, re.M) if not t[1].startswith("Instance")]
-    assert len(tools) < 80, len(tools)
+    assert len(tools) < 200, len(tools)
+    # slate, barre e countdown si alternano con Dissolve (Fusion calcola solo l'ingresso attivo)
+    assert ("MSlate", "Dissolve") in tools and ("MLeader", "Dissolve") in tools
     names = [t[0] for t in tools]
     assert not any(n.startswith(("St", "Rp", "FL", "Cal", "Pan", "Grey")) for n in names if n != "LK")
     for key in ("CalOn", "CalStars", "FL185", "Guides", "SafeAction"):     # restano come opzioni per Genera
@@ -479,3 +488,44 @@ def test_engine_burnin_sync_audio_tc(built, code):
 def test_engine_burnin_without_track_lock(built, code):
     res, text = run_engine(code, preset="work_dailies", progstart="6", program="10", nolock="1")
     assert "burn" not in res and "Burn-in non inserito" in text
+
+
+def dump_tools(setting, fps, w, h, frames_, t, **kw):
+    import json
+    args = [LUA, os.path.join(ROOT, "tests", "lua_dump.lua"), setting, str(fps), str(w), str(h), str(frames_), str(t)]
+    args += ["%s=%s" % kv for kv in kw.items()]
+    out = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert out.returncode == 0, out.stderr.decode()
+    return dict((k, v["inputs"]) for k, v in json.loads(out.stdout.decode())["tools"].items())
+
+
+def test_burnin_matte(built):
+    """Timeline 16:9 con mascherino 2.39: dati nelle bande nere; formato nativo: bande proprie semitrasparenti."""
+    setting = os.path.join(built, "LeaderKit Burn-in.setting")
+    seg = "86400|86880|1000|1|24|0|-1|0|IL FILM~|CLIP~|SRC {SRC}~|REC {REC}~~{REC}"
+    t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=11)
+    lb = (1 - (1920 / 1080) / 2.39) / 2
+    assert abs(t["MatTM"]["Height"] - lb) < 1e-3 and t["MatT"]["TopLeftAlpha"] == 1
+    assert t["BandT"]["TopLeftAlpha"] == 0                       # niente bande proprie: c'e' il mascherino
+    assert 1 - lb < t["T11"]["Center"][1] < 1 and t["T11"]["StyledText"] == "IL FILM"
+    assert 0 < t["T41"]["Center"][1] < lb and t["T41"]["StyledText"] == "REC 01:00:00:00"
+    t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=0)
+    assert t["MatTM"]["Height"] == 0 and t["BandT"]["TopLeftAlpha"] == 0.75
+    # su una timeline 2.39 nativa il mascherino 2.39 non serve
+    t = dump_tools(setting, 24, 4096, 1716, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=11)
+    assert t["MatTM"]["Height"] == 0 and t["BandT"]["TopLeftAlpha"] == 0.75
+
+
+def test_burnin_matte_presets_and_custom(built):
+    setting = os.path.join(built, "LeaderKit Burn-in.setting")
+    names = [m for m, _ in build_fx.MATTES]
+    seg = "86400|86880|1000|1|24|0|-1|0|A~|B~|C~|D~~{REC}"
+    # 1.33 su timeline 2:1: pillarbox, bande laterali di (1 - 1.33/2) / 2
+    t = dump_tools(setting, 24, 3840, 1920, 480, 0, Seg=seg, BMatte=names.index("1.33:1 (4:3)"))
+    assert abs(t["MatLM"]["Width"] - (1 - (4 / 3) / 2) / 2) < 1e-3 and t["MatTM"]["Height"] == 0
+    # 1.33 su timeline 2.39 DCI
+    t = dump_tools(setting, 24, 4096, 1716, 480, 0, Seg=seg, BMatte=names.index("1.33:1 (4:3)"))
+    assert abs(t["MatLM"]["Width"] - (1 - (4 / 3) / (4096 / 1716)) / 2) < 1e-3
+    # personalizzato con lo slider: 2.10 su 16:9 = letterbox
+    t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, BMatte=len(names) - 1, BMatteRatio=2.1)
+    assert abs(t["MatTM"]["Height"] - (1 - (1920 / 1080) / 2.1) / 2) < 1e-3 and t["MatLM"]["Width"] == 0

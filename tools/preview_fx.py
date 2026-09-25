@@ -124,6 +124,16 @@ class Renderer(object):
             f = self.image(fg) if fg else out
             k = num(self.inp(name, "Blend"), 1.0)
             out = b * (1 - f[..., 3:4] * k) + f * k
+        elif kind == "Dissolve":
+            k = num(self.inp(name, "Mix"), 0.0)
+            bg = self.link(name, "Background")
+            fg = self.link(name, "Foreground")
+            if k <= 0:
+                out = self.image(bg) if bg else out
+            elif k >= 1:
+                out = self.image(fg) if fg else out
+            else:
+                out = self.image(bg) * (1 - k) + self.image(fg) * k
         elif kind == "Transform":
             src = self.image(self.link(name, "Input"))
             cx, cy = pt(self.inp(name, "Center"))
@@ -176,7 +186,9 @@ def render(setting, fps=24, w=1920, h=1080, frames=432, t=0, extra=(), scale=1.0
     rw, rh = int(w * scale), int(h * scale)
     r = Renderer(data, rw, rh)
     img = r.image(data["output"])
-    rgb = np.clip(img[..., :3] + (1 - img[..., 3:4]) * 0, 0, 1)
+    # sotto: grigio-blu dove l'uscita e' trasparente (per vedere burn-in e mascherino)
+    under = np.array([0.27, 0.35, 0.47], dtype=np.float32)
+    rgb = np.clip(img[..., :3] + (1 - img[..., 3:4]) * under, 0, 1)
     return Image.fromarray((rgb * 255).astype(np.uint8), "RGB")
 
 

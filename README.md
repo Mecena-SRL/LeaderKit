@@ -72,9 +72,15 @@ ogni fotogramma. La **fase di lavoro** sceglie i campi (poi modificabili):
 | Suono / mix / VO / doppiaggio | Record TC anche grande, contatore del programma, titolo, versione |
 | Approvazione cliente | Record TC, titolo, versione, data, watermark con destinatario |
 
-Posizione (scheda Aspetto): bande sopra e sotto (opacità regolabile), bande del
-2.39 in letterbox, oppure dentro l'immagine (safe 90%); l'altezza del testo è in
-percentuale del quadro, quindi resta uguale su 16:9, 2:1 o DCI. I dati si
+**Mascherino** (scheda Aspetto): preset 1.33, 1.37 Academy, 1.43 IMAX, 1.66,
+1.78, 1.85 Flat, 1.90, 2.00, 2.20, 2.35, 2.39 Scope, 2.76 oppure un rapporto
+personalizzato con lo slider. È sempre calcolato sul rapporto reale della
+timeline: se il formato è più largo diventa letterbox (bande sopra e sotto,
+dove vanno i dati: la prassi delle grandi produzioni, "fuori dall'immagine
+attiva"), se è più stretto diventa pillarbox (bande laterali, es. 1.33 su una
+timeline 2:1 o 2.39), se coincide non si vede. Senza mascherino i dati stanno in
+bande proprie semitrasparenti o dentro l'immagine (safe 90%). L'altezza del
+testo è in percentuale del quadro, quindi resta uguale su 16:9, 2:1 o DCI. I dati si
 aggiornano con **Aggiorna dai metadati** (o con Genera) dopo modifiche al
 montaggio o ai metadati.
 
@@ -87,9 +93,17 @@ montaggio o ai metadati.
 | **Post** | montaggio, color, suono, VFX, versione, fase di lavorazione, stato color/suono/VFX/musica/titoli (TEMP/FINAL), note |
 | **Tecnico** | frame lines 1.33 / 1.66 / 1.78 / 1.85 / 2.00 / 2.20 / 2.39, safe area 93% e 90%, spazio colore (letto dal progetto), formato audio, livello pop |
 | **Aspetto** | colori di testo, sfondo e grafica; logo scelto con **selettore file** (posizione, dimensione, anche sulla coda) |
-| **Taratura** | strumenti sul countdown, ispirati al leader digitale SMPTE RP 428-6: stelle di Siemens per il fuoco, mirino centrale, scala di grigi a 11 gradini, patch RGBCMY, rampe continue B/N-R-G-B, verifica del blu (Wratten 47B), sfera sfumata per il contouring, bianco di picco e neri (PLUGE 2/4/8%), etichette fps/risoluzione/formato |
+| **Taratura** | strumenti sul countdown, ispirati al leader digitale SMPTE RP 428-6: griglie di risoluzione pixel-esatte (righe verticali e orizzontali da 1, 2, 3, 4 px: se quelle da 1 px si impastano, l'immagine è morbida o è stata scalata), mirino centrale, scala di grigi a 11 gradini, patch RGBCMY, rampe continue B/N-R-G-B, verifica del blu (Wratten 47B), sfera sfumata per il contouring, bianco di picco e neri (PLUGE 2/4/8%), etichette fps/risoluzione/formato |
 
-La slate mostra solo i campi compilati.
+**Slate**: titolo grande (si riduce da solo se è lungo), "Directed by", filo
+nel colore evidenza e tre pannelli: **Production** (produzione, produttore,
+cliente, agenzia, codice, episodio, lingua, data), **Post** (montaggio, color,
+suono, VFX, versione, fase, stato TEMP/FINAL) e **Technical** (durata, formato e
+rapporto, frame rate, spazio colore di uscita, audio). Ogni pannello ha due
+sotto-colonne; i campi vuoti non lasciano buchi e i pannelli si accorciano; in
+basso i timecode calcolati. Due loghi (produzione e cliente) negli angoli.
+Slate, barre e countdown si alternano con nodi Dissolve, così Fusion calcola
+solo la parte visibile.
 
 **Taratura e frame lines sono immagini statiche**: Genera le disegna pixel per
 pixel alla **risoluzione esatta della timeline** (PNG con trasparenza, in
