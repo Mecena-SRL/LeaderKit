@@ -38,6 +38,14 @@ LeaderKit tra i template). DaVinci Resolve per iPad non è supportato.
    - chiude con un riepilogo di **controlli** (✓/⚠) che dice cosa fare.
 4. **Rimuovi elementi generati** cancella solo ciò che ha creato LeaderKit:
    marker, audio, coda, immagini e burn-in. Il blocco di testa resta.
+5. **Aggiorna solo le immagini** (nelle schede Tecnico, Aspetto e Taratura)
+   rifà taratura, frame lines, slate fissa, titolo e loghi dopo aver cambiato
+   quelle impostazioni. Non tocca blocco, coda, audio, marker, timecode e
+   burn-in.
+
+Se una parte non riesce (per esempio un logo in un formato che Resolve non
+importa), le altre vengono fatte lo stesso e il riepilogo dice cosa è andato
+storto e perché.
 
 Tracce create da Genera:
 
@@ -46,7 +54,23 @@ Tracce create da Genera:
 | LeaderKit Pop (audio) | tono di line-up, 2-pop, sync, tail pop |
 | LeaderKit Grafica | taratura e frame lines sul countdown, quadranti degli stili Quadrante e Orologio |
 | LeaderKit Logo, Logo 2, Logo Titolo | logo di produzione, secondo logo, titolo in PNG |
+| LeaderKit Slate | la slate come immagine fissa (con titolo e loghi già dentro) |
 | LeaderKit Burn-in | burn-in delle copie di lavoro |
+
+**Fluidità**:
+- **Slate fissa**: la slate è testo fermo, quindi Genera la fa esportare da
+  Resolve una volta, alla risoluzione della timeline, e la mette come immagine
+  sulla traccia LeaderKit Slate. Nel blocco la slate non viene più calcolata.
+  Con l'orologio TV (o lo stile Orologio) crea un'immagine per ogni secondo.
+  Lo stile Quadrante resta in tempo reale, perché la tacca si muove a ogni
+  fotogramma. Si può spegnere in Aspetto › Slate come immagine fissa.
+  Se cambi testi, stile o loghi, premi **Aggiorna solo le immagini**.
+- **Espressioni leggere**: Genera scrive nei generatori risoluzione e frame rate
+  della timeline, così i testi non li richiedono a ogni fotogramma. Se cambi la
+  risoluzione della timeline, premi di nuovo Genera (o Aggiorna dai metadati
+  per il burn-in).
+- **Cache Fusion**: attivata su testa e coda ("Render Cache Fusion Output" su
+  On; serve Playback › Render Cache su Smart o User).
 
 Tutte le immagini (taratura, quadranti) vengono disegnate da Genera **pixel per
 pixel alla risoluzione esatta della timeline**. Sono PNG con trasparenza,
@@ -61,9 +85,19 @@ spazio.
 | **Progetto** | standard, rullo, durata del programma, slot, break TV, marker, coda, **Genera** / **Rimuovi**, guida timecode e timecode calcolati |
 | **Produzione** | titolo, produzione, produttore, regia, cliente, agenzia, codice (Ad-ID/Clock/Auditel), episodio/rullo, lingua, data con bottone **Oggi** e spunta **Data sempre aggiornata** (vale a ogni render) |
 | **Post** | montaggio, color, suono, VFX, versione, fase di lavorazione, stato dei reparti (TEMP/FINAL), note |
-| **Tecnico** | frame lines 1.33–2.39, safe area 93% e 90%, spazio colore (letto dal progetto), formato audio, livello del pop |
+| **Tecnico** | frame lines 1.33–2.39 e safe area 93% / 90% (sul countdown, si aggiornano con Genera), spazio colore (letto dal progetto), **audio**: canali, campionamento e loudness da preset più note libere, livello del pop |
 | **Aspetto** | stile della slate, titolo in PNG, colori (testo, sfondo, grafica, evidenza), logo di produzione e secondo logo (file, posizione, dimensione, anche sulla coda) |
 | **Taratura** | strumenti sul countdown (vedi sotto) |
+
+### Audio
+
+Nella scheda Tecnico:
+- **Canali**: mono, stereo, 5.1 (L R C LFE Ls Rs), 5.1 + stereo 7-8, 7.1, 7.1 + 5.1 + stereo, Atmos + 5.1 + stereo, M&E 5.1 + M&E stereo, stem DX/MX/FX, 8 mono con stereo su 1-2 (RAI spot), stereo 1-2 duplicato su 3-4 (Publitalia).
+- **Campionamento**: 48 kHz 24 bit, 48 kHz 16 bit, 96 kHz 24 bit.
+- **Loudness**: il target dello standard scelto, oppure uno tra EBU R128 (−23 LUFS / −1 dBTP), R128 s1 per gli spot, RAI spot (−23 LUFS ±0,2 / −2 dBTP), AGCOM / Publitalia (−24 LKFS ±0,5), ATSC A/85 (−24 LKFS / −2 dBTP), Netflix (−27 LKFS dialogue-gated / −2 dBTP), web (−14 LUFS). I valori vengono da `docs/industry-standards.md`.
+- **Note audio**: testo libero che si aggiunge a quanto sopra.
+
+Sulla slate compaiono i campi AUDIO e LOUDNESS. LeaderKit non misura il loudness: lo riporta come target.
 
 ## Slate
 
@@ -79,7 +113,7 @@ Quattro stili (Aspetto › Slate):
 - **Campi**: compaiono solo quelli compilati. I pannelli si accorciano quando i campi sono pochi e i testi lunghi si riducono, mai sotto l'80%.
 - **Stato dei reparti** (color, suono, VFX, musica, titoli): badge a grandezza fissa, **FINAL** in verde e **TEMP** nel colore evidenza.
 - **Titolo in PNG** (con trasparenza): Genera lo impagina nel riquadro del titolo dello stile scelto, leggendo le proporzioni dal file, e il titolo di testo sparisce.
-- **Loghi**: logo di produzione e secondo logo vanno negli angoli scelti, con margini esatti.
+- **Loghi**: logo di produzione e secondo logo vanno negli angoli scelti, con margini esatti. Si scelgono con il selettore di file (anche se l'immagine è già nel Media Pool), oppure mettendo l'immagine nei bin "LeaderKit Logo" / "LeaderKit Logo 2" del Media Pool. Se non c'è nessun logo, il riepilogo di Genera lo dice.
 - **Layout**: si adatta a 16:9, 2:1, DCI Flat/Scope e 4:3.
 
 Slate, barre e countdown, e i quattro stili tra loro, si alternano con nodi
@@ -105,6 +139,19 @@ un PNG statico sopra il countdown:
 - neri (PLUGE 2/4/8%);
 - etichette fps, risoluzione e formato;
 - frame lines dei formati scelti e safe area.
+
+Gli strumenti usano tutta la timeline e stanno **sopra** le frame lines: le
+frame lines si riferiscono ai formati, la taratura alla timeline. Si possono
+attivare tutte le frame lines insieme.
+
+**Ultimo fotogramma prima del programma** (Taratura): nero come da standard,
+pallino di cue in alto a destra, pallino al centro, cartello PROGRAM START con
+il timecode del FFOA, oppure flash bianco. Compare solo sul fotogramma che
+precede il FFOA (per esempio 00:59:59:23 con FFOA a 01:00:00:00).
+
+Sotto il cerchio del countdown c'è una riga con **titolo, produzione, regia e
+montaggio** e il **logo di produzione** in piccolo (Taratura › Dati del progetto
+nel countdown / Logo della produzione nel countdown).
 
 ## Standard inclusi
 
@@ -170,7 +217,9 @@ Il burn-in legge da Resolve, clip per clip:
 - sound roll e TC dell'audio sotto (per verificare il sync);
 - spazio colore del progetto.
 
-Record TC e contatore fotogrammi sono calcolati a ogni fotogramma. La **fase di
+Record TC e contatore fotogrammi sono calcolati a ogni fotogramma, con una
+ricerca veloce nella tabella dei clip (la riproduzione non rallenta). Tutti i
+testi hanno un contorno nero, leggibile anche sul bianco. La **fase di
 lavoro** sceglie i campi, che restano modificabili:
 
 | Fase | Campi |
@@ -196,8 +245,9 @@ lavoro** sceglie i campi, che restano modificabili:
   due righe, i dati diventano una riga sola, ridotta quanto basta.
 - **Pillarbox**: se il formato è più stretto (es. 1.33 su una timeline 2:1 o
   2.39), le bande stanno ai lati e i dati vanno lì.
-- **Formato nativo**: senza mascherino, i dati stanno in bande proprie
-  semitrasparenti o dentro l'immagine (safe 90%).
+- **Formato nativo** ("Nessuno"): nessuna banda. I dati stanno ai bordi,
+  sull'immagine, con il contorno nero. In alternativa si possono mettere dentro
+  l'immagine (safe 90%) o in bande proprie semitrasparenti (Posizione dei dati).
 
 L'altezza del testo è una percentuale del quadro, quindi resta la stessa su
 16:9, 2:1 e DCI. I dati sono **allineati ai bordi** (sinistra e destra). Se in
@@ -247,8 +297,8 @@ La prima versione, uno script Python da Workspace › Scripts, è documentata in
 Verificato in Resolve Studio 21.1 fino alla 0.8: resa, schede, Genera, bip,
 taratura PNG a piena risoluzione e geometria su 2:1. Da confermare sul campo:
 
-1. Riproduzione fluida con i quattro stili di slate: i Dissolve devono
-   calcolare solo la parte visibile.
+1. Slate fissa: esportazione con ExportCurrentFrameAsStill (API di Resolve
+   18.5+) e riproduzione fluida di slate e burn-in.
 2. Ancoraggio a sinistra e a destra dei testi Text+ (burn-in, stili Quadrante e
    Orologio).
 3. Loghi e titolo PNG: posizione e durata sulla slate e sulla coda.

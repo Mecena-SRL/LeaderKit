@@ -69,7 +69,8 @@
           2160
         ]
       ],
-      "resolution_hint": "Container DCI: Flat 1.85 = 1998×1080 / 3996×2160, Scope 2.39 = 2048×858 / 4096×1716, Full = 2048×1080 / 4096×2160 (docs §A). Imposta la timeline su uno di questi prima di montare, oppure prevedi il ridimensionamento nel DCP."
+      "resolution_hint": "Container DCI: Flat 1.85 = 1998×1080 / 3996×2160, Scope 2.39 = 2048×858 / 4096×1716, Full = 2048×1080 / 4096×2160 (docs §A). Imposta la timeline su uno di questi prima di montare, oppure prevedi il ridimensionamento nel DCP.",
+      "loudness": ""
     },
     {
       "id": "dubbing",
@@ -105,7 +106,8 @@
       "notes": [
         "Netflix: leader e sync pop vanno rimossi dai file Atmos doppiati (lunghezza identica all'IMF)."
       ],
-      "category": "cinema"
+      "category": "cinema",
+      "loudness": ""
     },
     {
       "id": "rai_tv",
@@ -158,7 +160,8 @@
       "notes": [
         "RAI non pubblica la specifica di consegna dei programmi: questo è un layout EBU/DPP di riferimento. Verifica barre, clock e timecode con il capitolato di produzione.",
         "Servizio pubblico: limiti di affollamento pubblicitario più stretti delle reti commerciali."
-      ]
+      ],
+      "loudness": "-23 LUFS  -1 dBTP (R128)"
     },
     {
       "id": "mediaset_tv",
@@ -210,7 +213,8 @@
       "unverified": true,
       "notes": [
         "Mediaset/Publitalia: specifica programmi non pubblica, consegna via Digital Delivery. Layout EBU/DPP di riferimento: verifica con il capitolato."
-      ]
+      ],
+      "loudness": "-24 LKFS ±0,5"
     },
     {
       "id": "sky_it",
@@ -262,7 +266,8 @@
       "unverified": true,
       "notes": [
         "Sky Italia: specifica non pubblica; layout basato su Sky UK. Verifica con il capitolato."
-      ]
+      ],
+      "loudness": "-23 LUFS  -1 dBTP (R128)"
     },
     {
       "id": "ebu_generic",
@@ -314,7 +319,8 @@
       "unverified": true,
       "notes": [
         "Layout di riferimento per broadcaster europei: ogni rete ha il suo capitolato (barre, clock, sync, timecode)."
-      ]
+      ],
+      "loudness": "-23 LUFS  -1 dBTP (R128)"
     },
     {
       "id": "dpp_uk",
@@ -370,7 +376,8 @@
         "DPP: a fine parte 5\" di freeze o living hold (montato da te), poi almeno 1\" di nero.",
         "Barre 100% (non SMPTE) con tono di line-up; clock ≥7\" in silenzio; sync opzionale: 2 fotogrammi bianchi, tono sul primo."
       ],
-      "category": "tv"
+      "category": "tv",
+      "loudness": "-23 LUFS  -1 dBTP (R128)"
     },
     {
       "id": "sky_uk",
@@ -425,7 +432,8 @@
       "notes": [
         "Sky: in coda 3\" di End of Programme card, 2\" di holding frame, 10\" di nero prima dei textless."
       ],
-      "category": "tv"
+      "category": "tv",
+      "loudness": "-23 LUFS  -1 dBTP (R128)"
     },
     {
       "id": "rai_spot",
@@ -471,7 +479,8 @@
       "notes": [
         "RAI: niente barre né countdown, un solo spot per file, durata esatta al fotogramma, 1080i25."
       ],
-      "category": "spot"
+      "category": "spot",
+      "loudness": "-23 LUFS ±0,2  -2 dBTP"
     },
     {
       "id": "publitalia_spot",
@@ -517,7 +526,8 @@
         "Publitalia HD: consegna solo tramite Digital Delivery; layout di testa da prassi vendor (slate 09:59:50, nero 09:59:57).",
         "Coda di 2 secondi di nero aggiunta da LeaderKit (lo standard non la richiede): si toglie con 'Inserisci la coda'."
       ],
-      "category": "spot"
+      "category": "spot",
+      "loudness": "-24 LKFS ±0,5"
     },
     {
       "id": "us_spot",
@@ -557,7 +567,8 @@
         "USA: identificativo Ad-ID (11 caratteri, 12° opzionale H/D) nella slate.",
         "Coda di 2 secondi di nero aggiunta da LeaderKit (lo standard non la richiede): si toglie con 'Inserisci la coda'."
       ],
-      "category": "spot"
+      "category": "spot",
+      "loudness": "-24 LKFS  -2 dBTP (A/85)"
     },
     {
       "id": "netflix",
@@ -594,7 +605,8 @@
         "Netflix: esattamente 1\" di nero e silenzio in testa e in coda al programma; niente slate nel master.",
         "In 29.97/59.94 il numero di fotogrammi di ogni segmento CPL deve essere divisibile per 5."
       ],
-      "category": "streaming"
+      "category": "streaming",
+      "loudness": "-27 LKFS DG  -2 dBTP"
     },
     {
       "id": "music",
@@ -634,7 +646,8 @@
       "notes": [
         "Digital clap: 1 fotogramma bianco + 1 fotogramma di tono in testa e in coda, per verificare la deriva."
       ],
-      "category": "music"
+      "category": "music",
+      "loudness": "-14 LUFS"
     },
     {
       "ffoa": "01:00:00:00",
@@ -671,7 +684,8 @@
       "notes": [
         "Burn-in consigliato fuori dall'immagine attiva (bande): Netflix, Dailies Best Practices.",
         "Scena, take, camera e roll arrivano dai metadati di Resolve: compilali nel Media Pool (o dai metadati di camera/BWF) prima di premere Genera."
-      ]
+      ],
+      "loudness": ""
     },
     {
       "ffoa": "01:00:00:00",
@@ -705,7 +719,8 @@
       "slate_lines": [
         "COPIA DI LAVORO — NON PER LA DIFFUSIONE"
       ],
-      "notes": []
+      "notes": [],
+      "loudness": ""
     },
     {
       "ffoa": "01:00:00:00",
@@ -742,7 +757,8 @@
       "notes": [
         "Per suono, mix, VO e doppiaggio servono 2-pop e tail pop per il sync nella DAW: sono inclusi.",
         "Il Record TC grande in basso e' letto a ogni fotogramma dalla timeline."
-      ]
+      ],
+      "loudness": ""
     },
     {
       "ffoa": "01:00:00:00",
@@ -778,7 +794,8 @@
       ],
       "notes": [
         "Contatore fotogrammi per clip da 1001 (convenzione VFX)."
-      ]
+      ],
+      "loudness": ""
     },
     {
       "ffoa": "01:00:00:00",
@@ -812,7 +829,8 @@
       "slate_lines": [
         "COPIA PER APPROVAZIONE — NON PER LA DIFFUSIONE"
       ],
-      "notes": []
+      "notes": [],
+      "loudness": ""
     },
     {
       "id": "review",
@@ -846,7 +864,8 @@
       "rates": [],
       "ntsc_warning": null,
       "notes": [],
-      "category": "custom"
+      "category": "custom",
+      "loudness": ""
     }
   ],
   "slots": {

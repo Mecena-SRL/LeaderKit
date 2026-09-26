@@ -159,7 +159,7 @@ def test_tail(built, fps, nominal):
 def code(tmp_path_factory):
     d = tmp_path_factory.mktemp("code")
     paths = {}
-    for mode in ("generate", "remove", "burnin"):
+    for mode in ("generate", "remove", "burnin", "images"):
         p = d / ("%s.lua" % mode)
         p.write_text(build_fx.engine(mode, STD))
         paths[mode] = str(p)
@@ -350,7 +350,7 @@ def test_generator_is_light(built):
     """Taratura e frame lines non sono piu' nodi Fusion (erano la causa dei 2.5 fps)."""
     text = open(HEAD(built)).read()
     tools = [t for t in re.findall(r"^\t\t\t\t(\w+) = (\w+) \{", text, re.M) if not t[1].startswith("Instance")]
-    assert len(tools) < 340, len(tools)
+    assert len(tools) < 360, len(tools)
     # slate, barre e countdown si alternano con Dissolve (Fusion calcola solo l'ingresso attivo)
     assert ("MSlate", "Dissolve") in tools and ("MLeader", "Dissolve") in tools
     assert all(("SStyle%d" % i, "Dissolve") in tools for i in (1, 2, 3))      # stili alternativi della slate
@@ -388,8 +388,9 @@ def test_engine_still_tiling(built, code, tmp_path):
     gfx = res["gfx"]
     assert sum(int(v.split("|")[1]) for v in gfx) == 6 * 24 + 1 and len(gfx) == 4
     logos = res["logo"]
-    assert sum(int(v.split("|")[1]) for v in logos) == 8 * 24 + 8 * 24      # slate + coda
-    assert all(v.endswith("|0.2") for v in logos)
+    assert sum(int(v.split("|")[1]) for v in logos) == 8 * 24 + 8 * 24 + 6 * 24 + 1   # slate + coda + countdown
+    # slate e coda al 20%; il piccolo logo del countdown (in piu' pezzi) e' piu' piccolo
+    assert sum(int(v.split("|")[1]) for v in logos if v.endswith("|0.2")) == 8 * 24 + 8 * 24
 
 
 def test_inspector_pages(built):
@@ -409,11 +410,12 @@ def test_engine_logo_and_colorinfo(code, tmp_path):
     logos = res["logo"]
     # sopra la slate, 8"; file non PNG: riquadro 20% x 10% della larghezza con le proporzioni del quadro
     assert logos[0].startswith("00:59:50:00|192|0.1777")
-    assert len(logos) == 2                                    # anche sulla coda
+    assert len(logos) == 3                                    # anche sulla coda e piccolo nel countdown
+    assert logos[2].startswith("01:00:00:00|145|")
     assert "Rec.709 Gamma 2.4" in res["colorinfo"][0]
     res, log = run_engine(code, fps="24", df="0", preset="cinema_dcp", head=5, progstart=18, program=60,
                           logo="/non/esiste.png")
-    assert "Logo non trovato" in log
+    assert "Logo: file non trovato (/non/esiste.png)" in log
 
 
 def test_engine_dcp_90_empty_timeline_tail(code):
@@ -511,11 +513,16 @@ def test_burnin_matte(built):
     assert t["BandT"]["TopLeftAlpha"] == 0                       # niente bande proprie: c'e' il mascherino
     assert 1 - lb < t["T11"]["Center"][1] < 1 and t["T11"]["StyledText"] == "IL FILM"
     assert 0 < t["T41"]["Center"][1] < lb and t["T41"]["StyledText"] == "REC 01:00:00:00"
+    # "Nessuno": formato nativo, nessuna banda (i testi hanno il contorno nero)
     t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=0)
+    assert t["MatTM"]["Height"] == 0 and t["BandT"]["TopLeftAlpha"] == 0
+    assert t["T11"]["Center"][1] > 0.9 and t["T41"]["Center"][1] < 0.1
+    # bande proprie solo se scelte
+    t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=0, BPos=2)
     assert t["MatTM"]["Height"] == 0 and t["BandT"]["TopLeftAlpha"] == 0.75
     # su una timeline 2.39 nativa il mascherino 2.39 non serve
     t = dump_tools(setting, 24, 4096, 1716, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=11)
-    assert t["MatTM"]["Height"] == 0 and t["BandT"]["TopLeftAlpha"] == 0.75
+    assert t["MatTM"]["Height"] == 0 and t["BandT"]["TopLeftAlpha"] == 0
 
 
 def test_burnin_matte_presets_and_custom(built):
@@ -605,3 +612,121 @@ def test_burnin_matte_precise_and_data_inside(built):
     # la risoluzione scritta da Genera prevale su quella della composizione
     t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=names.index("2.39:1 (Scope)"), TlW=4096, TlH=2160)
     assert abs(t["MatTM"]["Height"] * 2160 - (2160 - 2 * round(4096 / 2.39 / 2)) / 2) < 1e-6
+
+
+def test_engine_logo_already_in_media_pool(built, code, tmp_path):
+    """Se il logo e' gia' nel Media Pool, ImportMedia non lo reimporta: va cercato per percorso."""
+    from PIL import Image
+    logo = tmp_path / "marchio.png"
+    Image.new("RGBA", (400, 200), (255, 0, 0, 255)).save(logo)
+    res, log = run_engine(code, logo=str(logo), poolhas=str(logo))
+    logos = res["logo"]
+    assert len(logos) == 3 and "Logo sulla slate" in log and "non ha importato" not in log
+    # 400x200 adattato a 1920x1080 (f = 4.8) nel riquadro 20% x 10% della larghezza: z = 192 / (200 * 4.8)
+    assert abs(float(logos[0].split("|")[2]) - 192 / (200 * 4.8)) < 1e-9
+
+
+def test_engine_logo_from_media_pool_bin(built, code):
+    res, log = run_engine(code, logobin="1")
+    assert len(res.get("logo", [])) == 3 and "Logo sulla slate" in log and "Logo nel countdown" in log
+
+
+def test_engine_no_logo_is_reported_and_cache_on(built, code):
+    res, log = run_engine(code)
+    assert "Logo: nessuno" in log
+    assert int(res["cache"][0]) >= 2                       # testa e coda in cache
+    assert "Cache Fusion attivata" in log
+
+
+def test_overlay_panels_over_framelines(built, code):
+    """Taratura a tutta timeline, sopra le frame lines (che restano visibili fuori dai pannelli)."""
+    from PIL import Image
+    res, _ = run_engine(code, res="3840x1920", fps="24")
+    path = res["gfx"][0].split("|")[2]
+    px = Image.open(path).load()
+    x0 = round((3840 - 1920 * 1.85) / 2)
+    r, g, b, a = px[x0 + 1, 1200]                          # dentro il pannello sinistro: vince il pannello
+    assert a == 255 and r < 60
+    r, g, b, a = px[x0 + 1, 20]                            # fuori dai pannelli: la linea 1.85
+    assert a == 255 and r > 150
+
+
+def test_slate_audio_presets(built):
+    head = HEAD(built)
+    lay = [x for x, _ in build_fx.AUDIO_LAYOUTS].index("5.1 + Stereo (7-8)")
+    t = dump_tools(head, 25, 1920, 1080, 200, 10, Preset=IDS.index("rai_spot"), AudioLayout=lay, AudioSpec=1,
+                   Loudness=0, AudioFormat="M&E separato")
+    vals = [v["StyledText"] for k, v in t.items() if k.startswith("SV2_")]
+    assert "5.1 + Stereo 7-8  ·  48 kHz 24 bit  ·  M&E separato" in vals
+    assert "-23 LUFS ±0,2  -2 dBTP" in vals                 # loudness dello standard (RAI spot)
+    lou = [x for x, _ in build_fx.LOUDNESS].index("Netflix: -27 LKFS dialogue-gated / -2 dBTP")
+    t = dump_tools(head, 25, 1920, 1080, 200, 10, Preset=IDS.index("rai_spot"), Loudness=lou)
+    assert "-27 LKFS DG  -2 dBTP" in [v["StyledText"] for k, v in t.items() if k.startswith("SV2_")]
+
+
+def test_engine_uses_panel_values_even_if_copy_refused(built, code, tmp_path):
+    """Il blocco viene ricreato e Resolve rifiuta la copia di logo e frame lines: Genera usa i valori impostati."""
+    from PIL import Image
+    logo = tmp_path / "marchio.png"
+    Image.new("RGBA", (400, 200), (255, 0, 0, 255)).save(logo)
+    res, log = run_engine(code, res="3840x1920", logo=str(logo), fl133="1", refuse="1")
+    assert len(res["logo"]) == 3                                  # logo su slate, coda e countdown
+    assert "non ha accettato: FL133, FL185, FL239, Logo" in log     # e lo dice
+    assert "Frame lines: 1.33:1  1.85:1  2.39:1" in log
+    path = res["gfx"][0].split("|")[2]
+    px = Image.open(path).load()
+    x0 = round((3840 - 1920 * 4 / 3) / 2)                         # frame line 1.33 su 2:1
+    assert px[x0 + 1, 1900][3] == 255
+
+
+def test_slate_baked_to_still(built, code):
+    """La slate ferma viene esportata una volta alla risoluzione della timeline e il blocco non la calcola piu'."""
+    res, log = run_engine(code, preset="cinema_dcp", res="3840x1920", head=18, export="1")
+    assert res["export"] == ["00:59:53:23|edit|0"]           # esportata con la slate ancora in tempo reale
+    slate = [t for t in res["track"] if t.startswith("LeaderKit Slate|")]
+    assert len(slate) == 1 and slate[0].split("|")[1:3] == ["00:59:50:00", "192"]
+    assert res["baked"] == ["1|3840|24|01:00:08:00"]          # SlateBaked, formato e FFOA scritti nel blocco
+    assert "Slate esportata come immagine fissa 3840x1920" in log
+
+
+def test_slate_baked_per_second_with_clock(built, code):
+    """Con l'orologio (TV) un'immagine per secondo; se serve si esporta dalla pagina Color e si torna indietro."""
+    res, log = run_engine(code, preset="rai_tv", res="1920x1080", head=29, export="color")
+    slate = [t.split("|") for t in res["track"] if t.startswith("LeaderKit Slate|")]
+    assert len(slate) == 7 and all(t[2] == "24" for t in slate)
+    assert res["page"] == ["edit"] and res["baked"][0].startswith("1|")
+
+
+def test_slate_bake_fallback(built, code):
+    res, log = run_engine(code, preset="rai_tv", res="1920x1080", head=29, export="0")
+    assert res["baked"][0].startswith("0|") and "Slate in tempo reale" in log
+    assert not [t for t in res.get("track", []) if t.startswith("LeaderKit Slate|")]
+
+
+def test_images_only_mode(built, code):
+    """'Aggiorna solo le immagini' rifa' taratura, slate e loghi senza toccare il resto."""
+    res, log = run_engine(code, preset="cinema_dcp", res="3840x1920", head=18, export="1", imagescode=code["images"])
+    assert "Aggiornate solo le immagini" in log and "LeaderKit — Aggiorna immagini" in log
+    assert len(res["export"]) == 2
+    assert len([t for t in res["track"] if t.startswith("LeaderKit Slate|")]) == 1
+    assert len([t for t in res["track"] if t.startswith("LeaderKit Grafica|")]) == 1
+    assert len(res["tail"]) == 1                               # la coda resta
+
+
+def test_no_getprefs_when_format_known(built):
+    """Con il formato scritto da Genera le espressioni non chiamano piu' comp:GetPrefs."""
+    for name in ("LeaderKit.setting", "LeaderKit Burn-in.setting", "LeaderKit Tail.setting"):
+        text = open(os.path.join(built, name)).read()
+        raw = re.findall(r'.{24}comp:GetPrefs', text)
+        assert raw and all(" or comp:GetPrefs" in x for x in raw), name
+
+
+def test_last_frame_options(built):
+    head = HEAD(built)
+    for k, node in ((1, "MLfCue"), (2, "MLfDot"), (3, "MLfCard"), (4, "MLfFlash")):
+        t = dump_tools(head, 24, 1920, 1080, 200, 199, LastFrame=k, FfoaTc="01:00:00:00")
+        assert t[node]["Blend"] == 1
+        t = dump_tools(head, 24, 1920, 1080, 200, 198, LastFrame=k)
+        assert t[node]["Blend"] == 0
+    t = dump_tools(head, 24, 1920, 1080, 200, 199, LastFrame=3, FfoaTc="01:00:00:00")
+    assert t["LfCard"]["StyledText"] == "PROGRAM START\nFFOA  01:00:00:00"

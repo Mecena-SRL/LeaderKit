@@ -177,6 +177,16 @@ class Renderer(object):
                 x = cx * self.w - tw / 2
             d.text((x, y0 + i * lh), line, fill=255, font=font)
         a = np.asarray(img).astype(np.float32) / 255
+        if num(self.inp(name, "Enabled2"), 0) > 0.5:
+            # contorno (elemento 2 di Text+): alone scuro attorno ai caratteri
+            rad = max(1, int(round(num(self.inp(name, "Thickness2"), 0.05) * font.size * 0.6)))
+            halo = np.asarray(img.filter(ImageFilter.MaxFilter(2 * rad + 1))).astype(np.float32) / 255
+            col = [num(self.inp(name, ch), 1) for ch in ("Red1", "Green1", "Blue1")]
+            out[..., 0] = a * col[0]
+            out[..., 1] = a * col[1]
+            out[..., 2] = a * col[2]
+            out[..., 3] = np.maximum(a, halo)
+            return out
         col = [num(self.inp(name, ch), 1) for ch in ("Red1", "Green1", "Blue1")]
         out[..., 0], out[..., 1], out[..., 2] = a * col[0], a * col[1], a * col[2]
         out[..., 3] = a

@@ -39,6 +39,28 @@ def e(expr):
             .replace("ASPECT", ASPECT).replace("CD", CD))
 
 
+PREF_KEYS = {"Width": "FW", "Height": "FH", "Rate": "FR"}
+
+
+def fast_prefs(expr):
+    """comp:GetPrefs costa a ogni valutazione (centinaia di volte per fotogramma): si usano i valori
+    scritti da Genera negli input nascosti LK.FW / LK.FH / LK.FR; GetPrefs solo finche' mancano
+    (and/or di Lua valuta il secondo ramo solo se serve, iif invece li valuta tutti e due)."""
+    return re.sub(r'(?<!or )comp:GetPrefs\("Comp\.FrameFormat\.(Width|Height|Rate)"\)',
+                  lambda m: '(LK.%s > 0 and LK.%s or comp:GetPrefs("Comp.FrameFormat.%s"))'
+                  % (PREF_KEYS[m.group(1)], PREF_KEYS[m.group(1)], m.group(1)), expr)
+
+
+def hidden_numbers(names):
+    """Input numerici nascosti del pannello LK (scritti da Genera)."""
+    return "".join("\t\t\t\t\t\t%s = { LINKID_DataType = \"Number\", INPID_InputControl = \"SliderControl\", "
+                   "INP_Integer = false, INP_External = false, IC_Visible = false, LINKS_Name = \"%s\", },\n" % (k, k)
+                   for k in names)
+
+
+FRAME_HIDDEN = ("FW", "FH", "FR")
+
+
 class G(object):
     """Grafo di un generatore: nodi come testo Lua."""
 
@@ -51,7 +73,7 @@ class G(object):
         for key, val in inputs:
             k = key if key.isidentifier() else "[%s]" % lua_string(key)
             if isinstance(val, tuple) and val[0] == "expr":
-                v = "Expression = %s, " % lua_string(val[1])
+                v = "Expression = %s, " % lua_string(fast_prefs(val[1]))
             elif isinstance(val, tuple) and val[0] == "link":
                 v = "SourceOp = %s, Source = %s, " % (lua_string(val[1]), lua_string(val[2]))
             else:
@@ -302,6 +324,7 @@ def engine(mode, std=None):
             + "local __ok, __err = xpcall(__leaderkit_main, debug and debug.traceback or tostring)\n"
             + "if not __ok then\n"
             + "  print('[LeaderKit] ERRORE: ' .. tostring(__err))\n"
+            + "  if LK_FAIL and pcall(LK_FAIL, tostring(__err)) then return end\n"
             + "  pcall(function() local cc = comp or fusion:GetCurrentComp(); cc:AskUser('LeaderKit - errore', "
             + "{ { 'Errore', 'Text', Default = tostring(__err), Lines = 14, Wrap = true } }) end)\n"
             + "end\n")
@@ -387,7 +410,8 @@ LOGO_POS = ["In alto a destra", "In alto a sinistra", "In basso a destra", "In b
 
 def param_names():
     """Parametri del pannello da ricopiare quando Genera ricrea il blocco."""
-    skip = ("Generate", "Remove", "Guide", "Duration", "Info", "ColorInfo", "DateToday")
+    skip = ("Generate", "Remove", "Guide", "Duration", "Info", "ColorInfo", "DateToday", "ImagesTech", "ImagesLook",
+            "ImagesCal")
     return [src for src, _ in head_inputs() if not src.startswith("Sec") and src not in skip]
 
 
@@ -401,13 +425,14 @@ def head_inputs():
     out += [(f, "Post") for f, _, _ in POST_FIELDS] + [("Phase", "Post")]
     out += [(f, "Post") for f, _, _ in STATUSES] + [("Note", "Post")]
     out += [(x, "Tecnico") for x in ("SecGuides", "Guides", "GuidesSlate")] + [(f, "Tecnico") for f, _, _ in FRAMELINES]
-    out += [(x, "Tecnico") for x in ("SafeAction", "SafeTitle", "SecTech", "ColorInfo", "AudioFormat",
-                                     "SecAudio", "PopLevel", "BeepEach")]
-    out += [(x, "Aspetto") for x in ("SecStyle", "SlateStyle", "TitleImage", "TitleImageSize")]
+    out += [(x, "Tecnico") for x in ("SafeAction", "SafeTitle", "SecTech", "ColorInfo", "SecAudio", "AudioLayout",
+                                     "AudioSpec", "Loudness", "AudioFormat", "PopLevel", "BeepEach", "ImagesTech")]
+    out += [(x, "Aspetto") for x in ("SecStyle", "SlateStyle", "SlateBake", "ImagesLook", "TitleImage", "TitleImageSize")]
     out += [("SecLook", "Aspetto")] + [(c, "Aspetto") for c in color_inputs()]
     out += [(x, "Aspetto") for x in ("SecLogo", "Logo", "LogoPos", "LogoSize", "Logo2", "LogoPos2", "LogoSize2",
                                      "LogoOnTail")]
-    out += [("CalOn", "Taratura")] + [(f, "Taratura") for f, _, _ in CALIBRATION]
+    out += [(x, "Taratura") for x in ("ImagesCal", "LastFrame", "CdInfo", "CdLogo", "CalOn")]
+    out += [(f, "Taratura") for f, _, _ in CALIBRATION]
     return out
 
 
@@ -473,7 +498,7 @@ def slate_details():
     parts.append('"FRAME RATE   " .. string.format("%g fps", comp:GetPrefs("Comp.FrameFormat.Rate")) .. '
                  '"   ·   " .. comp:GetPrefs("Comp.FrameFormat.Width") .. " x " .. comp:GetPrefs("Comp.FrameFormat.Height") .. "\\n"')
     parts.append('iif(LK.ColorInfo.Value == "", "", LK.ColorInfo.Value .. "\\n")')
-    parts.append('iif(LK.AudioFormat.Value == "", "", "AUDIO   " .. LK.AudioFormat.Value .. "\\n")')
+    parts.append('iif(LK.AudioFormat.Value == "", "", "AUDIO   " .. LK.AudioFormat.Value .. "\\n")')  # non usato
     parts.append('iif(LK.Note.Value == "", "", LK.Note.Value .. "\\n")')
     parts.append('"\\n" .. LK.Info.Value')
     return " .. ".join(parts)
@@ -557,6 +582,41 @@ def status_chips(g, prefix, y, top):
     return top
 
 
+# ------------------------------------------------------------------ audio: predefiniti (docs/industry-standards.md)
+AUDIO_LAYOUTS = [("—", ""), ("Mono", "Mono"), ("Stereo 2.0", "Stereo 2.0"),
+                 ("5.1 (L R C LFE Ls Rs)", "5.1 L-R-C-LFE-Ls-Rs"), ("5.1 + Stereo (7-8)", "5.1 + Stereo 7-8"),
+                 ("7.1", "7.1"), ("7.1 + 5.1 + Stereo", "7.1 + 5.1 + Stereo"),
+                 ("Dolby Atmos + 5.1 + Stereo", "Atmos + 5.1 + Stereo"), ("M&E 5.1 + M&E Stereo", "M&E 5.1 + M&E Stereo"),
+                 ("Stem DX / MX / FX", "Stem DX / MX / FX"),
+                 ("8 mono: stereo 1-2, silenzio 3-8 (RAI spot)", "8 mono, stereo 1-2"),
+                 ("Stereo 1-2 duplicato su 3-4 (Publitalia)", "Stereo 1-2 = 3-4")]
+AUDIO_SPECS = [("—", ""), ("48 kHz / 24 bit", "48 kHz 24 bit"), ("48 kHz / 16 bit", "48 kHz 16 bit"),
+               ("96 kHz / 24 bit", "96 kHz 24 bit")]
+LOUDNESS = [("Dallo standard", None), ("—", ""),
+            ("EBU R128: -23 LUFS / -1 dBTP", "-23 LUFS  -1 dBTP (R128)"),
+            ("EBU R128 s1 (spot): -23 LUFS, short-term max -18", "-23 LUFS  ST -18 (R128 s1)"),
+            ("RAI spot: -23 LUFS ±0,2 / -2 dBTP", "-23 LUFS ±0,2  -2 dBTP"),
+            ("AGCOM / Publitalia: -24 LKFS ±0,5", "-24 LKFS ±0,5"),
+            ("ATSC A/85 (USA): -24 LKFS / -2 dBTP", "-24 LKFS  -2 dBTP (A/85)"),
+            ("Netflix: -27 LKFS dialogue-gated / -2 dBTP", "-27 LKFS DG  -2 dBTP"),
+            ("Web / piattaforme: -14 LUFS", "-14 LUFS")]
+
+
+def audio_expr():
+    """Testo AUDIO della slate: configurazione canali + campionamento + note libere."""
+    lay = "({ %s })[math.floor(LK.AudioLayout + 1.5)]" % ", ".join(lua_string(v) for _, v in AUDIO_LAYOUTS)
+    spec = "({ %s })[math.floor(LK.AudioSpec + 1.5)]" % ", ".join(lua_string(v) for _, v in AUDIO_SPECS)
+    return ("(function() local s = '' local function a(v) v = tostring(v or '') if v ~= '' then "
+            "if s ~= '' then s = s .. '  ·  ' end s = s .. v end end a(%s) a(%s) a(LK.AudioFormat.Value) "
+            "return s end)()" % (lay, spec))
+
+
+def loudness_expr(presets):
+    table = "({ %s })" % ", ".join(lua_string(v or "") for _, v in LOUDNESS)
+    std = pv(presets, "loudness", default="")
+    return "iif(LK.Loudness < 0.5, %s, %s[math.floor(LK.Loudness + 1.5)])" % (std, table)
+
+
 def slate_columns():
     phase = "({ %s })[math.floor(LK.Phase + 1.5)]" % ", ".join(lua_string(x) for x in PHASES)
     prod = [("PRODUCTION", "LK.Production.Value"), ("PRODUCER", "LK.Producer.Value"),
@@ -571,7 +631,8 @@ def slate_columns():
                        '.. "   " .. string.format("%.2f:1", comp:GetPrefs("Comp.FrameFormat.Width") / '
                        'comp:GetPrefs("Comp.FrameFormat.Height"))'),
             ("FRAME RATE", 'string.format("%g fps", comp:GetPrefs("Comp.FrameFormat.Rate"))'),
-            ("COLOR", "LK.ColorInfo.Value"), ("AUDIO", "LK.AudioFormat.Value")]
+            ("COLOR", "LK.ColorInfo.Value"), ("AUDIO", audio_expr()),
+            ("LOUDNESS", loudness_expr(load_standards()["presets"]))]
     return [("PRODUCTION", 0.19, prod), ("POST", 0.5, post), ("TECHNICAL", 0.81, tech)]
 
 
@@ -594,6 +655,8 @@ def tint(prefix, k=1.0):
 
 
 # ------------------------------------------------------------------ stili della slate
+LAST_FRAME = ["Nero (come da standard)", "Pallino di cue in alto a destra", "Pallino bianco al centro",
+              "Cartello PROGRAM START con il timecode del FFOA", "Flash bianco"]
 SLATE_STYLES = ["Pannelli (produzione / post / tecnico)", "Quadrante (fotogrammi, dati a destra)",
                 "Orologio (titolo e dati a destra)", "Minimale (titolo al centro)"]
 # riquadro del titolo in PNG per stile: (x, y, larghezza, altezza, ancora) in frazioni del quadro;
@@ -731,7 +794,7 @@ def slate_style_d(g, P):
     parts = ["LK.Version.Value", "LK.Duration.Value", DATE_EXPR % TODAY,
              'string.format("%g fps", comp:GetPrefs("Comp.FrameFormat.Rate"))',
              'comp:GetPrefs("Comp.FrameFormat.Width") .. " x " .. comp:GetPrefs("Comp.FrameFormat.Height")',
-             "LK.ColorInfo.Value", "LK.AudioFormat.Value"]
+             "LK.ColorInfo.Value", audio_expr(), loudness_expr(load_standards()["presets"])]
     line = ("(function() local s = '' local function a(v) v = tostring(v or '') "
             "if v ~= '' then if s ~= '' then s = s .. '   ·   ' end s = s .. v end end "
             + " ".join("a(%s)" % x for x in parts) + " return s end)()")
@@ -744,6 +807,21 @@ def slate_style_d(g, P):
     top = g.merge("DMw", top, "DWho")
     return status_chips(g, "DSt", "0.21", top)
 
+WIDE_FIELDS = ("AUDIO", "LOUDNESS")        # testi lunghi: occupano una riga intera della colonna
+
+
+def pack_iife(fields, ret):
+    """Impaginazione dei campi di una colonna in 2 sotto-colonne: i vuoti non lasciano buchi, i campi
+    'larghi' prendono una riga intera. Dentro 'ret' sono disponibili s[i] (posto del campo i) e p (totale)."""
+    body = "local p = 0 local s = {} "
+    for j, (label, v) in enumerate(fields):
+        wide = label in WIDE_FIELDS
+        body += "if (" + v + ") ~= '' then "
+        if wide:
+            body += "if p % 2 == 1 then p = p + 1 end "
+        body += "s[" + str(j) + "] = p p = p + " + ("2" if wide else "1") + " end "
+    return "(function() " + body + ret + " end)()"
+
 
 def slate_stack(g, P):
     heading = pv(P, "heading")
@@ -753,8 +831,7 @@ def slate_stack(g, P):
     PY1 = 0.645
     rows = []
     for _, _, fields in slate_columns():
-        cnt = " + ".join('iif((%s) ~= "", 1, 0)' % v for _, v in fields)
-        rows.append("math.ceil((%s) / 2)" % cnt)
+        rows.append(pack_iife(fields, "return math.ceil(p / 2)"))
     bottom = "(0.54 - (math.max(1, %s) - 1) * 0.083 - 0.075)" % ", ".join(rows)
     for i, (_, cx, _) in enumerate(slate_columns()):
         g.mask("SPan%dM" % i, "RectangleMask", "0.295", ("expr", "%s - %s" % (PY1, bottom)),
@@ -787,18 +864,19 @@ def slate_stack(g, P):
     for ci, (title, cx, fields) in enumerate(slate_columns()):
         text_node(g, "SCol%d" % ci, "Point(%s, 0.605)" % cx, cap_size(0.015), 'Text("%s")' % title, tint("Hi"))
         top = g.merge("SMC%d" % ci, top, "SCol%d" % ci)
-        vals = ["(%s)" % v for _, v in fields]
-        count = " + ".join('iif(%s ~= "", 1, 0)' % v for v in vals)
         for fi, (label, v) in enumerate(fields):
-            k = " + ".join(['0'] + ['iif(%s ~= "", 1, 0)' % x for x in vals[:fi]])
-            # ultimo campo di un numero dispari: centrato nella colonna
-            x = ("iif(((%s) %% 2 == 0) and ((%s) == (%s) - 1), %s, %s + iif((%s) %% 2 == 0, -0.072, 0.072))"
-                 % (k, k, count, cx, cx, k))
-            y = "0.54 - math.floor((%s) / 2) * 0.083" % k
+            wide = label in WIDE_FIELDS
+            # campo largo: al centro della colonna; ultimo campo di un numero dispari: al centro
+            x = pack_iife(fields, "local k = s[" + str(fi) + "] if not k then return " + str(cx) + " end "
+                          + ("return " + str(cx) if wide else
+                             "if k % 2 == 0 and k == p - 1 then return " + str(cx) + " end "
+                             "return " + str(cx) + " + (k % 2 == 0 and -0.072 or 0.072)"))
+            y = pack_iife(fields, "local k = s[" + str(fi) + "] or 0 return 0.54 - math.floor(k / 2) * 0.083")
             lab = text_node(g, "SL%d_%d" % (ci, fi), "Point(%s, %s)" % (x, y), cap_size(0.0125),
                             'Text(iif(%s == "", "", "%s"))' % (v, label), tint("Text", 0.5))
             val = text_node(g, "SV%d_%d" % (ci, fi), "Point(%s, %s - 0.033)" % (x, y),
-                            e("2 * 0.019 / ASPECT * %s * math.max(0.8, math.min(1, 9.3 * ASPECT / math.max(1, string.len(%s))))" % (NARROW, v)),
+                            e("2 * 0.019 / ASPECT * %s * math.max(0.8, math.min(1, %s * ASPECT / math.max(1, string.len(%s))))"
+                              % (NARROW, "19" if wide else "9.3", v)),
                             "Text(%s)" % v, tint("Text"), style="Semibold")
             top = g.merge("SML%d_%d" % (ci, fi), top, lab)
             top = g.merge("SMV%d_%d" % (ci, fi), top, val)
@@ -851,6 +929,7 @@ def head(std=None):
              + uc_slider("GapSec", "Nero prima del programma (s)", 0, 10, 2)
              + uc_slider("CountFrom", "Countdown da (0 = nessuno)", 0, 11, 8)
              + uc_slider("TailSec", "Coda (s)", 0, 30, 8))
+    images = engine("images", std)
     today_code = ('pcall(function() tool:SetInput("Date", os.date("%d/%m/%Y")) end)')
     prod = "".join(uc_text(f, label) for f, label, _ in PRODUCTION_FIELDS)
     prod += (uc_check("DateAuto", "Data sempre aggiornata (data del render)", 1)
@@ -859,22 +938,28 @@ def head(std=None):
     post += uc_combo("Phase", "Fase di lavorazione", PHASES)
     post += "".join(uc_combo(f, label, STATUS_VALUES) for f, label, _ in STATUSES)
     post += uc_text("Note", "Note (riga libera)")
-    tech = (uc_label("SecGuides", "Frame lines e safe area (immagine creata da Genera, sul countdown)")
+    tech = (uc_label("SecGuides", "Frame lines e safe area (sul countdown; premi Genera per aggiornarle)")
             + uc_check("Guides", "Mostra le frame lines", 1) + uc_check("GuidesSlate", "Anche sulla slate", 0)
             + "".join(uc_check(f, "Frame line " + lab + ":1", 1 if f in ("FL185", "FL239") else 0) for f, lab, _ in FRAMELINES)
             + uc_check("SafeAction", "Safe action 93% (EBU R95)", 0) + uc_check("SafeTitle", "Safe graphics 90%", 0)
             + uc_label("SecTech", "Dati tecnici")
             + uc_text("ColorInfo", "Spazio colore (letto da Genera)", read_only=True)
-            + uc_text("AudioFormat", "Formato audio (es. 5.1 + stereo, 24 bit 48 kHz)")
-            + uc_label("SecAudio", "Audio (tono 1 kHz)")
+            + uc_label("SecAudio", "Audio")
+            + uc_combo("AudioLayout", "Canali", [x for x, _ in AUDIO_LAYOUTS])
+            + uc_combo("AudioSpec", "Campionamento", [x for x, _ in AUDIO_SPECS])
+            + uc_combo("Loudness", "Loudness", [x for x, _ in LOUDNESS])
+            + uc_text("AudioFormat", "Note audio (testo libero, si aggiunge)")
             + uc_combo("PopLevel", "Livello pop", ["Dallo standard", "-20 dBFS (SMPTE / USA)", "-18 dBFS (EBU / Europa)"])
-            + uc_check("BeepEach", "Bip anche su 8..3 (non standard)", 0))
+            + uc_check("BeepEach", "Bip anche su 8..3 (non standard)", 0)
+            + uc_button("ImagesTech", "Aggiorna solo le immagini (frame lines, taratura, slate, loghi)", images))
     look = (uc_label("SecStyle", "Slate")
             + uc_combo("SlateStyle", "Stile della slate", SLATE_STYLES)
+            + uc_check("SlateBake", "Slate come immagine fissa a piena risoluzione (riproduzione fluida)", 1)
+            + uc_button("ImagesLook", "Aggiorna solo le immagini (slate, loghi, titolo)", images)
             + uc_file("TitleImage", "Titolo come immagine (PNG con trasparenza)")
             + uc_slider("TitleImageSize", "Dimensione del titolo in PNG (%)", 20, 200, 100, integer=False)
             + uc_label("SecLook", "Colori") + color_controls()
-            + uc_label("SecLogo", "Logo (inserito da Genera sopra la slate, traccia LeaderKit Logo)")
+            + uc_label("SecLogo", "Loghi (file, oppure immagine nel bin LeaderKit Logo del Media Pool)")
             + uc_file("Logo", "File del logo")
             + uc_combo("LogoPos", "Posizione", LOGO_POS)
             + uc_slider("LogoSize", "Dimensione (%)", 5, 100, 12, integer=False)
@@ -882,9 +967,18 @@ def head(std=None):
             + uc_combo("LogoPos2", "Posizione del secondo logo", LOGO_POS)
             + uc_slider("LogoSize2", "Dimensione del secondo logo (%)", 5, 100, 12, integer=False)
             + uc_check("LogoOnTail", "Anche sulla coda", 0))
-    cal = (uc_check("CalOn", "Strumenti di taratura sul countdown (immagine creata da Genera)", 1)
+    cal = (uc_button("ImagesCal", "Aggiorna solo le immagini (taratura, frame lines, loghi)", images)
+           + uc_combo("LastFrame", "Ultimo fotogramma prima del programma (FFOA - 1)", LAST_FRAME)
+           + uc_check("CdInfo", "Dati del progetto nel countdown (titolo, produzione, regia, montaggio)", 1)
+           + uc_check("CdLogo", "Logo della produzione nel countdown", 1)
+           + uc_check("CalOn", "Strumenti di taratura sul countdown (immagine creata da Genera)", 1)
            + "".join(uc_check(f, label, d) for f, label, d in CALIBRATION))
-    uc = (on_page("Progetto", prog) + on_page("Produzione", prod) + on_page("Post", post)
+    hidden = "".join("\t\t\t\t\t\t%s = { LINKID_DataType = \"Number\", INPID_InputControl = \"SliderControl\", "
+                     "INP_Integer = false, INP_External = false, IC_Visible = false, LINKS_Name = \"%s\", },\n" % (k, k)
+                     for k in ("CdY", "CdCap")) + hidden_numbers(FRAME_HIDDEN + ("SlateBaked",)) + (
+        "\t\t\t\t\t\tFfoaTc = { LINKID_DataType = \"Text\", INPID_InputControl = \"TextEditControl\", "
+        "TEC_Lines = 1, IC_Visible = false, INP_External = false, LINKS_Name = \"FfoaTc\", },\n")
+    uc = hidden + (on_page("Progetto", prog) + on_page("Produzione", prod) + on_page("Post", post)
           + on_page("Tecnico", tech) + on_page("Aspetto", look) + on_page("Taratura", cal))
 
     values = [("Preset", "0"), ("Reel", "1"), ("DurSel", "0"), ("ProgramTC", '"00:00:30:00"'), ("Breaks", "0"),
@@ -894,10 +988,13 @@ def head(std=None):
               ("Duration", '"premi Genera"'), ("Info", '""'), ("Title", '"TITOLO"'), ("Version", '"v1"'),
               ("DateAuto", "1"), ("Phase", "0"), ("Note", '""'), ("Guides", "1"), ("GuidesSlate", "0"),
               ("SafeAction", "0"), ("SafeTitle", "0"), ("ColorInfo", '""'), ("AudioFormat", '""'),
+              ("AudioLayout", "0"), ("AudioSpec", "1"), ("Loudness", "0"),
               ("PopLevel", "0"), ("BeepEach", "0"), ("Logo", '""'), ("LogoPos", "0"), ("LogoSize", "12"),
               ("Logo2", '""'), ("LogoPos2", "1"), ("LogoSize2", "12"),
               ("SlateStyle", "0"), ("TitleImage", '""'), ("TitleImageSize", "100"),
-              ("LogoOnTail", "0"), ("CalOn", "1")]
+              ("LogoOnTail", "0"), ("CalOn", "1"), ("CdInfo", "1"), ("CdLogo", "1"), ("CdY", "0.075"),
+              ("CdCap", "0.014"), ("FW", "0"), ("FH", "0"), ("FR", "0"), ("SlateBaked", "0"), ("SlateBake", "1"),
+              ("LastFrame", "0"), ("FfoaTc", '""')]
     values += [(i, str(std.get("slot_defaults", {}).get(c, 0))) for c, i, _ in SLOT_INPUTS]
     values += [(f, '""') for f, _, _ in PRODUCTION_FIELDS + POST_FIELDS if f not in ("Title", "Version")]
     values += [(f, "0") for f, _, _ in STATUSES]
@@ -927,6 +1024,8 @@ def head(std=None):
         s_ = g.dissolve("SStyle%d" % i, s_, alt, "iif(math.floor(LK.SlateStyle + 0.5) == %d, 1, 0)" % i)
     clock = clock_stack(g, 'Text(tostring(math.ceil(REM / FPS)))')
     s_ = g.merge("SM4", s_, clock, "iif(%s > 0.5, 1, 0)" % CLOCK)
+    # slate gia' esportata da Genera come immagine fissa (traccia LeaderKit Grafica): qui non si calcola nulla
+    s_ = g.dissolve("SBaked", s_, transparent(g, "SBakedE"), "iif(LK.SlateBaked > 0.5, 1, 0)")
     SLATEVIS = "(REM <= (%s + %s + %s) * FPS and REM > (%s + %s) * FPS)" % (S, GP, C, GP, C)
     g.merge("SlateFull", "Bg", s_)
     top = g.dissolve("MSlate", top, "SlateFull", e("iif(%s, 1, 0)" % SLATEVIS))
@@ -934,6 +1033,14 @@ def head(std=None):
     LEADVIS = "(%s > 0 and REM <= %s * FPS and (REM > 2 * FPS or (REM == 2 * FPS and %s > 0.5)))" % (C, C, POP)
     lead = leader_stack(g, "L", 'Text(iif(REM < %s * FPS and REM >= 2 * FPS, tostring(math.ceil(REM / FPS)), ""))' % C,
                         sweep_vis="iif(REM < %s * FPS and REM > 2 * FPS, 1, 0)" % C, cd=C)
+    # dati del progetto nel countdown (fascia libera sotto il cerchio, calcolata da Genera: LK.CdY / LK.CdCap)
+    cd1 = ('Text(string.upper(LK.Title.Value) .. iif(LK.Production.Value == "", "", "   ·   " .. LK.Production.Value))')
+    cd2 = ('Text((function() local s = "" local function a(l, v) if v ~= "" then if s ~= "" then s = s .. "      " end '
+           's = s .. l .. "  " .. v end end a("DIRECTOR", LK.Director.Value) a("EDITOR", LK.Editor.Value) return s end)())')
+    for nm, txt, dy, k, style in (("CdI1", cd1, "0.62", 1.0, "Bold"), ("CdI2", cd2, "-0.62", 0.75, "Regular")):
+        size = e("math.min(2 * LK.CdCap / ASPECT, 0.3 / (0.5 * math.max(1, string.len(%s))))" % txt[5:-1])
+        text_node(g, nm, "Point(0.5, LK.CdY + %s * 1.9 * LK.CdCap)" % dy, size, txt, tint("Text", k), style=style)
+        lead = g.merge("LM" + nm, lead, nm, "iif(LK.CdInfo > 0.5, 1, 0)")
     g.merge("LeadFull", "Bg", lead)
     top = g.dissolve("MLeader", top, "LeadFull", e("iif(%s, 1, 0)" % LEADVIS))
     g.text("PicStart", ("expr", 'Text("PICTURE\\nSTART")'), 0.075, spacing=1.0)
@@ -942,6 +1049,17 @@ def head(std=None):
                                                ("TopLeftBlue", "1.0"), ("TopLeftAlpha", "1.0")])
     top = g.merge("MFlash", top, "Flash", e("iif(%s > 0.5 and REM <= %s and REM > %s - %s, 1, 0)"
                                             % (FL_ON, SYNCREM, SYNCREM, SYNCFR)))
+    # ultimo fotogramma del leader (FFOA - 1): nero, pallino di cue, pallino al centro, cartello, flash
+    LF = "math.floor(LK.LastFrame + 0.5)"
+    g.mask("LfCueM", "EllipseMask", "0.035", "0.035", center="{ 0.87, 0.80 }")
+    g.background("LfCue", mask="LfCueM", grey=1.0)
+    top = g.merge("MLfCue", top, "LfCue", e("iif(REM == 1 and %s == 1, 1, 0)" % LF))
+    g.mask("LfDotM", "EllipseMask", "0.03", "0.03", center="{ 0.5, 0.5 }")
+    g.background("LfDot", mask="LfDotM", grey=1.0)
+    top = g.merge("MLfDot", top, "LfDot", e("iif(REM == 1 and %s == 2, 1, 0)" % LF))
+    g.text("LfCard", ("expr", 'Text("PROGRAM START" .. iif(LK.FfoaTc.Value == "", "", "\\nFFOA  " .. LK.FfoaTc.Value))'), 0.06, spacing=1.2)
+    top = g.merge("MLfCard", top, "LfCard", e("iif(REM == 1 and %s == 3, 1, 0)" % LF))
+    top = g.merge("MLfFlash", top, "Flash", e("iif(REM == 1 and %s == 4, 1, 0)" % LF))
     g.text("Warn", ("expr", e("Text(\"Premi GENERA nell'Inspector: il blocco diventa di \" .. %s .. \" secondi\")"
                               % HEADLEN)), 0.03, y=0.08, grey=1.0)
     top = g.merge("MWarn", top, "Warn",
@@ -957,9 +1075,11 @@ def tail(std=None):
     uc = (uc_check("TailPop", "Tail pop a +2\"", 1) + uc_check("TailFlash", "Flash (clap) a +2\"", 0)
           + uc_slider("CardFrom", "Card da (s)", 0, 30, 4, integer=False)
           + uc_slider("CardTo", "Card fino a (s)", 0, 30, 7, integer=False)
-          + uc_text("CardText", "Testo card") + uc_text("Info", "Info (da Genera)") + color_controls())
+          + uc_text("CardText", "Testo card") + uc_text("Info", "Info (da Genera)") + color_controls()
+          + hidden_numbers(FRAME_HIDDEN))
     g.controls([("TailPop", "1"), ("TailFlash", "0"), ("CardFrom", "4"), ("CardTo", "7"),
-                ("CardText", '"END OF PROGRAM"'), ("Info", '""')] + color_values(), uc)
+                ("CardText", '"END OF PROGRAM"'), ("Info", '""'), ("FW", "0"), ("FH", "0"), ("FR", "0")]
+               + color_values(), uc)
     g.background("Bg", color="Bg")
     lead = leader_stack(g, "T", 'Text("2")')
     top = g.merge("MPop", "Bg", lead, e("iif(LK.TailPop > 0.5 and ELAPSED == 2 * FPS - 1, 1, 0)"))
@@ -994,7 +1114,8 @@ BURN_PHASES = [
     ("Approvazione cliente", ["BRec", "BTitle", "BVersion", "BDate", "BWater"], 2),
     ("Personalizzato (scegli i campi)", None, None),
 ]
-BURN_POS = ["Nelle bande (del mascherino, o bande proprie)", "Dentro l'immagine (safe 90%)"]
+BURN_POS = ["Nelle bande del mascherino (senza mascherino: ai bordi, sull'immagine)", "Dentro l'immagine (safe 90%)",
+            "Bande proprie semitrasparenti (quando non c'e' mascherino)"]
 MATTES = [("Nessuno (formato nativo)", 0), ("1.33:1 (4:3)", 4.0 / 3.0), ("1.37:1 (Academy)", 1.37),
           ("1.43:1 (IMAX)", 1.43), ("1.66:1", 1.66), ("1.78:1 (16:9)", 16.0 / 9.0), ("1.85:1 (Flat)", 1.85),
           ("1.90:1 (IMAX digitale / DCI full)", 1.9), ("2.00:1 (Univisium)", 2.0), ("2.20:1 (70 mm)", 2.2),
@@ -1029,22 +1150,65 @@ def burn_phase_script():
 
 CAP = "(LK.BSize * 0.01)"
 # risoluzione della timeline scritta da Genera / Aggiorna (se manca: formato della composizione)
-BW = 'iif(LK.TlW > 0, LK.TlW, comp:GetPrefs("Comp.FrameFormat.Width"))'
-BH = 'iif(LK.TlH > 0, LK.TlH, comp:GetPrefs("Comp.FrameFormat.Height"))'
+BW = '(LK.TlW > 0 and LK.TlW or comp:GetPrefs("Comp.FrameFormat.Width"))'
+BH = '(LK.TlH > 0 and LK.TlH or comp:GetPrefs("Comp.FrameFormat.Height"))'
 AR = "(%s / %s)" % (BW, BH)
 MR = ("iif(math.floor(LK.BMatte + 0.5) == %d, LK.BMatteRatio, (({ %s })[math.floor(LK.BMatte + 1.5)] or 0))"
       % (len(MATTES) - 1, ", ".join(repr(max(r, 0)) for _, r in MATTES)))
 # immagine attiva in pixel interi e pari (es. 1920 x 804 per 2.39 su 1920 x 1080): bande nette e simmetriche
 LB = "iif(%s > %s + 0.01, (%s - 2 * math.floor(%s / %s / 2 + 0.5)) / (2 * %s), 0)" % (MR, AR, BH, BW, MR, BH)
 PB = "iif(%s > 0 and %s < %s - 0.01, (%s - 2 * math.floor(%s * %s / 2 + 0.5)) / (2 * %s), 0)" % (MR, MR, AR, BW, BH, MR, BW)
-LBOX = "(LK.BPos < 0.5 and %s > 0)" % LB                   # dati nelle bande del letterbox
-PBOX = "(LK.BPos < 0.5 and %s > 0)" % PB                   # dati nelle bande laterali
+SAFE = "(LK.BPos > 0.5 and LK.BPos < 1.5)"                # dati dentro l'immagine (safe 90%)
+LBOX = "(not %s and %s > 0)" % (SAFE, LB)                  # dati nelle bande del letterbox
+PBOX = "(not %s and %s > 0)" % (SAFE, PB)                  # dati nelle bande laterali
 TWO = "(%s >= 3.2 * %s)" % (LB, CAP)                        # banda abbastanza alta per due righe
 SINGLE = "(%s and not %s)" % (LBOX, TWO)                    # banda sottile: una riga, testo ridotto se serve
 CAPE = "iif(%s, math.min(%s, (%s) / 1.7), %s)" % (SINGLE, CAP, LB, CAP)
-OWN = "(LK.BPos < 0.5 and not %s and not %s)" % (LBOX, PBOX)   # bande proprie semitrasparenti
+OWN = "(LK.BPos > 1.5 and not %s and not %s)" % (LBOX, PBOX)   # bande proprie, solo se scelte
 BAND = "(4.6 * %s)" % CAP
 IN_MATTE = LBOX
+
+
+BURN_LOOKUP = (
+    "(function() "
+    # elenco dei segmenti analizzato una volta sola e tenuto in memoria (per testo di Seg)
+    "local seg = LK.Seg.Value; "
+    "local cache = LeaderKitBurnCache; "
+    "local C = cache and cache[seg]; "
+    "if not C then "
+    "C = { a = {}, b = {}, rows = {} }; "
+    "local function split(t) local p = {}; for x in string.gmatch((t or '') .. '~', '([^~]*)~') do p[#p + 1] = x end; return p end; "
+    "for l in string.gmatch(seg, '[^\\n]+') do "
+    "local a, b, sv, st, sn, sd, au, fr, t1, t2, t3, t4 = string.match(l, "
+    "'^(%-?%d+)|(%-?%d+)|(%-?[%d%.]+)|([%d%.]+)|(%d+)|(%d+)|(%-?%d+)|(%-?%d+)|([^|]*)|([^|]*)|([^|]*)|([^|]*)$'); "
+    "if a then local k = #C.a + 1; C.a[k] = a + 0; C.b[k] = b + 0; "
+    "C.rows[k] = { sv + 0, st + 0, sn + 0, sd + 0, au + 0, fr + 0, split(t1), split(t2), split(t3), split(t4) } end end; "
+    "pcall(function() if not LeaderKitBurnCache then LeaderKitBurnCache = {} end; LeaderKitBurnCache[seg] = C end) "
+    "end; "
+    "local rec = LK.RecStart + (time - comp.RenderStart); "
+    # ricerca binaria del segmento che contiene il fotogramma
+    "local lo, hi, idx = 1, #C.a, nil; "
+    "while lo <= hi do local mid = math.floor((lo + hi) / 2); "
+    "if rec < C.a[mid] then hi = mid - 1 elseif rec >= C.b[mid] then lo = mid + 1 else idx = mid; break end end; "
+    "if not idx then return '' end; "
+    "local row = C.rows[idx]; local e = rec - C.a[idx]; "
+    "local parts = row[6 + CORNER]; local line = LINE; local txt; "
+    "if (SINGLE_EXPR) and line < 3 then "
+    "if line == 1 then local p1, p2 = parts[1] or '', parts[2] or ''; "
+    "txt = p1 .. ((p1 ~= '' and p2 ~= '') and '     ' or '') .. p2 else txt = '' end "
+    "else txt = parts[line] or '' end; "
+    "if txt == '' then return '' end; "
+    "local function tc(f, n, d) f = math.floor(f + 0.5); if f < 0 then return '--:--:--:--' end; "
+    "if d > 0 then local p10, pm = n * 600 - d * 9, n * 60 - d; local q, m = math.floor(f / p10), f % p10; "
+    "if m > d then f = f + d * 9 * q + d * math.floor((m - d) / pm) else f = f + d * 9 * q end end; "
+    "return string.format('%02d:%02d:%02d%s%02d', math.floor(f / (n * 3600)), math.floor(f / (n * 60)) % 60, "
+    "math.floor(f / n) % 60, d > 0 and ';' or ':', f % n) end; "
+    "local tn, td = math.max(1, LK.TlFps), LK.TlDrop; "
+    "if string.find(txt, '{REC}', 1, true) then txt = string.gsub(txt, '{REC}', tc(rec, tn, td)) end; "
+    "if string.find(txt, '{SRC}', 1, true) then txt = string.gsub(txt, '{SRC}', tc(row[1] < 0 and -1 or row[1] + e * row[2], row[3], row[4])) end; "
+    "if string.find(txt, '{ATC}', 1, true) then txt = string.gsub(txt, '{ATC}', tc(row[5] < 0 and -1 or row[5] + e, tn, td)) end; "
+    "if string.find(txt, '{FRM}', 1, true) then txt = string.gsub(txt, '{FRM}', tostring(row[6] + e)) end; "
+    "return txt end)()")
 
 
 def burn_lookup(corner, line, single="false"):
@@ -1052,34 +1216,13 @@ def burn_lookup(corner, line, single="false"):
 
     LK.Seg contiene una riga per segmento:
     rec_da|rec_a|src|passo|fps_src|drop_src|audio|contatore|TL|TR|BL|BR
-    con i segnaposto {REC} {SRC} {ATC} {FRM} calcolati qui a ogni fotogramma."""
-    return (
-        "(function() "
-        "local function tc(f, n, d) f = math.floor(f + 0.5); if f < 0 then return '--:--:--:--' end; "
-        "if d > 0 then local p10, pm = n * 600 - d * 9, n * 60 - d; local q, m = math.floor(f / p10), f %% p10; "
-        "if m > d then f = f + d * 9 * q + d * math.floor((m - d) / pm) else f = f + d * 9 * q end end; "
-        "return string.format('%%02d:%%02d:%%02d%%s%%02d', math.floor(f / (n * 3600)), math.floor(f / (n * 60)) %% 60, "
-        "math.floor(f / n) %% 60, d > 0 and ';' or ':', f %% n) end; "
-        "local rec = LK.RecStart + (time - comp.RenderStart); "
-        "local tn, td = math.max(1, LK.TlFps), LK.TlDrop; "
-        "for l in string.gmatch(LK.Seg.Value, '[^\\n]+') do "
-        "local a, b, sv, st, sn, sd, au, fr, t1, t2, t3, t4 = string.match(l, "
-        "'^(%%-?%%d+)|(%%-?%%d+)|(%%-?[%%d%%.]+)|([%%d%%.]+)|(%%d+)|(%%d+)|(%%-?%%d+)|(%%-?%%d+)|([^|]*)|([^|]*)|([^|]*)|([^|]*)$'); "
-        "a, b = a and (a + 0), b and (b + 0); "
-        "if a and rec >= a and rec < b then "
-        "local e = rec - a; "
-        "local txt = ({ t1, t2, t3, t4 })[%d] or ''; "
-        "local parts = {}; for x in string.gmatch(txt .. '~', '([^~]*)~') do parts[#parts + 1] = x end; "
-        "local line = %d; "
-        "if (SINGLE_EXPR) and line < 3 then "
-        "if line == 1 then local p1, p2 = parts[1] or '', parts[2] or ''; "
-        "txt = p1 .. ((p1 ~= '' and p2 ~= '') and '     ' or '') .. p2 else txt = '' end "
-        "else txt = parts[line] or '' end; "
-        "txt = string.gsub(txt, '{REC}', tc(rec, tn, td)); "
-        "txt = string.gsub(txt, '{SRC}', tc((sv + 0) < 0 and -1 or (sv + 0) + e * (st + 0), (sn + 0), (sd + 0))); "
-        "txt = string.gsub(txt, '{ATC}', tc((au + 0) < 0 and -1 or (au + 0) + e, tn, td)); "
-        "txt = string.gsub(txt, '{FRM}', tostring(fr + e)); "
-        "return txt end end; return '' end)()" % (corner, line)).replace("SINGLE_EXPR", single)
+    con i segnaposto {REC} {SRC} {ATC} {FRM} calcolati qui a ogni fotogramma. L'elenco viene
+    analizzato una volta e tenuto in memoria; il segmento si trova con una ricerca binaria."""
+    return (BURN_LOOKUP.replace("CORNER", str(corner)).replace("LINE", str(line))
+            .replace("SINGLE_EXPR", single))
+
+
+OUTLINE = [("Enabled2", "1"), ("Red2", "0"), ("Green2", "0"), ("Blue2", "0"), ("Alpha2", "1"), ("Thickness2", "0.08")]
 
 
 def burnin(std=None):
@@ -1122,7 +1265,9 @@ def burnin(std=None):
            "INP_Integer = true, INP_External = false, IC_Visible = false, LINKS_Name = \"TlDrop\", },\n"
            + "".join("\t\t\t\t\t\t%s = { LINKID_DataType = \"Number\", INPID_InputControl = \"SliderControl\", "
                      "INP_Integer = true, INP_External = false, IC_Visible = false, LINKS_Name = \"%s\", },\n" % (k, k)
-                     for k in ("TlW", "TlH")))
+                     for k in ("TlW", "TlH"))
+           + hidden_numbers(FRAME_HIDDEN))
+    values += [("FW", "0"), ("FH", "0"), ("FR", "0")]
     g.controls(values, uc)
     g._add("Bg", "Background", G.CREATOR + [("TopLeftRed", "0"), ("TopLeftGreen", "0"), ("TopLeftBlue", "0"),
                                              ("TopLeftAlpha", "0")])
@@ -1135,9 +1280,13 @@ def burnin(std=None):
         g._add(nm, "Background", G.CREATOR + [("TopLeftRed", "0"), ("TopLeftGreen", "0"), ("TopLeftBlue", "0"),
                                               ("TopLeftAlpha", ("expr", "LK.BMatteAlpha")),
                                               ("EffectMask", ("link", nm + "M", "Mask"))])
+    # ogni parte opzionale passa da un Dissolve 0/1: se spenta Fusion non la calcola (quattro fondi a
+    # tutto quadro in meno a ogni fotogramma quando il mascherino non c'e')
     top = "Bg"
-    for i, nm in enumerate(("MatT", "MatB", "MatL", "MatR")):
-        top = g.merge("MM%d" % i, top, nm)
+    mt = g.merge("MM1", g.merge("MM0", top, "MatT"), "MatB")
+    top = g.dissolve("SwLB", top, mt, "iif(%s > 0, 1, 0)" % lb)
+    mt = g.merge("MM3", g.merge("MM2", top, "MatL"), "MatR")
+    top = g.dissolve("SwPB", top, mt, "iif(%s > 0, 1, 0)" % pb)
     # bande proprie semitrasparenti solo senza mascherino
     own = "iif(%s, LK.BBandAlpha, 0)" % OWN
     for nm, cy in (("BandT", "1 - %s / 2" % BAND), ("BandB", "%s / 2" % BAND)):
@@ -1145,10 +1294,9 @@ def burnin(std=None):
         g._add(nm, "Background", G.CREATOR + [("TopLeftRed", "0"), ("TopLeftGreen", "0"), ("TopLeftBlue", "0"),
                                               ("TopLeftAlpha", ("expr", own)),
                                               ("EffectMask", ("link", nm + "M", "Mask"))])
-    top = g.merge("MB1", top, "BandT")
-    top = g.merge("MB2", top, "BandB")
+    top = g.dissolve("SwOwn", top, g.merge("MB2", g.merge("MB1", top, "BandT"), "BandB"), "iif(%s, 1, 0)" % OWN)
     half = "0.9 * %s" % CAPE
-    margin = "iif(LK.BPos > 0.5, 0.05, 0.02)"
+    margin = "iif(%s, 0.05, 0.02)" % SAFE
     # angoli: 1 alto-sx, 2 alto-dx, 3 basso-sx, 4 basso-dx; due righe (una sola se la banda e' sottile)
     for corner, (hx, vy) in enumerate([(-1, -1), (1, -1), (-1, 1), (1, 1)], 1):
         for line in (1, 2):
@@ -1162,12 +1310,12 @@ def burnin(std=None):
             off = "(%s)" % half if line == 1 else "(-(%s))" % half
             if vy < 0:
                 y = ("iif(%s, 1 - (%s) / 2 + iif(%s, 0, %s), iif(%s, 0.95 - %d * 1.8 * %s, "
-                     "iif(LK.BPos > 0.5, 0.93 %s %s, 1 - %s / 2 %s %s)))"
-                     % (LBOX, LB, SINGLE, off, PBOX, line - 1, CAPE, sign, half, BAND, sign, half))
+                     "iif(%s, 0.93 %s %s, 1 - %s / 2 %s %s)))"
+                     % (LBOX, LB, SINGLE, off, PBOX, line - 1, CAPE, SAFE, sign, half, BAND, sign, half))
             else:
                 y = ("iif(%s, (%s) / 2 + iif(%s, 0, %s), iif(%s, 0.05 + %d * 1.8 * %s, "
-                     "iif(LK.BPos > 0.5, 0.07 %s %s, %s / 2 %s %s)))"
-                     % (LBOX, LB, SINGLE, off, PBOX, 2 - line, CAPE, sign, half, BAND, sign, half))
+                     "iif(%s, 0.07 %s %s, %s / 2 %s %s)))"
+                     % (LBOX, LB, SINGLE, off, PBOX, 2 - line, CAPE, SAFE, sign, half, BAND, sign, half))
             # grandezza: altezza voluta, ridotta se il testo non entra nella larghezza disponibile
             maxw = "iif(%s, 0.9 * (%s), 0.46)" % (PBOX, PB)
             size = "math.min(2 * %s / %s, %s / (0.5 * math.max(1, string.len(%s))))" % (CAPE, AR, maxw, lookup)
@@ -1175,7 +1323,7 @@ def burnin(std=None):
             g._add(nm, "TextPlus", G.CREATOR + [
                 ("Center", ("expr", "Point(%s, %s)" % (x, y))), ("Font", '"Open Sans"'), ("Style", '"Bold"'),
                 ("Size", ("expr", size)), ("StyledText", ("expr", "Text(%s)" % lookup)),
-                ("Red1", "1"), ("Green1", "1"), ("Blue1", "1"),
+                ("Red1", "1"), ("Green1", "1"), ("Blue1", "1")] + OUTLINE + [
                 ("HorizontalLeftCenterRight", ("expr", "iif(%s or LK.BAlign > 0.5, 0, %d)" % (PBOX, hx))),
                 ("HorizontalJustificationNew", ("expr", "iif(%s or LK.BAlign > 0.5, 3, %d)" % (PBOX, 0 if hx < 0 else 1))),
                 ("VerticalJustificationNew", "3")])
@@ -1183,19 +1331,19 @@ def burnin(std=None):
     # record TC grande (in basso al centro)
     g._add("Big", "TextPlus", G.CREATOR + [
         ("Center", ("expr", "Point(iif(%s, 1 - (%s) / 2, 0.5), iif(%s, 0.16, iif(%s, (%s) + 0.06, "
-                             "iif(LK.BPos > 0.5, 0.15, %s + 0.055))))" % (PBOX, PB, PBOX, LBOX, LB, BAND))),
+                             "iif(%s, 0.15, %s + 0.055))))" % (PBOX, PB, PBOX, LBOX, LB, SAFE, BAND))),
         ("Font", '"Open Sans"'), ("Style", '"Bold"'),
         ("Size", ("expr", "iif(%s, math.min(10 * %s / %s, 0.9 * (%s) / 4.8), 10 * %s / %s)" % (PBOX, CAP, AR, PB, CAP, AR))),
         ("StyledText", ("expr", "Text(%s)" % burn_lookup(4, 3))),
-        ("Red1", "1"), ("Green1", "1"), ("Blue1", "1"),
+        ("Red1", "1"), ("Green1", "1"), ("Blue1", "1")] + OUTLINE + [
         ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")])
-    top = g.merge("MBig", top, "Big", "iif(LK.BBig > 0.5, 1, 0)")
+    top = g.dissolve("SwBig", top, g.merge("MBig", top, "Big"), "iif(LK.BBig > 0.5, 1, 0)")
     g._add("Water", "TextPlus", G.CREATOR + [
         ("Center", "{ 0.5, 0.5 }"), ("Font", '"Open Sans"'), ("Style", '"Bold"'), ("Size", "0.06"),
         ("StyledText", ("expr", 'Text(string.upper(LK.BWaterText.Value) .. iif(LK.BRecipient.Value == "", "", "\\n" .. LK.BRecipient.Value))')),
         ("Red1", "1"), ("Green1", "1"), ("Blue1", "1"),
         ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")])
-    top = g.merge("MWater", top, "Water", "iif(LK.BWater > 0.5, LK.BWaterAlpha, 0)")
+    top = g.dissolve("SwWater", top, g.merge("MWater", top, "Water", "LK.BWaterAlpha"), "iif(LK.BWater > 0.5, 1, 0)")
     inputs = ([(x, "Burn-in") for x in ("SecBurn", "BPhase", "BUpdate", "BInfo", "BTitleText", "BVersionText",
                                         "BWaterText", "BRecipient")]
               + [(k, "Campi") for k, _ in BURN_FIELDS] + [("BFrameMode", "Campi")]

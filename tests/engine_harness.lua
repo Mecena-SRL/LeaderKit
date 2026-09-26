@@ -4,7 +4,7 @@
 local enginePath = arg[1]
 local opt = { fps = "24", df = "0", preset = "0", head = "5", progstart = "30", program = "60",
   variant = "1", runs = "1", usermarker = "0", remove = "0", marks = "abs_incl", beep = "0",
-  dursel = "0", programtc = "00:00:30:00", removecode = "", logo = "", res = "1920x1080", stilldur = "0" }
+  dursel = "0", programtc = "00:00:30:00", removecode = "", logo = "", res = "1920x1080", stilldur = "0", export = "0" }
 for i = 2, #arg do local k, v = arg[i]:match("([^=]+)=(.*)"); opt[k] = v end
 local fps = tonumber(opt.fps)
 local nominal = math.floor(fps + 0.5)
@@ -47,13 +47,15 @@ function Item:SetProperty(k, v) self.props = self.props or {}; self.props[k] = v
 function Item:GetMediaPoolItem() return self.mpi end
 function Item:GetSourceStartFrame() return self.srcin or 0 end
 function Item:GetTrackTypeAndIndex() return self.where end
+function Item:SetFusionOutputCache(v) self.cache = v; return true end
 
 local tracks = { video = { { name = "Video 1", items = {} } }, audio = { { name = "Audio 1", items = {} } } }
 local markers = {}
 local playhead = "01:00:00:00"
-local function newTool() local t = { inputs = {} }
+local function newTool(refuse) local t = { inputs = {} }
   function t:GetInput(k) return self.inputs[k] end
-  function t:SetInput(k, v) self.inputs[k] = v end
+  -- refuse: simula Resolve che non accetta la copia di alcuni campi nel blocco ricreato
+  function t:SetInput(k, v) if refuse and (k == "Logo" or k:match("^FL")) then return end; self.inputs[k] = v end
   return t end
 local function newComp(tool) local c = { tool = tool }
   function c:FindTool(n) if n == "LK" then return self.tool end end
@@ -69,7 +71,8 @@ headTool.inputs = { Preset = tonumber(opt.preset), Reel = 1, Custom = 0, BarsSec
   SlotSpot = tonumber(opt.SlotSpot or "3"), SlotStream = tonumber(opt.SlotStream or "3"), DateAuto = 1,
   Title = "Il film", TextRed = 0.5, BeepEach = tonumber(opt.beep), PopLevel = 0,
   Logo = opt.logo, LogoPos = 0, LogoSize = 20, LogoOnTail = 1,
-  SlateStyle = tonumber(opt.style or "0"), TitleImage = opt.titleimg or "", TitleImageSize = 100 }
+  SlateStyle = tonumber(opt.style or "0"), TitleImage = opt.titleimg or "", TitleImageSize = 100,
+  FL133 = tonumber(opt.fl133 or "0"), FL185 = 1, FL239 = 1 }
 local head = setmetatable({ off = 0, dur = tonumber(opt.head) * nominal, name = "LeaderKit Head",
   comp = newComp(headTool) }, Item)
 table.insert(tracks.video[1].items, head)
@@ -130,7 +133,7 @@ function tl:SetMarkInOut(i, o)
 end
 function tl:ClearMarkInOut() marks = nil; return true end
 function tl:InsertFusionGeneratorIntoTimeline(name)
-  local t = newTool()
+  local t = newTool(opt.refuse == "1")
   t.inputs = { Preset = 0, Info = "", CountFrom = 8, SlateSec = 8, GapSec = 2, TailSec = 8, MarkersOn = 1,
     MarkerKind = 0, MarkerEvery = 20, TailOn = 1, Reel = 1 }
   local off, dur = tcf(playhead) - tlStart, 5 * nominal
@@ -157,13 +160,29 @@ local wavClip = { GetName = function() return "LeaderKit_pop_1kHz_-20dBFS.wav" e
 local folder = { clips = {} }
 function folder:GetName() return "LeaderKit" end
 function folder:GetClipList() return counted(self.clips) end
-local rootFolder = { GetSubFolderList = function() return counted({ folder }) end }
+local userFolders = {}
+local function newFolder(name, clips)
+  local f = { name = name, clips = clips or {} }
+  function f:GetName() return self.name end
+  function f:GetClipList() return counted(self.clips) end
+  function f:GetSubFolderList() return counted({}) end
+  return f
+end
+local function stillClip(name, path, res)
+  return { GetName = function() return name end, path = path,
+    GetClipProperty = function(_, k) if k == "File Path" then return path end; if k == "Resolution" then return res end end }
+end
+if opt.poolhas then table.insert(userFolders, newFolder("Loghi", { stillClip(opt.poolhas:match("[^/]+$"), opt.poolhas, "400x200") })) end
+if opt.logobin then table.insert(userFolders, newFolder("LeaderKit Logo", { stillClip("marchio.png", "/x/marchio.png", "1000x500") })) end
+local rootFolder = { GetSubFolderList = function() local l = { folder }; for _, f in ipairs(userFolders) do l[#l + 1] = f end; return counted(l) end,
+  GetClipList = function() return counted({}) end, GetName = function() return "Master" end }
 local pool = {}
 function pool:GetRootFolder() return rootFolder end
 function pool:AddSubFolder() return folder end
 function pool:GetCurrentFolder() return folder end
 function pool:SetCurrentFolder() return true end
 function pool:ImportMedia(paths)
+  if opt.poolhas and paths[1] == opt.poolhas then return counted({}) end   -- come Resolve: gia' nel Media Pool
   local name = paths[1]:match("[^/\\]+$")
   local clip = { GetName = function() return name end, path = paths[1] }
   table.insert(folder.clips, clip)
@@ -189,7 +208,26 @@ local project = { GetCurrentTimeline = function() return tl end, GetMediaPool = 
     return ({ colorScienceMode = "davinciYRGBColorManagedv2", colorSpaceTimeline = "DaVinci WG/Intermediate",
       colorSpaceOutput = "Rec.709 Gamma 2.4" })[k]
   end }
-local resolveObj = { GetProjectManager = function() return { GetCurrentProject = function() return project end } end }
+-- esportazione del fotogramma corrente (slate fissa): scrive un PNG della risoluzione della timeline.
+-- export=0: API assente; export=color: riesce solo dalla pagina Color.
+local page = "edit"
+local exportN = 0
+if opt.export ~= "0" then
+  function project:ExportCurrentFrameAsStill(path)
+    if opt.export == "color" and page ~= "color" then return false end
+    local rw, rh = opt.res:match("(%d+)x(%d+)")
+    local function be(v) return string.char(math.floor(v / 16777216) % 256, math.floor(v / 65536) % 256,
+      math.floor(v / 256) % 256, v % 256) end
+    local f = io.open(path, "wb")
+    f:write("\137PNG\r\n\26\n\0\0\0\13IHDR" .. be(tonumber(rw)) .. be(tonumber(rh)) .. "\8\6\0\0\0")
+    f:close()
+    exportN = exportN + 1
+    print("RESULT export=" .. tostring(playhead) .. "|" .. page .. "|" .. tostring(head.comp.tool.inputs.SlateBaked))
+    return true
+  end
+end
+local resolveObj = { GetProjectManager = function() return { GetCurrentProject = function() return project end } end,
+  GetCurrentPage = function() return page end, OpenPage = function(_, p) page = p; return true end }
 
 -- globali attesi dal motore
 fusion = { GetResolve = function() return resolveObj end, GetCurrentComp = function() return head.comp end }
@@ -214,6 +252,13 @@ if opt.burncode then
   end end
   assert(load(io.open(opt.burncode):read("a"), "engine", "t", _ENV))()
 end
+if opt.imagescode then
+  comp = head.comp; tool = head.comp.tool
+  assert(load(io.open(opt.imagescode):read("a"), "engine", "t", _ENV))()
+end
+print("RESULT page=" .. page)
+print("RESULT baked=" .. tostring(head.comp.tool.inputs.SlateBaked) .. "|" .. tostring(head.comp.tool.inputs.FW) .. "|" ..
+  tostring(head.comp.tool.inputs.FR) .. "|" .. tostring(head.comp.tool.inputs.FfoaTc))
 if opt.remove == "1" then
   comp = head.comp; tool = head.comp.tool
   assert(load(io.open(opt.removecode):read("a"), "engine", "t", _ENV))()
@@ -255,6 +300,11 @@ for _, t in ipairs(tracks.video) do
         tostring(pr.ZoomX), tostring(pr.Pan), tostring(pr.Tilt), tostring(it.path)))
     end
   end
+end
+do
+  local nc = 0
+  for _, t in ipairs(tracks.video) do for _, it in ipairs(t.items) do if it.cache == 1 then nc = nc + 1 end end end
+  print("RESULT cache=" .. nc)
 end
 for _, it in ipairs(tracks.video[1].items) do
   if it.name == "LeaderKit Tail" then
