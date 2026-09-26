@@ -443,148 +443,189 @@ LK_OVERLAY = (function()
       end
     end
 
-    -- frame lines (sul raster reale) ed etichette
+    -- 1) frame lines ed etichette: prima si calcolano, per sapere quale area resta libera
     local gh = max(8, floor(0.016 * H + 0.5))
-    local narrow, wide = {}, {}
+    local rects, narrow, wide = {}, {}, {}
     labels = {}
     for _, fl in ipairs(spec.framelines or {}) do
       local ar = fl.ar
       if ar >= W / H - 0.005 then
         local h = floor(W / ar + 0.5)
         local y0 = floor((H - h) / 2 + 0.5)
-        cv:frame(0, y0, W, y0 + h, lw, dim(0.8))
+        rects[#rects + 1] = { 0, y0, W, y0 + h }
         wide[#wide + 1] = { label = fl.label, y = y0 + lw + floor(gh * 0.5) }
       else
         local w = floor(H * ar + 0.5)
         local x0 = floor((W - w) / 2 + 0.5)
-        cv:frame(x0, 0, x0 + w, H, lw, dim(0.8))
+        rects[#rects + 1] = { x0, 0, x0 + w, H }
         narrow[#narrow + 1] = { x0 = x0, label = fl.label }
       end
     end
-    table.sort(wide, function(a, b) return a.y < b.y end)
+    table.sort(wide, function(p1, p2) return p1.y < p2.y end)
     local lastY = -1e9
     for _, fl in ipairs(wide) do
       local y = max(fl.y, lastY + floor(gh * 1.6))
       labels[#labels + 1] = { fl.label, floor(0.53 * W), y }
       lastY = y
     end
-    table.sort(narrow, function(a, b) return a.x0 < b.x0 end)
-    for k, fl in ipairs(narrow) do
-      labels[#labels + 1] = { fl.label, fl.x0 + lw + floor(gh * 0.5), floor(0.012 * H) + (k - 1) * floor(gh * 1.9) }
+    -- etichette dei formati piu' stretti: accanto alla propria linea, spostate in giu' solo se si toccano
+    table.sort(narrow, function(p1, p2) return p1.x0 < p2.x0 end)
+    local placed = {}
+    for _, fl in ipairs(narrow) do
+      local x = fl.x0 + lw + floor(gh * 0.5)
+      local y = floor(0.012 * H)
+      local wl = textWidth(fl.label, gh) + gh
+      for _, q in ipairs(placed) do
+        if x < q[1] + q[3] and q[1] < x + wl and math.abs(q[2] - y) < gh * 1.5 then y = q[2] + floor(gh * 1.9) end
+      end
+      placed[#placed + 1] = { x, y, wl }
+      labels[#labels + 1] = { fl.label, x, y }
     end
+    local safes = {}
     for _, sa in ipairs({ { spec.safeAction, 0.93 }, { spec.safeTitle, 0.90 } }) do
       if sa[1] then
         local mw, mh = floor(W * (1 - sa[2]) / 2 + 0.5), floor(H * (1 - sa[2]) / 2 + 0.5)
-        cv:frame(mw, mh, W - mw, H - mh, max(1, floor(lw / 2)), dim(0.5))
+        safes[#safes + 1] = { mw, mh, W - mw, H - mh }
       end
     end
 
-    if cal then
-      -- pannelli ai lati del cerchio del countdown (diametro 0.36 W)
-      local py0, py1 = floor(0.22 * H), floor(0.78 * H)
-      local boxes = { { floor(0.025 * W), floor(0.30 * W) }, { W - floor(0.30 * W), W - floor(0.025 * W) } }
-      local VW, VH = 100, 112
-      local P = {}
-      for i, bx in ipairs(boxes) do
-        cv:rect(bx[1], py0, bx[2], py1, { 15, 15, 15 })
-        cv:frame(bx[1], py0, bx[2], py1, lw, dim(0.8))
-        local pw, ph = bx[2] - bx[1], py1 - py0
-        local s = min(pw / VW, ph / VH) * 0.92
-        local ox, oy = bx[1] + (pw - VW * s) / 2, py0 + (ph - VH * s) / 2
-        P[i] = function(x, y) return ox + x * s, oy + y * s end
-        P[i .. "s"] = s
-      end
-      local L, R, s = P[1], P[2], P["1s"]
-      local function box(F, x0, y0, x1, y1, c)
-        local a, b = F(x0, y0); local cc, d = F(x1, y1); cv:rect(a, b, cc, d, c)
-      end
-      -- sinistra: sfera, bianco di picco, nero (PLUGE), rampe, etichette
-      if cal.contour then local x, y = L(20, 20); cv:sphere(x, y, 15 * s) end
-      if cal.peak then
-        box(L, 40, 5, 60, 35, WHITE)
-        box(L, 65, 5, 95, 35, BLACK)
-        box(L, 69, 9, 75, 31, { 5, 5, 5 }); box(L, 78, 9, 84, 31, { 10, 10, 10 }); box(L, 87, 9, 93, 31, { 20, 20, 20 })
-      end
-      if cal.ramps then
-        for i, c in ipairs({ { 255, 255, 255 }, { 255, 0, 0 }, { 0, 255, 0 }, { 0, 0, 255 } }) do
-          local y0 = 42 + (i - 1) * 14
-          local ax, ay = L(5, y0); local bx, by = L(95, y0 + 10)
-          cv:ramp(ax, ay, bx, by, { 0, 0, 0 }, c)
-        end
-      end
-      if cal.labels then
-        for i, lab in ipairs({ spec.fpsLabel or "", spec.resLabel or "" }) do
-          local x0 = (i == 1) and 5 or 53
-          local ax, ay = L(x0, 99); local bx, by = L(x0 + 42, 111)
-          cv:frame(floor(ax), floor(ay), floor(bx), floor(by), lw, accent)
-          local gh = 5 * s
-          while textWidth(lab, gh) > (bx - ax) * 0.86 and gh > 6 do gh = gh * 0.9 end
-          cv:text(lab, (ax + bx) / 2, (ay + by) / 2 - gh / 2, gh, WHITE, "center")
-        end
-      end
-      -- destra: verifica del blu, bianchi vicini al clip, scala di grigi, colori, formato
-      if cal.blue then
-        box(R, 5, 5, 20, 20, { 255, 0, 255 }); box(R, 20, 5, 35, 20, { 0, 255, 255 })
-        box(R, 5, 20, 20, 35, WHITE); box(R, 20, 20, 35, 35, { 0, 0, 255 })
-      end
-      if cal.peak then
-        box(R, 40, 5, 95, 35, WHITE)
-        box(R, 44, 9, 54, 31, { 235, 235, 235 }); box(R, 60, 9, 70, 31, { 245, 245, 245 })
-        box(R, 76, 9, 86, 31, { 250, 250, 250 })
-      end
-      if cal.grey then
-        for i = 0, 10 do
-          local v = floor(i * 25.5 + 0.5)
-          box(R, 5 + i * 90 / 11, 42, 5 + (i + 1) * 90 / 11, 56, { v, v, v })
-        end
-      end
-      if cal.color then
-        local cols = { { 255, 0, 0 }, { 0, 255, 0 }, { 0, 0, 255 }, { 255, 255, 0 }, { 0, 255, 255 }, { 255, 0, 255 } }
-        for i, c in ipairs(cols) do box(R, 5 + (i - 1) * 15, 62, 5 + i * 15 - 1, 80, c) end
-      end
-      if cal.labels then
-        local gh = 4.2 * s
-        local x, y = R(50, 88)
-        cv:text(string.format("%d x %d", W, H), x, y, gh, accent, "center")
-        x, y = R(50, 100)
-        cv:text(string.format("%.2f:1", W / H), x, y, gh, accent, "center")
-      end
-      -- griglie di risoluzione sopra e sotto i pannelli: righe di 1, 2, 3, 4 pixel,
-      -- verticali (fila in alto) e orizzontali (fila in basso). Al 100% devono essere nette:
-      -- se le righe da 1 px si impastano l'immagine e' stata scalata o e' morbida.
-      if cal.stars then
-        local sq = floor(0.042 * H + 0.5)
-        local gap = floor(0.008 * H + 0.5)
-        local lgh = max(8, floor(0.016 * H + 0.5))
-        local wTot = 4 * sq + 3 * gap
-        local hTot = lgh + gap + 2 * sq + gap
-        for _, p in ipairs({ { 0.25, 0.115 }, { 0.75, 0.115 }, { 0.25, 0.885 }, { 0.75, 0.885 } }) do
-          local x0 = floor(p[1] * W - wTot / 2 + 0.5)
-          local y0 = floor(p[2] * H - hTot / 2 + 0.5)
-          cv:rect(x0 - gap, y0 - gap, x0 + wTot + gap, y0 + hTot + gap, BLACK)
-          cv:frame(x0 - gap, y0 - gap, x0 + wTot + gap, y0 + hTot + gap, lw, dim(0.6))
-          for k = 1, 4 do
-            local gx = x0 + (k - 1) * (sq + gap)
-            cv:text(tostring(k), gx + sq / 2, y0, lgh, accent, "center")
-            local gy = y0 + lgh + gap
-            cv:grating(gx, gy, gx + sq, gy + sq, k, true, WHITE, BLACK)
-            cv:grating(gx, gy + sq + gap, gx + sq, gy + 2 * sq + gap, k, false, WHITE, BLACK)
-          end
-        end
-      end
-      if cal.center then
-        local a = floor(0.012 * W)
-        cv:frame(floor(W / 2 - a), floor(H / 2 - a), floor(W / 2 + a), floor(H / 2 + a), lw, accent)
-        local b = floor(a / 2.5)
-        cv:frame(floor(W / 2 - b), floor(H / 2 - b), floor(W / 2 + b), floor(H / 2 + b), lw, accent)
-      end
-    end
-
+    -- 2) frame lines, safe area ed etichette per prime: gli strumenti di taratura vanno sopra
+    --    (le frame lines si riferiscono ai formati, la taratura alla timeline intera)
+    for _, rc in ipairs(rects) do cv:frame(rc[1], rc[2], rc[3], rc[4], lw, dim(0.8)) end
+    for _, rc in ipairs(safes) do cv:frame(rc[1], rc[2], rc[3], rc[4], max(1, floor(lw / 2)), dim(0.5)) end
     for _, l in ipairs(labels or {}) do
       local pad = floor(gh * 0.3)
       cv:rect(l[2] - pad, l[3] - pad, l[2] + textWidth(l[1], gh) + pad, l[3] + gh + pad, { 0, 0, 0 }, 0.75)
       cv:text(l[1], l[2], l[3], gh, dim(0.95))
     end
+
+    -- 3) area degli strumenti: tutta la timeline, con un margine (indipendente dalle frame lines)
+    local m = max(4, floor(0.03 * H))
+    local R = { m, m, W - m, H - m }
+
+    if cal then
+      -- zone ai lati del cerchio del countdown (diametro 0.36 W), simmetriche
+      local ringR = 0.18 * W + 0.012 * W
+      local zw = min(W / 2 - ringR - R[1], R[3] - (W / 2 + ringR))
+      local zones = {}
+      if zw >= 0.06 * W then
+        zones = { { W / 2 - ringR - zw, W / 2 - ringR }, { W / 2 + ringR, W / 2 + ringR + zw } }
+      end
+      -- griglie di risoluzione (sopra e sotto i pannelli), grandezza adattata alla zona
+      local gap = max(2, floor(0.008 * H + 0.5))
+      local lgh = max(8, floor(0.016 * H + 0.5))
+      local sq = floor(min(0.042 * H, (zw * 0.9 - 3 * gap) / 4))
+      local gridH = lgh + gap + 2 * sq + gap
+      local useGrid = cal.stars and #zones > 0 and sq >= 12 and (R[4] - R[2]) > 2 * gridH + 0.2 * H
+      local VW, VH = 100, 112
+      -- pannelli proporzionati al contenuto, centrati in verticale; griglie subito sopra e sotto
+      local avail0, avail1 = R[2], R[4]
+      if useGrid then avail0, avail1 = R[2] + gridH + 3 * gap, R[4] - gridH - 3 * gap end
+      local ph = min(avail1 - avail0, zw * VH / VW * 1.06)
+      local mid = (avail0 + avail1) / 2
+      local py0, py1 = floor(mid - ph / 2 + 0.5), floor(mid + ph / 2 + 0.5)
+      local gridTop, gridBot = py0 - 3 * gap - gridH, py1 + 3 * gap
+      local P = {}
+      local panels = #zones > 0 and (py1 - py0) > 0.12 * H
+      if panels then
+        for i, z in ipairs(zones) do
+          local bx0, bx1 = floor(z[1] + 0.5), floor(z[2] + 0.5)
+          cv:rect(bx0, py0, bx1, py1, { 15, 15, 15 })
+          cv:frame(bx0, py0, bx1, py1, lw, dim(0.8))
+          local pw, ph = bx1 - bx0, py1 - py0
+          local sc = min(pw / VW, ph / VH) * 0.92
+          local ox, oy = bx0 + (pw - VW * sc) / 2, py0 + (ph - VH * sc) / 2
+          P[i] = function(x, y) return ox + x * sc, oy + y * sc end
+          P[i .. "s"] = sc
+        end
+      end
+      if panels then
+        local L, Rr, s = P[1], P[2], P["1s"]
+        local function box(F, x0, y0, x1, y1, c)
+          local ax, ay = F(x0, y0); local cx2, cy2 = F(x1, y1); cv:rect(ax, ay, cx2, cy2, c)
+        end
+        -- sinistra: sfera, bianco di picco, nero (PLUGE), rampe, etichette
+        if cal.contour then local x, y = L(20, 20); cv:sphere(x, y, 15 * s) end
+        if cal.peak then
+          box(L, 40, 5, 60, 35, WHITE)
+          box(L, 65, 5, 95, 35, BLACK)
+          box(L, 69, 9, 75, 31, { 5, 5, 5 }); box(L, 78, 9, 84, 31, { 10, 10, 10 }); box(L, 87, 9, 93, 31, { 20, 20, 20 })
+        end
+        if cal.ramps then
+          for i, c in ipairs({ { 255, 255, 255 }, { 255, 0, 0 }, { 0, 255, 0 }, { 0, 0, 255 } }) do
+            local y0 = 42 + (i - 1) * 14
+            local ax, ay = L(5, y0); local bx, by = L(95, y0 + 10)
+            cv:ramp(ax, ay, bx, by, { 0, 0, 0 }, c)
+          end
+        end
+        if cal.labels then
+          for i, lab in ipairs({ spec.fpsLabel or "", spec.resLabel or "" }) do
+            local x0 = (i == 1) and 5 or 53
+            local ax, ay = L(x0, 99); local bx, by = L(x0 + 42, 111)
+            cv:frame(floor(ax), floor(ay), floor(bx), floor(by), lw, accent)
+            local tgh = 5 * s
+            while textWidth(lab, tgh) > (bx - ax) * 0.86 and tgh > 6 do tgh = tgh * 0.9 end
+            cv:text(lab, (ax + bx) / 2, (ay + by) / 2 - tgh / 2, tgh, WHITE, "center")
+          end
+        end
+        -- destra: verifica del blu, bianchi vicini al clip, scala di grigi, colori, formato
+        if cal.blue then
+          box(Rr, 5, 5, 20, 20, { 255, 0, 255 }); box(Rr, 20, 5, 35, 20, { 0, 255, 255 })
+          box(Rr, 5, 20, 20, 35, WHITE); box(Rr, 20, 20, 35, 35, { 0, 0, 255 })
+        end
+        if cal.peak then
+          box(Rr, 40, 5, 95, 35, WHITE)
+          box(Rr, 44, 9, 54, 31, { 235, 235, 235 }); box(Rr, 60, 9, 70, 31, { 245, 245, 245 })
+          box(Rr, 76, 9, 86, 31, { 250, 250, 250 })
+        end
+        if cal.grey then
+          for i = 0, 10 do
+            local v = floor(i * 25.5 + 0.5)
+            box(Rr, 5 + i * 90 / 11, 42, 5 + (i + 1) * 90 / 11, 56, { v, v, v })
+          end
+        end
+        if cal.color then
+          local cols = { { 255, 0, 0 }, { 0, 255, 0 }, { 0, 0, 255 }, { 255, 255, 0 }, { 0, 255, 255 }, { 255, 0, 255 } }
+          for i, c in ipairs(cols) do box(Rr, 5 + (i - 1) * 15, 62, 5 + i * 15 - 1, 80, c) end
+        end
+        if cal.labels then
+          local tgh = 4.2 * s
+          local x, y = Rr(50, 88)
+          cv:text(string.format("%d x %d", W, H), x, y, tgh, accent, "center")
+          x, y = Rr(50, 100)
+          cv:text(string.format("%.2f:1", W / H), x, y, tgh, accent, "center")
+        end
+      end
+      -- griglie di risoluzione: righe di 1, 2, 3, 4 pixel, verticali (fila in alto) e orizzontali
+      -- (fila in basso). Al 100% devono essere nette: se quelle da 1 px si impastano l'immagine e'
+      -- stata scalata o e' morbida.
+      if useGrid then
+        local wTot = 4 * sq + 3 * gap
+        for _, z in ipairs(zones) do
+          for _, gy0 in ipairs({ gridTop, gridBot }) do
+            local x0 = floor((z[1] + z[2]) / 2 - wTot / 2 + 0.5)
+            local y0 = floor(gy0 + 0.5)
+            cv:rect(x0 - gap, y0 - gap, x0 + wTot + gap, y0 + gridH, BLACK)
+            cv:frame(x0 - gap, y0 - gap, x0 + wTot + gap, y0 + gridH, lw, dim(0.6))
+            for k = 1, 4 do
+              local gx = x0 + (k - 1) * (sq + gap)
+              cv:text(tostring(k), gx + sq / 2, y0, lgh, accent, "center")
+              local gyy = y0 + lgh + gap
+              cv:grating(gx, gyy, gx + sq, gyy + sq, k, true, WHITE, BLACK)
+              cv:grating(gx, gyy + sq + gap, gx + sq, gyy + 2 * sq + gap, k, false, WHITE, BLACK)
+            end
+          end
+        end
+      end
+      if cal.center then
+        local a2 = floor(0.012 * W)
+        cv:frame(floor(W / 2 - a2), floor(H / 2 - a2), floor(W / 2 + a2), floor(H / 2 + a2), lw, accent)
+        local b2 = floor(a2 / 2.5)
+        cv:frame(floor(W / 2 - b2), floor(H / 2 - b2), floor(W / 2 + b2), floor(H / 2 + b2), lw, accent)
+      end
+    end
+
+    M.lastFreeArea = R
     return cv
   end
 

@@ -1,13 +1,17 @@
 -- LeaderKit engine: eseguito dai bottoni del generatore "LeaderKit Head".
--- LK_MODE = "generate" | "remove" (impostato dal bottone).
+-- LK_MODE = "generate" | "remove" | "burnin" | "images" (impostato dal bottone).
+-- "images" rifa' solo le immagini (taratura, frame lines, slate fissa, titolo, loghi) senza toccare
+-- blocco, coda, audio, marker, timecode e burn-in.
 -- Tutto viene ricalcolato sul frame rate e sul drop-frame reali della timeline.
 
 local MODE = LK_MODE or "generate"
+local FULL = MODE ~= "images"
 local PREFIX = "leaderkit"
 local POP_TRACK = "LeaderKit Pop"
 local TAIL_NAME = "LeaderKit Tail"
 local LOGO_TRACK = "LeaderKit Logo"
 local GFX_TRACK = "LeaderKit Grafica"
+local SLATE_TRACK = "LeaderKit Slate"
 local BURN_NAME = "LeaderKit Burn-in"
 local BURN_TRACK = "LeaderKit Burn-in"
 HEAD_NAME = "LeaderKit Head"
@@ -36,6 +40,12 @@ local function show(title)
       end)
     end
   end
+end
+
+-- In caso di errore imprevisto: riepilogo con quanto fatto fino a quel punto e l'errore
+LK_FAIL = function(err)
+  report[#report + 1] = "\nERRORE INTERNO (Genera si e' fermato qui, il resto non e' stato fatto):\n" .. tostring(err)
+  show("LeaderKit — errore")
 end
 
 -- ---------------------------------------------------------------- timecode
@@ -116,10 +126,28 @@ end
 
 local lk = tool
 if not lk or not pcall(function() return lk:GetInput("Preset") end) then lk = findTool(c, "LK") end
+-- Lettura di un input: GetInput, poi (per selettore file e casi particolari) il valore all'istante corrente.
+local function readInput(t, name)
+  if not t then return nil end
+  local okk, v = pcall(function() return t:GetInput(name) end)
+  if okk and v ~= nil then
+    if type(v) == "table" then v = v[1] or v.Value or v.Filename end
+    if v ~= nil then return v end
+  end
+  okk, v = pcall(function() return t[name][fu.TIME_UNDEFINED] end)
+  if okk and v ~= nil and type(v) ~= "table" then return v end
+  okk, v = pcall(function() return t[name][(c or comp).CurrentTime] end)
+  if okk and v ~= nil and type(v) ~= "table" then return v end
+  return nil
+end
+-- Fotografia dei parametri al momento in cui si preme il bottone: Genera legge sempre questi valori,
+-- anche dopo aver ricreato il blocco (dove la copia di alcuni campi potrebbe non riuscire).
+local SNAP = {}
+for _, k in ipairs(LK_PARAMS or {}) do SNAP[k] = readInput(lk, k) end
 local function get(name, default)
-  if not lk then return default end
-  local ok, v = pcall(function() return lk:GetInput(name) end)
-  if ok and v ~= nil then return v end
+  local v = SNAP[name]
+  if v == nil then v = readInput(lk, name) end
+  if v ~= nil then return v end
   return default
 end
 local function set(tool, name, value)
@@ -155,9 +183,23 @@ local function isLeaderKit(entry, kind)
   if kind == "video" then
     local tn = tl:GetTrackName("video", entry.track)
     if tn == LOGO_TRACK or tn == LOGO_TRACK .. " 2" or tn == LOGO_TRACK .. " Titolo" or tn == GFX_TRACK
-      or tn == BURN_TRACK then return true end
+      or tn == BURN_TRACK or tn == SLATE_TRACK then return true end
   end
   return false
+end
+
+local function imageTrack(tn)
+  return tn == LOGO_TRACK or tn == LOGO_TRACK .. " 2" or tn == LOGO_TRACK .. " Titolo" or tn == GFX_TRACK
+    or tn == SLATE_TRACK
+end
+-- solo le immagini (per "Aggiorna solo le immagini")
+local function cleanupImages()
+  local doomed = {}
+  for _, e in ipairs(allItems("video")) do
+    if imageTrack(tl:GetTrackName("video", e.track)) then doomed[#doomed + 1] = e.item end
+  end
+  if #doomed > 0 then tl:DeleteClips(doomed, false) end
+  return 0, #doomed
 end
 
 local function cleanup()
@@ -173,8 +215,7 @@ local function cleanup()
   end
   for _, e in ipairs(allItems("video")) do
     local tn = tl:GetTrackName("video", e.track)
-    if e.item:GetName() == TAIL_NAME or tn == LOGO_TRACK or tn == LOGO_TRACK .. " 2"
-      or tn == LOGO_TRACK .. " Titolo" or tn == GFX_TRACK or tn == BURN_TRACK then
+    if e.item:GetName() == TAIL_NAME or imageTrack(tn) or tn == BURN_TRACK then
       doomed[#doomed + 1] = e.item
     end
   end
@@ -336,6 +377,7 @@ function BURN.fill(item, lkb, opts)
   set(lkb, "TlDrop", r.drop)
   set(lkb, "TlW", tonumber(W) or 0)          -- risoluzione vera della timeline per mascherino e testi
   set(lkb, "TlH", tonumber(H) or 0)
+  set(lkb, "FW", tonumber(W) or 0); set(lkb, "FH", tonumber(H) or 0); set(lkb, "FR", r.fps or 0)
   local msg = string.format("Burn-in %s → %s: %d segmenti, %d clip letti dai metadati.",
     framesToTc(rs, r), framesToTc(re_ - 1, r), #points - 1, clips)
   set(lkb, "BInfo", msg)
@@ -376,6 +418,21 @@ end
 local checks = {}
 local function ok(s) checks[#checks + 1] = "✓ " .. s end
 local function bad(s) checks[#checks + 1] = "⚠ " .. s; warnings[#warnings + 1] = s end
+LK_FAIL = function(err)
+  report[#report + 1] = "\nCONTROLLI\n" .. table.concat(checks, "\n")
+  report[#report + 1] = "\nERRORE INTERNO (Genera si e' fermato qui, il resto non e' stato fatto):\n" .. tostring(err)
+  show("LeaderKit — errore")
+end
+-- Una parte che si rompe non ferma le altre: l'errore finisce nel riepilogo.
+local function stage(label, fn)
+  local okS, err = xpcall(fn, function(e2)
+    return tostring(e2) .. ((debug and debug.traceback) and ("\n" .. debug.traceback("", 2)) or "")
+  end)
+  if not okS then
+    bad(label .. ": non riuscito, il resto e' stato fatto lo stesso. Dettagli: " .. string.sub(tostring(err), 1, 700))
+  end
+  return okS
+end
 
 local function isHeadItem(item)
   if not item then return false end
@@ -442,7 +499,8 @@ local PARAMS = LK_PARAMS or { "Preset", "Reel", "DurSel", "ProgramTC", "Title", 
   "AccentRed", "AccentGreen", "AccentBlue" }
 local COLORS = { "TextRed", "TextGreen", "TextBlue", "BgRed", "BgGreen", "BgBlue", "AccentRed", "AccentGreen", "AccentBlue" }
 
-local nm, ni = cleanup()
+local nm, ni
+if FULL then nm, ni = cleanup() else nm, ni = cleanupImages() end
 if nm + ni > 0 then log(string.format("Pulizia: tolti %d marker e %d clip della generazione precedente.", nm, ni)) end
 
 local function trackOf(item)
@@ -519,6 +577,13 @@ if programFirst and programFirst < ffoa then
 end
 
 local panel = lk
+if not FULL and head:GetDuration() ~= headLen then
+  bad("Il blocco LeaderKit Head non ha la durata dello standard (" .. framesToTc(headLen, r) ..
+    "): premi prima 'Genera sulla timeline' (scheda Progetto).")
+  report[#report + 1] = "\nCONTROLLI\n" .. table.concat(checks, "\n")
+  warnings = {}
+  show("LeaderKit — Aggiorna immagini"); return
+end
 if head:GetDuration() ~= headLen then
   local saved = {}
   for _, k in ipairs(PARAMS) do saved[k] = get(k, nil) end
@@ -528,8 +593,19 @@ if head:GetDuration() ~= headLen then
   head = newHead
   pcall(function() local nc = head:GetFusionCompByIndex(1); if nc then c = nc end end)
   panel = lkOf(head)
-  if panel then for k, v in pairs(saved) do set(panel, k, v) end
-  else bad("Parametri non ricopiati nel nuovo blocco (pannello non trovato).") end
+  if panel then
+    local lost = {}
+    for k, v in pairs(saved) do
+      set(panel, k, v)
+      local back = readInput(panel, k)
+      if back == nil or tostring(back) ~= tostring(v) then lost[#lost + 1] = k end
+    end
+    table.sort(lost)
+    if #lost > 0 then
+      bad("Nel blocco ricreato Resolve non ha accettato: " .. table.concat(lost, ", ") ..
+        ". Genera usa comunque i valori che avevi impostato; se nell'Inspector li vedi diversi, reimpostali.")
+    end
+  else bad("Parametri non ricopiati nel nuovo blocco (pannello non trovato): Genera usa comunque i valori impostati.") end
   if exact then ok("Blocco leader portato alla durata dello standard: " .. framesToTc(headLen, r) .. ".")
   else bad(string.format("Il blocco dura %s invece di %s: questa versione di Resolve ignora In/Out. Allungalo a mano fino a %s.",
     framesToTc(head:GetDuration(), r), framesToTc(headLen, r), framesToTc(ffoa, r))) end
@@ -540,6 +616,15 @@ else
 end
 lk = panel or lk
 ffoa = head:GetStart() + head:GetDuration()
+-- input nascosti: si scrivono sia sul pannello del bottone sia sul nodo LK dentro il blocco
+local lkInner = lkOf(head)
+local function setHead(name, value)
+  set(lk, name, value)
+  if lkInner and lkInner ~= lk then set(lkInner, name, value) end
+end
+-- formato della timeline per le espressioni (cosi' non lo chiedono alla composizione a ogni fotogramma)
+setHead("FW", tonumber(W) or 0); setHead("FH", tonumber(H) or 0); setHead("FR", r.fps or 0)
+setHead("SlateBaked", 0)
 
 -- ---------------------------------------------------------------- 2) start timecode
 local ffoaTc = P.ffoa or "01:00:00:00"
@@ -550,6 +635,8 @@ local newStart = ffoaTarget - (ffoa - tl:GetStartFrame())
 if newStart < 0 then
   bad("Il blocco e' troppo lontano dall'inizio della timeline per portare il FFOA a " .. ffoaTc ..
     ": avvicinalo all'inizio e premi di nuovo Genera.")
+elseif newStart ~= tl:GetStartFrame() and not FULL then
+  bad("Lo start della timeline non porta il FFOA a " .. ffoaTc .. ": premi 'Genera sulla timeline'.")
 elseif newStart ~= tl:GetStartFrame() then
   if tl:SetStartTimecode(framesToTc(newStart, r)) then
     ok("Start della timeline portato da " .. oldStartTc .. " a " .. framesToTc(newStart, r) ..
@@ -787,6 +874,7 @@ local function placeStill(clip, frame, len, track)
 end
 
 local function placeAudio(clip, frame, len, label)
+  if not FULL then return true end
   if not clip then audioFail = audioFail + 1; bad(label .. ": file audio non creato (" .. cacheDir .. ")."); return false end
   local track = ensurePopTrack()
   local list = goodVariant and { goodVariant } or VARIANTS
@@ -809,6 +897,7 @@ local function placeAudio(clip, frame, len, label)
 end
 
 local function marker(frame, color, name, note, tag, duration)
+  if not FULL then return end
   local okm = tl:AddMarker(frame - tl:GetStartFrame(), color, name, note, duration or 1, PREFIX .. ":" .. tag)
   if not okm then bad("Marker '" .. name .. "' non aggiunto a " .. framesToTc(frame, r) .. " (fotogramma gia' occupato?).") end
 end
@@ -851,7 +940,7 @@ if lfoa then
   end
   marker(lfoa, "Blue", "LFOA", "Last frame of action " .. framesToTc(lfoa, r), "lfoa")
   local contentPastEnd = lastContent and lastContent > lfoa
-  if tailOn and not contentPastEnd then
+  if tailOn and not contentPastEnd and FULL then
     local playhead = tl:GetCurrentTimecode()
     -- Se la coda cade oltre la fine attuale della timeline (contenitore ancora vuoto),
     -- un fotogramma di silenzio temporaneo estende la timeline fino alla fine della coda.
@@ -881,6 +970,7 @@ if lfoa then
       set(tlk, "CardTo", P.card_to or 0)
       set(tlk, "CardText", P.card_text or "")
       set(tlk, "Info", "LFOA " .. framesToTc(lfoa, r) .. "  ·  DURATION " .. durTc)
+      set(tlk, "FW", tonumber(W) or 0); set(tlk, "FH", tonumber(H) or 0); set(tlk, "FR", r.fps or 0)
       for _, k in ipairs(COLORS) do set(tlk, k, get(k, nil)) end
       ok("Coda " .. framesToTc(tail:GetStart(), r) .. " → " .. framesToTc(tail:GetStart() + tail:GetDuration() - 1, r) .. ".")
       if (P.tail_pop or P.tail_flash) and tail:GetDuration() >= 2 * n then
@@ -933,19 +1023,107 @@ if audioOk == 1 then ok("1 clip audio posizionato sulla traccia '" .. POP_TRACK 
 elseif audioOk > 1 then ok(audioOk .. " clip audio posizionati sulla traccia '" .. POP_TRACK .. "'.") end
 
 -- ---------------------------------------------------------------- 5b) taratura, frame lines, logo
-local function importImage(path)
-  local folder = mediaFolder()
-  local name = string.match(path, "[^/\\]+$") or path
-  if folder then
-    for _, clip in ipairs(listOf(folder:GetClipList())) do
-      if clip:GetName() == name then return clip end
+if not FULL then
+  -- in "Aggiorna solo le immagini" i controlli di durate e coda non servono
+  for i = #checks, 1, -1 do checks[i] = nil end
+  ok("Aggiornate solo le immagini: blocco, coda, audio, marker e burn-in non sono stati toccati.")
+end
+-- Tutti i clip del Media Pool (ricorsivo)
+local poolWalk = nil
+local function poolClips()
+  if poolWalk then return poolWalk end
+  local out = {}
+  local function walk(folder, depth)
+    if not folder or depth > 12 then return end
+    local okc, clips = pcall(function() return folder:GetClipList() end)
+    for _, cl in ipairs(okc and listOf(clips) or {}) do out[#out + 1] = { clip = cl, folder = folder } end
+    local oks, subs = pcall(function() return folder:GetSubFolderList() end)
+    for _, sub in ipairs(oks and listOf(subs) or {}) do walk(sub, depth + 1) end
+  end
+  walk(pool:GetRootFolder(), 0)
+  poolWalk = out
+  return out
+end
+local function clipProp(clip, key)
+  local okp, v = pcall(function() return clip:GetClipProperty(key) end)
+  if okp and type(v) ~= "table" and v ~= nil then return tostring(v) end
+  return ""
+end
+local function normPath(p) return (string.gsub(string.lower(tostring(p or "")), "\\", "/")) end
+
+-- percorso -> clip del Media Pool, costruito una volta sola (le proprieta' dei clip sono lente da leggere)
+local poolByPath = nil
+local function findInPool(path)
+  if not poolByPath then
+    poolByPath = {}
+    for _, e in ipairs(poolClips()) do
+      local fp = clipProp(e.clip, "File Path")
+      if fp ~= "" then poolByPath[normPath(fp)] = e.clip end
     end
   end
+  return poolByPath[normPath(path)]
+end
+local function importImage(path)
+  local name = string.match(path, "[^/\\]+$") or path
+  local folder = mediaFolder()
+  -- 1) nel bin LeaderKit (immagini generate le altre volte)
+  if folder then
+    for _, clip in ipairs(listOf(folder:GetClipList())) do
+      if normPath(clipProp(clip, "File Path")) == normPath(path) then return clip end
+    end
+  end
+  -- 2) importazione
   local prev = pool:GetCurrentFolder()
   if folder then pool:SetCurrentFolder(folder) end
-  local items = pool:ImportMedia({ path })
+  local okI, items = pcall(function() return pool:ImportMedia({ path }) end)
   if prev then pool:SetCurrentFolder(prev) end
-  return listOf(items)[1]
+  local clip = okI and listOf(items)[1] or nil
+  if clip then
+    if poolByPath then poolByPath[normPath(path)] = clip end
+    return clip
+  end
+  -- 3) gia' altrove nel Media Pool (Resolve non reimporta un file gia' presente)
+  clip = findInPool(path)
+  if clip then return clip end
+  if folder then
+    for _, cl in ipairs(listOf(folder:GetClipList())) do
+      if cl:GetName() == name then return cl end
+    end
+  end
+  return nil
+end
+
+-- Immagine scelta dall'utente: file dal selettore, oppure clip del Media Pool
+-- (con lo stesso nome, o il primo clip del bin indicato). Ritorna clip, percorso, descrizione.
+local function userImage(key, bin, label)
+  local v = get(key, "")
+  if type(v) == "table" then v = v[1] or v.Value or "" end
+  v = tostring(v or "")
+  v = string.gsub(string.gsub(v, "^%s+", ""), "%s+$", "")
+  v = string.gsub(string.gsub(v, "^[\"']", ""), "[\"']$", "")
+  v = string.gsub(v, "^file://", "")
+  if v ~= "" then
+    local fh = io.open(v, "rb")
+    if fh then
+      fh:close()
+      local clip = importImage(v)
+      if clip then return clip, v end
+      bad(label .. ": Resolve non ha importato " .. v .. " (formato non supportato?).")
+      return nil
+    end
+  end
+  local base = v ~= "" and (string.match(v, "[^/\\]+$") or v) or nil
+  for _, e in ipairs(poolClips()) do
+    local fname = e.folder and select(2, pcall(function() return e.folder:GetName() end)) or ""
+    if (base and e.clip:GetName() == base) or (not base and fname == bin) then
+      return e.clip, clipProp(e.clip, "File Path")
+    end
+  end
+  if v ~= "" then
+    bad(label .. ": file non trovato (" .. v .. "). Sceglilo di nuovo nella scheda Aspetto, oppure metti l'immagine nel bin '" ..
+      bin .. "' del Media Pool.")
+  end
+  return nil
 end
 
 local function videoTrack(name)
@@ -1000,6 +1178,9 @@ local function overlay(kind, spec)
   return path
 end
 
+-- fascia libera sotto il cerchio del countdown (per i dati del progetto e il piccolo logo)
+local cdFree = nil
+stage("Taratura e frame lines sul countdown", function()
 if countFrom > 0 and (get("CalOn", 1) > 0.5 or #frameLines > 0 or safeA or safeT) then
   local calOn = get("CalOn", 1) > 0.5
   local cal = nil
@@ -1007,8 +1188,10 @@ if countFrom > 0 and (get("CalOn", 1) > 0.5 or #frameLines > 0 or safeA or safeT
     cal = {}
     for _, k in ipairs(LK_CALIBRATION or {}) do cal[string.lower(string.sub(k, 4))] = get(k, 1) > 0.5 end
   end
-  local path = overlay(calOn and "Taratura" or "FrameLines", { accent = accent, cal = cal, framelines = frameLines,
-    safeAction = safeA, safeTitle = safeT, fpsLabel = string.format("%g/SEC", r.fps), resLabel = resClass() })
+  local cdSpec = { accent = accent, cal = cal, framelines = frameLines,
+    safeAction = safeA, safeTitle = safeT, fpsLabel = string.format("%g/SEC", r.fps), resLabel = resClass() }
+  pcall(function() LK_OVERLAY.compose(w, h, cdSpec); cdFree = LK_OVERLAY.lastFreeArea end)
+  local path = overlay(calOn and "Taratura" or "FrameLines", cdSpec)
   local clip = path and importImage(path)
   if path and not clip then bad("Resolve non ha importato " .. path .. ".") end
   if clip then
@@ -1017,7 +1200,21 @@ if countFrom > 0 and (get("CalOn", 1) > 0.5 or #frameLines > 0 or safeA or safeT
     local pieces = placeStill(clip, from, len, videoTrack(GFX_TRACK))
     describe(pieces, (calOn and "Taratura" or "Frame lines") .. " " .. w .. "x" .. h .. " sul countdown", GFX_TRACK)
   end
+elseif countFrom <= 0 and (#frameLines > 0 or safeA or safeT) then
+  ok("Frame lines: questo standard non ha countdown; attiva 'Anche sulla slate' (scheda Tecnico) per vederle.")
 end
+end)
+local cdY, cdCap = 0.075, 0.014
+do
+  local R = cdFree or { 0.018 * h, 0.018 * h, w - 0.018 * h, h - 0.018 * h }
+  local bm = (h - R[4]) / h                             -- bordo inferiore dell'area libera (dal basso)
+  local rb = 0.5 - (0.18 + 0.012) * w / h               -- fondo del cerchio del countdown (dal basso)
+  if rb - bm < 0.03 then rb = bm + 0.03 end
+  cdY = (bm + rb) / 2
+  cdCap = math.max(0.006, math.min(0.016, (rb - bm) / 4.2))
+  setHead("CdY", cdY); setHead("CdCap", cdCap)
+end
+stage("Frame lines sulla slate", function()
 if slateSec > 0 and get("GuidesSlate", 0) > 0.5 and (#frameLines > 0 or safeA or safeT) then
   local path = overlay("FrameLines", { accent = accent, framelines = frameLines, safeAction = safeA, safeTitle = safeT })
   local clip = path and importImage(path)
@@ -1026,6 +1223,7 @@ if slateSec > 0 and get("GuidesSlate", 0) > 0.5 and (#frameLines > 0 or safeA or
     describe(placeStill(clip, slateAt, math.floor(slateSec * n + 0.5), videoTrack(GFX_TRACK)), "Frame lines sulla slate", GFX_TRACK)
   end
 end
+end)
 
 -- dimensioni di un PNG (per impaginare titolo e loghi); nil per altri formati
 local function pngSize(path)
@@ -1037,8 +1235,14 @@ local function pngSize(path)
   return be(17), be(21)
 end
 -- zoom/pan/tilt di Resolve per mettere un'immagine in un riquadro (pixel), con l'immagine adattata al quadro
-local function fitBox(path, bw, bh, cxp, cyp, anchorLeft)
-  local iw, ih = pngSize(path)
+local function imageSize(clip, path)
+  local rw, rh = string.match(clipProp(clip, "Resolution"), "(%d+)%s*[xX]%s*(%d+)")
+  if rw then return tonumber(rw), tonumber(rh) end
+  if path and path ~= "" then return pngSize(path) end
+  return nil
+end
+local function fitBox(clip, path, bw, bh, cxp, cyp, anchorLeft)
+  local iw, ih = imageSize(clip, path)
   if not iw or iw <= 0 or ih <= 0 then iw, ih = w, h end
   local f = math.min(w / iw, h / ih)
   local z = math.min(bw / (iw * f), bh / (ih * f))
@@ -1046,9 +1250,7 @@ local function fitBox(path, bw, bh, cxp, cyp, anchorLeft)
   if anchorLeft == "left" then cxp = cxp + dw / 2 elseif anchorLeft == "right" then cxp = cxp - dw / 2 end
   return z, cxp - w / 2, cyp - h / 2, dw, dh
 end
-local function placeImage(path, span, track, label, z, pan, tilt)
-  local clip = importImage(path)
-  if not clip then bad("Resolve non ha importato " .. path .. "."); return end
+local function placeImage(clip, span, track, label, z, pan, tilt)
   local pieces = placeStill(clip, span[1], span[2], track)
   for _, it in ipairs(pieces) do
     pcall(function()
@@ -1061,6 +1263,7 @@ end
 
 local slateStyle = math.floor(get("SlateStyle", 0) + 0.5)
 local slateSpan = { head:GetStart() + math.floor(barsSec * n + 0.5), math.floor(slateSec * n + 0.5) }
+stage("Quadrante della slate", function()
 if slateSec > 0 and (slateStyle == 1 or slateStyle == 2) and LK_DIALS then
   local d = LK_DIALS[slateStyle == 1 and "b" or "c"]
   local key = slateStyle == 1 and "dialB" or "dialC"
@@ -1073,71 +1276,59 @@ if slateSec > 0 and (slateStyle == 1 or slateStyle == 2) and LK_DIALS then
       (slateStyle == 1 and "Quadrante" or "Orologio") .. " della slate " .. w .. "x" .. h, GFX_TRACK)
   end
 end
+end)
 
-local titleImg = tostring(get("TitleImage", "") or "")
-titleImg = string.gsub(string.gsub(titleImg, "^%s+", ""), "%s+$", "")
-if titleImg ~= "" and slateSec > 0 then
-  local fh = io.open(titleImg, "rb")
-  if not fh then
-    bad("Titolo in PNG non trovato: " .. titleImg .. " (sceglilo di nuovo nella scheda Aspetto).")
-  else
-    fh:close()
+stage("Titolo in PNG", function()
+if slateSec > 0 then
+  local clip, path = userImage("TitleImage", "LeaderKit Titolo", "Titolo in PNG")
+  if clip then
     local box = (LK_TITLE_BOXES or {})[slateStyle + 1] or { 0.5, 0.8, 0.6, 0.12, "center" }
     local k = (get("TitleImageSize", 100) or 100) / 100
-    local z, pan, tilt = fitBox(titleImg, box[3] * w * k, box[4] * h * k, box[1] * w, box[2] * h, box[5])
-    if not pngSize(titleImg) then
-      ok("Titolo: non e' un PNG, impaginato supponendo le proporzioni del quadro (meglio un PNG con trasparenza).")
-    end
-    placeImage(titleImg, slateSpan, videoTrack(LOGO_TRACK .. " Titolo"), "Titolo in PNG sulla slate", z, pan, tilt)
+    local z, pan, tilt = fitBox(clip, path, box[3] * w * k, box[4] * h * k, box[1] * w, box[2] * h, box[5])
+    placeImage(clip, slateSpan, videoTrack(LOGO_TRACK .. " Titolo"), "Titolo in PNG sulla slate", z, pan, tilt)
   end
 end
+end)
 
 local LOGOS = { { "Logo", "LogoPos", "LogoSize", LOGO_TRACK, "Logo" },
   { "Logo2", "LogoPos2", "LogoSize2", LOGO_TRACK .. " 2", "Secondo logo" } }
+local logosPlaced = 0
 for _, L in ipairs(LOGOS) do
-  local logoPath = tostring(get(L[1], "") or "")
-  logoPath = string.gsub(string.gsub(logoPath, "^%s+", ""), "%s+$", "")
-  logoPath = string.gsub(logoPath, "^[\"']", ""); logoPath = string.gsub(logoPath, "[\"']$", "")
-  if logoPath ~= "" then
-    local fh = io.open(logoPath, "rb")
-    if not fh then
-      bad(L[5] .. " non trovato: " .. logoPath .. " (sceglilo di nuovo con il selettore nella scheda Aspetto).")
-    else
-      fh:close()
-      local clip = importImage(logoPath)
-      if not clip then
-        bad("Resolve non ha importato " .. logoPath .. ".")
-      else
-        local size = (get(L[3], 12) or 12) / 100
-        local pos = math.floor(get(L[2], L[1] == "Logo" and 0 or 1) + 0.5)
-        -- riquadro del logo: largo size * W, alto al massimo meta'; angolo esatto a 3.5% / 4% dai bordi
-        local bw, bh = size * w, size * w * 0.5
-        local z, _, _, dw, dh = fitBox(logoPath, bw, bh, 0, 0, "center")
-        local mx, my = w / 2 - 0.035 * w - dw / 2, h / 2 - 0.04 * h - dh / 2
-        local pan, tilt = ({ mx, -mx, mx, -mx, 0 })[pos + 1], ({ my, my, -my, -my, 0 })[pos + 1]
-        local track = videoTrack(L[4])
-        local spans = {}
-        local slateAt = head:GetStart() + math.floor(barsSec * n + 0.5)
-        if slateSec > 0 then spans[#spans + 1] = { slateAt, math.floor(slateSec * n + 0.5), "slate" } end
-        if get("LogoOnTail", 0) > 0.5 and lfoa and tailOn then spans[#spans + 1] = { lfoa + 1, tailLen, "coda" } end
-        if #spans == 0 then bad(L[5] .. ": lo standard non ha slate; attiva 'Anche sulla coda' per vederlo.") end
-        for _, sp in ipairs(spans) do
-          local pieces = placeStill(clip, sp[1], sp[2], track)
-          for _, it in ipairs(pieces) do
-            pcall(function()
-              it:SetProperty("ZoomX", z); it:SetProperty("ZoomY", z)
-              it:SetProperty("Pan", pan); it:SetProperty("Tilt", tilt)
-            end)
-          end
-          describe(pieces, L[5] .. " sulla " .. sp[3], L[4])
-        end
-      end
+ stage(L[5], function()
+  local clip, path = userImage(L[1], L[4], L[5])
+  if clip then
+    local size = (get(L[3], 12) or 12) / 100
+    local pos = math.floor(get(L[2], L[1] == "Logo" and 0 or 1) + 0.5)
+    -- riquadro del logo: largo size * W, alto al massimo meta'; angolo esatto a 3.5% / 4% dai bordi
+    local z, _, _, dw, dh = fitBox(clip, path, size * w, size * w * 0.5, 0, 0, "center")
+    local mx, my = w / 2 - 0.035 * w - dw / 2, h / 2 - 0.04 * h - dh / 2
+    local pan, tilt = ({ mx, -mx, mx, -mx, 0 })[pos + 1], ({ my, my, -my, -my, 0 })[pos + 1]
+    local track = videoTrack(L[4])
+    local spans = {}
+    if slateSec > 0 then spans[#spans + 1] = { slateSpan[1], slateSpan[2], "slate" } end
+    if get("LogoOnTail", 0) > 0.5 and lfoa and tailOn then spans[#spans + 1] = { lfoa + 1, tailLen, "coda" } end
+    if #spans == 0 then bad(L[5] .. ": lo standard non ha slate; attiva 'Anche sulla coda' per vederlo.") end
+    for _, sp in ipairs(spans) do
+      placeImage(clip, sp, track, L[5] .. " sulla " .. sp[3], z, pan, tilt)
+      logosPlaced = logosPlaced + 1
+    end
+    -- piccolo logo della produzione nel countdown, a sinistra dei dati del progetto
+    if L[1] == "Logo" and countFrom > 0 and get("CdLogo", 1) > 0.5 then
+      local cz, _, _, cdw = fitBox(clip, path, 0.07 * w, math.min(cdCap * 4.2 * h * 0.9, 0.07 * h), 0, 0, "center")
+      local cx = 0.5 * w - 0.16 * w - cdw / 2
+      placeImage(clip, { ffoa - countFrom * n, (countFrom - 2) * n + 1 }, track, "Logo nel countdown",
+        cz, cx - w / 2, cdY * h - h / 2)
+      logosPlaced = logosPlaced + 1
     end
   end
+ end)
+end
+if logosPlaced == 0 then
+  ok("Logo: nessuno (scegli il file in Aspetto › Logo, oppure metti l'immagine nel bin 'LeaderKit Logo' del Media Pool).")
 end
 
 -- ---------------------------------------------------------------- 5c) burn-in delle copie di lavoro
-do
+if FULL then stage("Burn-in", function()
   local existing = {}
   for _, e in ipairs(allItems("video")) do
     if BURN.isBurn(e.item) then existing[#existing + 1] = e.item end
@@ -1209,6 +1400,28 @@ do
       bad("Burn-in: serve la fine del programma (monta i clip o scegli una durata) per sapere quanto deve durare.")
     end
   end
+end) end
+
+-- ---------------------------------------------------------------- 5d) cache Fusion
+-- La grafica dei generatori (slate con molti testi, countdown) si calcola una volta e poi
+-- si riproduce dalla cache: come "Render Cache Fusion Output > On" nel menu del clip.
+do
+  local cacheOn = 1
+  pcall(function() if resolve.CACHE_ENABLED ~= nil then cacheOn = resolve.CACHE_ENABLED end end)
+  local done, failed = 0, 0
+  for _, e in ipairs(allItems("video")) do
+    local nm = e.item:GetName() or ""
+    if e.item == head or nm == TAIL_NAME or isHeadItem(e.item) then
+      local okc, res = pcall(function() return e.item:SetFusionOutputCache(cacheOn) end)
+      if okc and res ~= false then done = done + 1 else failed = failed + 1 end
+    end
+  end
+  if done > 0 then
+    ok("Cache Fusion attivata su " .. done .. " clip LeaderKit: la riproduzione e' fluida dopo il primo passaggio " ..
+      "(serve Playback › Render Cache su Smart o User).")
+  elseif failed > 0 then
+    bad("Non riesco ad attivare la cache Fusion: fai clic destro sui clip LeaderKit › Render Cache Fusion Output › On.")
+  end
 end
 
 -- ---------------------------------------------------------------- 6) slate, guida, note
@@ -1247,13 +1460,117 @@ if syncTc ~= "—" then guide = guide .. "\nSync " .. syncTc end
 if lfoa then guide = guide .. "\nLFOA " .. framesToTc(lfoa, r) .. (tailOn and (" · coda fino a " .. framesToTc(lfoa + tailLen, r)) or "") end
 if slotFrames then guide = guide .. "\nContenitore " .. slotLabel end
 set(lk, "Guide", guide)
+setHead("FfoaTc", framesToTc(ffoa, r))
+
+-- ---------------------------------------------------------------- 7) slate come immagine fissa
+-- La slate e' testo fermo: Resolve la esporta una volta alla risoluzione della timeline (con titolo,
+-- loghi e quadranti gia' sopra) e l'immagine va sulla traccia "LeaderKit Slate". Nel blocco la slate
+-- non si calcola piu' (SlateBaked). Se c'e' un orologio che scatta ogni secondo, un'immagine per secondo.
+stage("Slate come immagine fissa", function()
+  if slateSec <= 0 then return end
+  if get("SlateBake", 1) < 0.5 then
+    ok("Slate in tempo reale (Aspetto › Slate come immagine fissa e' spenta).")
+    return
+  end
+  if slateStyle == 1 then
+    ok("Slate stile Quadrante: resta in tempo reale (la tacca si muove a ogni fotogramma).")
+    return
+  end
+  local span0, spanLen = slateSpan[1], slateSpan[2]
+  local perSecond = (P.clock and true or false) or slateStyle == 2
+  -- pezzi: interi, oppure un pezzo per ogni secondo del conto alla rovescia (cambia quando (FFOA - f) % n == 0)
+  local pieces = {}
+  local startP = span0
+  if perSecond then
+    for f = span0 + 1, span0 + spanLen - 1 do
+      if (ffoa - f) % n == 0 then pieces[#pieces + 1] = { startP, f - startP }; startP = f end
+    end
+  end
+  pieces[#pieces + 1] = { startP, span0 + spanLen - startP }
+  local playhead = tl:GetCurrentTimecode()
+  local page = nil
+  pcall(function() page = resolve:GetCurrentPage() end)
+  local stamp = tostring(os.time())
+  local files, why = {}, nil
+  local function exportAt(frame, path)
+    tl:SetCurrentTimecode(framesToTc(frame, r))
+    local okx, res = pcall(function() return project:ExportCurrentFrameAsStill(path) end)
+    if not okx then return false, "ExportCurrentFrameAsStill non disponibile (" .. tostring(res) .. ")" end
+    local fh = io.open(path, "rb")
+    if not fh then return false, "l'esportazione non ha creato il file" end
+    fh:close()
+    return true
+  end
+  local switched = false
+  for i, pc in ipairs(pieces) do
+    local letters = string.rep("a", math.floor((i - 1) / 26)) .. string.char(97 + (i - 1) % 26)
+    local path = cacheDir .. sep .. "LeaderKit_Slate_" .. stamp .. "_" .. letters .. ".png"
+    local frame = pc[1] + math.floor((pc[2] - 1) / 2)
+    local okE, err = exportAt(frame, path)
+    if not okE and i == 1 and not switched and page and page ~= "color" then
+      -- alcune versioni esportano solo dalla pagina Color
+      if pcall(function() resolve:OpenPage("color") end) then
+        switched = true
+        okE, err = exportAt(frame, path)
+      end
+    end
+    if not okE then why = err; break end
+    local pw, ph = pngSize(path)
+    if pw and (pw ~= w or ph ~= h) then
+      why = string.format("l'immagine esportata e' %dx%d invece di %dx%d", pw, ph, w, h); break
+    end
+    files[#files + 1] = { path, pc }
+  end
+  if switched and page then pcall(function() resolve:OpenPage(page) end) end
+  if playhead then pcall(function() tl:SetCurrentTimecode(playhead) end) end
+  if why or #files == 0 then
+    bad("Slate in tempo reale: non sono riuscito a esportarla come immagine (" .. tostring(why) .. ").")
+    return
+  end
+  local track = videoTrack(SLATE_TRACK)
+  local placed = 0
+  for _, fp in ipairs(files) do
+    local clip = importImage(fp[1])
+    if not clip then bad("Slate: Resolve non ha importato " .. fp[1] .. "."); return end
+    local its, full = placeStill(clip, fp[2][1], fp[2][2], track)
+    if not full then
+      for _, it in ipairs(its) do pcall(function() tl:DeleteClips({ it }, false) end) end
+      bad("Slate: immagine non posizionata sulla traccia '" .. SLATE_TRACK .. "': resta in tempo reale.")
+      return
+    end
+    placed = placed + 1
+  end
+  -- titolo, loghi e quadranti sono gia' dentro l'immagine: si tolgono dalla durata della slate
+  local extra = {}
+  for _, e in ipairs(allItems("video")) do
+    local tn = tl:GetTrackName("video", e.track)
+    local st = e.item:GetStart()
+    if tn ~= SLATE_TRACK and imageTrack(tn) and st >= span0 and st < span0 + spanLen then extra[#extra + 1] = e.item end
+  end
+  if #extra > 0 then pcall(function() tl:DeleteClips(extra, false) end) end
+  setHead("SlateBaked", 1)
+  ok(string.format("Slate esportata come immagine fissa %dx%d (%d %s) sulla traccia '%s': si riproduce senza calcoli. " ..
+    "Se cambi testi, stile o loghi premi 'Aggiorna solo le immagini'.", w, h, placed,
+    placed == 1 and "immagine" or "immagini, una per secondo", SLATE_TRACK))
+end)
 
 log(string.format("Timeline %s — %s fps%s, %sx%s", tl:GetName(), rateLabel, r.df and " DF" or "", W, H))
 log(guide)
+do
+  local fls = {}
+  for _, fl in ipairs(frameLines or {}) do fls[#fls + 1] = fl.label end
+  local function q(k) local v = get(k, ""); v = tostring(v or ""); return v == "" and "(vuoto)" or v end
+  log("\nPARAMETRI USATI")
+  log("Frame lines: " .. (#fls > 0 and table.concat(fls, "  ") or "nessuna") ..
+    (guidesOn and "" or " (frame lines spente)") .. "   ·   Taratura: " .. (get("CalOn", 1) > 0.5 and "si" or "no"))
+  log("Logo: " .. q("Logo") .. "   ·   Secondo logo: " .. q("Logo2") .. "   ·   Titolo PNG: " .. q("TitleImage"))
+  log("Stile slate: " .. tostring(math.floor(get("SlateStyle", 0) + 0.5) + 1) .. "   ·   Dati progetto nel countdown: " ..
+    (get("CdInfo", 1) > 0.5 and "si" or "no"))
+end
 if P.unverified then
   checks[#checks + 1] = "⚠ Standard senza specifica pubblica: i valori sono un riferimento, verificali con il capitolato del committente."
 end
 report[#report + 1] = "\nCONTROLLI\n" .. table.concat(checks, "\n")
 if P.notes and #P.notes > 0 then report[#report + 1] = "\nNOTE DELLO STANDARD\n- " .. table.concat(P.notes, "\n- ") end
 warnings = {}   -- gia' elencati nei controlli
-show("LeaderKit — Genera")
+show(FULL and "LeaderKit — Genera" or "LeaderKit — Aggiorna immagini")
