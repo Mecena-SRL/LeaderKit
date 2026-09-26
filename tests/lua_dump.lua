@@ -29,7 +29,10 @@ function comp:GetPrefs(k)
   if k == "Comp.FrameFormat.Width" then return W end
   if k == "Comp.FrameFormat.Height" then return H end
 end
-local env = { comp = comp, LK = LK, math = math, string = string, tostring = tostring, time = T,
+-- LK conta le letture dei campi: costo delle espressioni di ogni nodo per fotogramma
+local reads = 0
+local LKP = setmetatable({}, { __index = function(_, k) reads = reads + 1; return LK[k] end })
+local env = { comp = comp, LK = LKP, math = math, string = string, tostring = tostring, time = T,
   pcall = pcall, os = os,
   iif = function(c, a, b) if c then return a else return b end end,
   Text = function(s) return tostring(s) end,
@@ -51,6 +54,7 @@ end
 local out = {}
 for name, tool in pairs(grp.Tools) do
   local ins = {}
+  reads = 0
   for k, v in pairs(tool.Inputs or {}) do
     if type(v) == "table" then
       if v.Expression then
@@ -67,7 +71,7 @@ for name, tool in pairs(grp.Tools) do
       end
     end
   end
-  out[#out + 1] = enc(name) .. ":{" .. '"kind":' .. enc(tool.__kind) .. ',"inputs":' .. enc(ins) .. "}"
+  out[#out + 1] = enc(name) .. ":{" .. '"kind":' .. enc(tool.__kind) .. ',"reads":' .. reads .. ',"inputs":' .. enc(ins) .. "}"
 end
 local outName
 for _, o in pairs(grp.Outputs or {}) do outName = o.SourceOp end

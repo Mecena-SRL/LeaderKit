@@ -63,9 +63,9 @@ spazio.
 | Scheda | Contenuto |
 |---|---|
 | **Progetto** | standard, rullo, durata del programma, slot, break TV, marker, coda, **Genera** / **Rimuovi**, esito e timecode calcolati, durate personalizzate |
-| **Dati** | *Produzione*: titolo, produzione, produttore, regia, cliente, agenzia, codice (Ad-ID/Clock/Auditel), episodio/rullo, lingua, data con bottone **Oggi** e spunta **Data sempre aggiornata**. *Post-produzione*: montaggio, color, suono, VFX, versione, fase, stato dei reparti (TEMP/FINAL), note |
-| **Aspetto** | stile della slate, titolo in PNG, logo e secondo logo con **Scegli…** (posizione, larghezza, anche sulla coda), colori |
-| **Guide** | frame lines (formato della timeline e 1.33–2.39), safe area 93% e 90%, dove mostrarle (slate, countdown), **pallino sull'ultimo fotogramma** |
+| **Dati** | *Produzione*: titolo, produzione, produttore, regia, cliente, agenzia, codice (Ad-ID/Clock/Auditel), episodio/rullo, lingua, data con bottone **Oggi** e spunta **Data sempre aggiornata**. *Post-produzione*: montaggio, assistente al montaggio, color, suono, VFX, versione, fase, stato dei reparti (TEMP/FINAL), note |
+| **Aspetto** | stile della slate, titolo in PNG, logo e secondo logo con **Scegli…** (posizione, larghezza, anche sulla coda), **logo e dati sul countdown**, colori |
+| **Guide** | frame lines (formato della timeline e 1.33–2.39), safe area 93% e 90%, dove mostrarle (slate, countdown), colore delle guide, **pallino sull'ultimo fotogramma** |
 | **Tecnico** | spazio colore (letto dal progetto), formato audio, livello del pop, strumenti di taratura |
 
 ## Slate
@@ -95,7 +95,9 @@ Slate, barre e countdown, i quattro stili tra loro e ogni elemento facoltativo
 solo la parte visibile. I testi dei pannelli sono raccolti in pochi Text+ a più
 righe (etichette e valori allineati riga per riga) e le forme dello stesso
 colore usano un solo sfondo con le maschere in catena: sulla slate Pannelli
-Fusion calcola 18 Text+ e 20 Merge invece di 58 e 69.
+Fusion calcola 18 Text+ e 20 Merge invece di 58 e 69. I pannelli hanno altezza
+fissa (6 righe; con più campi la colonna si riduce) e ogni tabella legge solo i
+campi della sua colonna: per fotogramma le letture dei campi sono 287 invece di 713.
 
 ## Frame lines, safe area e pallino finale
 
@@ -107,7 +109,22 @@ sotto il countdown (e quindi sotto la taratura), e seguono dal vivo la timeline:
   timeline**, per esempio `2.39:1 · 1920 × 804` su 1920×1080, `1.85:1 · 3552 × 1920`
   su 2:1;
 - safe action 93% e safe title 90%;
-- spunte **Sulla slate** e **Sul countdown**. Di default nessuna guida è attiva.
+- spunte **Sulla slate** e **Sul countdown**. Di default nessuna guida è attiva;
+- **colore delle guide** (bianco di default) per linee ed etichette; le etichette
+  hanno un contorno nero, così si leggono anche sopra altre linee.
+
+## Logo e dati sul countdown
+
+Scheda **Aspetto › Countdown**, con spunte:
+- **Logo sopra il countdown**: il logo principale, centrato sopra il cerchio
+  (sulla linea verticale), nello spazio libero tra cerchio e bordo; dimensione
+  regolabile;
+- **Dati sotto il countdown**: titolo (e versione) sulla prima riga, poi i ruoli
+  scelti due per riga (regia, produzione, montaggio, assistente al montaggio,
+  color, suono, codice, data), presi dai campi già compilati, con contorno nero.
+
+Restano dentro lo spazio libero su 16:9, 2:1, 4:3 e 2.39 e lontani dalle griglie
+della taratura.
 
 **Pallino sull'ultimo fotogramma**: il fotogramma prima del FFOA mostra un pallino
 (in alto a destra come i cue mark della pellicola, al centro o in alto a sinistra;
@@ -194,13 +211,27 @@ Burn-in** sulla sua traccia, sopra il montato, dal FFOA all'LFOA.
   **Aggiorna dai metadati**.
 
 Il burn-in legge da Resolve, clip per clip:
-- nome del clip;
+- nome del file di camera (senza estensione);
 - Start TC e punto d'ingresso (il Source TC che scorre);
 - scena, shot, take e take cerchiata;
 - camera e reel/roll;
 - data di ripresa;
 - sound roll e TC dell'audio sotto (per verificare il sync);
 - spazio colore del progetto.
+
+Impaginazione (convenzioni dailies e review: dati fuori dall'immagine attiva,
+etichette esplicite `SRC TC` / `REC TC`, source a sinistra e record a destra come
+in Avid):
+
+| | Sinistra | Centro | Destra |
+|---|---|---|---|
+| **In alto** | nome file · reel e camera | titolo · versione, data | scena / take, formato · colore |
+| **In basso** | `SRC TC`, `AUD TC` + sound roll | TC grande (suono, VO) | `REC TC`, contatore `FR` |
+
+Watermark e destinatario stanno al centro. Tutti i blocchi hanno la stessa
+grandezza (la più grande con cui ognuno sta nel suo spazio) e un **contorno nero**
+(spunta e spessore nella scheda Aspetto, attivo di default), così il timecode si
+legge anche sul bianco.
 
 Record TC e contatore fotogrammi sono calcolati a ogni fotogramma. Il segmento del
 fotogramma si trova con una **ricerca binaria** su un indice scritto da Aggiorna
@@ -291,12 +322,14 @@ taratura PNG a piena risoluzione e geometria su 2:1. Da confermare sul campo
 
 1. Fluidità di slate, countdown e burn-in (Dissolve come interruttori, maschere
    in catena con l'ingresso EffectMask, elaborazione a 8 bit).
-2. Logo e titolo in PNG nei nodi Loader: bottone **Scegli…** (selettore
+2. Logo e titolo in PNG nei nodi Loader (0.12: il bottone scrive nel pannello
+   "LK" e mostra sempre l'esito): bottone **Scegli…** (selettore
    FileBrowse di Fusion), immagine tenuta per tutta la durata del clip,
    grandezza con il Size del Merge (pixel del file × Size).
 3. Ancoraggio a sinistra e a destra dei testi Text+ (tabelle dei pannelli,
    etichette delle guide, burn-in) e interlinea dei testi a più righe.
-4. Spessore dei contorni delle frame lines (BorderWidth dei RectangleMask).
+4. Spessore dei contorni delle frame lines (BorderWidth dei RectangleMask) e
+   contorno nero dei testi (elemento 2 di Text+: Enabled2, Thickness2).
 5. Coda su timeline vuota con slot lunghi (es. DCP 90': coda a 02:30:08:00).
 6. Burn-in: inserimento automatico con le altre tracce bloccate e nomi dei
    metadati delle varie camere (Scene, Take, Camera #, Reel Name, Sound Roll #…).
