@@ -31,6 +31,10 @@ from leaderkit.fusion import lua_string  # noqa: E402
 
 RING_D = 0.36
 LINE_W = 0.0025
+# Interlinea dei Text+ a piu' righe rispetto all'altezza delle maiuscole di cap_size(): misurata in
+# Resolve 21 (le maiuscole sono ~0.44 * Size * larghezza, la riga di Open Sans 1.36 em).
+PITCH = 1.65
+OUTLINE = [("Red2", "0"), ("Green2", "0"), ("Blue2", "0"), ("Alpha2", "1")]   # elemento 2 di Text+: contorno
 
 # ------------------------------------------------------------------ espressioni
 # Segnaposto usabili nelle espressioni: diventano variabili locali calcolate una
@@ -140,8 +144,9 @@ class G(object):
             ins.append(("EffectMask", ("link", chain, "Mask")))
         return self._add(name, kind, ins)
 
-    def text(self, name, center, size, styled, rgb, style="Bold", align="c", spacing=None):
-        """Text+; align: "c" centro, "l" ancorato a sinistra, "r" a destra, oppure (anchor, justify) in Lua."""
+    def text(self, name, center, size, styled, rgb, style="Bold", align="c", spacing=None, outline=None):
+        """Text+; align: "c" centro, "l" ancorato a sinistra, "r" a destra, oppure (anchor, justify) in Lua.
+        outline: (acceso, spessore) del contorno nero (elemento 2 di Text+), valori o espressioni."""
         ins = self.CREATOR + [
             ("Center", _v(center)), ("Font", '"Open Sans"'), ("Style", lua_string(style)),
             ("Size", _v(size)), ("StyledText", _v(styled)),
@@ -157,6 +162,8 @@ class G(object):
             ins.append(("HorizontalJustificationNew", "3"))
         if spacing:
             ins.append(("LineSpacing", repr(spacing)))
+        if outline:
+            ins += [("Enabled2", _v(outline[0])), ("Thickness2", _v(outline[1]))] + OUTLINE
         return self._add(name, "TextPlus", ins)
 
     def merge(self, name, bg, fg, center=None, size=None):
@@ -256,6 +263,8 @@ COLOR_DEFAULTS = [("Text", "Testo", (1.0, 1.0, 1.0)), ("Bg", "Sfondo", (0.0, 0.0
                   ("Accent", "Grafica del leader", (0.85, 0.85, 0.85)),
                   ("Hi", "Evidenza (titoli di sezione)", (0.96, 0.74, 0.30))]
 COLOR_GROUP_BASE = 11
+GUIDE_COLOR = ("Guide", "Colore delle guide", (1.0, 1.0, 1.0))
+GUIDE_GROUP = COLOR_GROUP_BASE + len(COLOR_DEFAULTS)
 
 
 def color_controls():
@@ -263,7 +272,7 @@ def color_controls():
 
 
 def control_group(src):
-    for i, (p, _, _) in enumerate(COLOR_DEFAULTS):
+    for i, (p, _, _) in enumerate(COLOR_DEFAULTS + [GUIDE_COLOR]):
         if src.startswith(p) and src[len(p):] in ("Red", "Green", "Blue"):
             return COLOR_GROUP_BASE + i
     return None
@@ -448,7 +457,8 @@ PRODUCTION_FIELDS = [("Title", "Titolo", None), ("Production", "Produzione", "PR
                      ("Code", "Codice (Ad-ID / Clock / Auditel)", "CODE"),
                      ("Episode", "Episodio / rullo", "EPISODE"), ("Language", "Lingua / versione", "LANGUAGE"),
                      ("Date", "Data", "DATE")]
-POST_FIELDS = [("Editor", "Montaggio", "EDITOR"), ("Colorist", "Color", "COLORIST"),
+POST_FIELDS = [("Editor", "Montaggio", "EDITOR"), ("AsstEditor", "Assistente al montaggio", "ASSISTANT EDITOR"),
+               ("Colorist", "Color", "COLORIST"),
                ("Sound", "Suono / mix", "SOUND"), ("VFXBy", "VFX", "VFX"), ("Version", "Versione", "VERSION")]
 PHASES = ["—", "OFFLINE", "ONLINE / CONFORM", "GRADING", "MIX", "MASTER", "CONSEGNA"]
 STATUSES = [("StColor", "Stato color", "COLOR"), ("StSound", "Stato suono", "SOUND"),
@@ -486,10 +496,12 @@ def head_inputs():
     out += [(x, "Dati") for x in data]
     look = (["SecStyle", "SlateStyle", "TitleImage", "TitlePick", "TitleImageSize",
              "SecLogo", "Logo", "LogoPick", "LogoPos", "LogoSize", "Logo2", "Logo2Pick", "LogoPos2", "LogoSize2",
-             "LogoOnTail", "SecLook"] + color_inputs())
+             "LogoOnTail", "SecCd", "CdLogo", "CdLogoSize", "CdInfo"] + [k for k, _, _, _ in CD_FIELDS]
+            + ["SecLook"] + color_inputs())
     out += [(x, "Aspetto") for x in look]
     guides = (["SecGuides", "GuidesSlate", "GuidesCd", "FLTL"] + [f for f, _, _ in FRAMELINES]
-              + [k for k, _, _ in SAFE_AREAS] + ["SecEnd", "EndDot", "EndDotPos", "EndDotSize"])
+              + [k for k, _, _ in SAFE_AREAS] + [GUIDE_COLOR[0] + ch for ch in ("Red", "Green", "Blue")]
+              + ["SecEnd", "EndDot", "EndDotPos", "EndDotSize"])
     out += [(x, "Guide") for x in guides]
     tech = (["SecTech", "ColorInfo", "AudioFormat", "SecAudio", "PopLevel", "BeepEach", "SecCal", "CalOn"]
             + [f for f, _, _ in CALIBRATION])
@@ -563,7 +575,8 @@ def slate_columns():
             ("CLIENT", "LK.Client.Value"), ("AGENCY", "LK.Agency.Value"), ("CODE", "LK.Code.Value"),
             ("EPISODE / REEL", "LK.Episode.Value"), ("LANGUAGE", "LK.Language.Value"),
             ("DATE", DATE_EXPR % TODAY)]
-    post = [("EDITOR", "LK.Editor.Value"), ("COLORIST", "LK.Colorist.Value"), ("SOUND", "LK.Sound.Value"),
+    post = [("EDITOR", "LK.Editor.Value"), ("ASST. EDITOR", "LK.AsstEditor.Value"),
+            ("COLORIST", "LK.Colorist.Value"), ("SOUND", "LK.Sound.Value"),
             ("VFX", "LK.VFXBy.Value"), ("VERSION", "LK.Version.Value"),
             ("PHASE", '(LK.Phase < 0.5 and "" or %s)' % PHASE_EXPR)]
     tech = [("DURATION", "LK.Duration.Value"),
@@ -592,17 +605,15 @@ def info_fn(maxlines=16):
             "%s return { s = s, n = n } end " % (maxlines, " ".join(adds)))
 
 
-def cols_fn():
-    """Lua: local function COLS() -> colonne { l = etichette, v = valori, n = righe }, valore piu' lungo."""
-    parts = []
-    for _, _, fields in slate_columns():
-        parts.append("col({ %s })" % ", ".join("{ %s, %s }" % (lua_string(lab), v) for lab, v in fields))
-    return ("local function COLS() local ml = 1 "
-            "local function col(list) local l, v, n = '', '', 0 "
+def col_fn(fields):
+    """Lua: local function COL() -> una colonna dei pannelli { l = etichette, v = valori, n = righe,
+    ml = valore piu' lungo }: solo i campi compilati, nell'ordine."""
+    items = ", ".join("{ %s, %s }" % (lua_string(lab), v) for lab, v in fields)
+    return ("local function COL() local l, v, n, ml = '', '', 0, 1 local list = { %s } "
             "for i = 1, #list do local x = tostring(list[i][2] or '') if x ~= '' then n = n + 1 "
             "l = l .. (n > 1 and '\\n' or '') .. list[i][1] v = v .. (n > 1 and '\\n' or '') .. x "
-            "if string.len(x) > ml then ml = string.len(x) end end end return { l = l, v = v, n = n } end "
-            "return { %s }, ml end " % ", ".join(parts))
+            "if string.len(x) > ml then ml = string.len(x) end end end return { l = l, v = v, n = n, ml = ml } end "
+            % items)
 
 
 # ------------------------------------------------------------------ elementi grafici
@@ -618,8 +629,9 @@ def bars_stack(g):
     return top
 
 
-def leader_stack(g, prefix, base, digit_expr, sweep_vis=None, cd=None):
-    """Cerchi e croce (un solo Background), braccio rotante e cifra centrale sopra 'base'."""
+def leader_stack(g, prefix, base, digit_expr, sweep_vis=None, cd=None, extras=()):
+    """Cerchi e croce (un solo Background), braccio rotante e cifra centrale sopra 'base'.
+    extras: (nome, livelli, condizione) messi sotto la cifra, ognuno con il suo gate."""
     r = RING_D / 2.0
     g.mask(prefix + "RingO", "EllipseMask", repr(RING_D), repr(RING_D), border=repr(LINE_W * 1.6))
     g.mask(prefix + "RingI", "EllipseMask", repr(RING_D * 0.86), repr(RING_D * 0.86), border=repr(LINE_W),
@@ -634,6 +646,8 @@ def leader_stack(g, prefix, base, digit_expr, sweep_vis=None, cd=None):
         g.background(prefix + "ArmBg", color="Accent", mask=prefix + "Arm")
         g.transform(prefix + "Sweep", prefix + "ArmBg", ex("-360 * math.fmod((%s) * _FPS - _REM, _FPS) / _FPS" % cd))
         top = g.gate(prefix + "ArmG", top, [prefix + "Sweep"], sweep_vis)
+    for name, layers, cond in extras:
+        top = g.gate(name, top, layers, cond)
     g.text(prefix + "Digit", "{ 0.5, 0.5 }", "0.30", X(digit_expr), tint("Text"))
     return g.merge(prefix + "M5", top, prefix + "Digit")
 
@@ -659,7 +673,7 @@ def hand(g, name, cx, cy, r0, r1, width, angle, color="Hi"):
     return g.transform(name, name + "Bg", ex(angle), pivot="{ %s, %s }" % (cx, cy))
 
 
-def status_chips(g, prefix, y, pre=""):
+def status_chips(g, prefix, y, pre="", chain=True):
     """Stato dei reparti: COLOR · FINAL (verde) / TEMP (colore evidenza), affiancati e centrati."""
     n = " + ".join("(LK.%s > 0.5 and 1 or 0)" % f for f, _, _ in STATUSES)
     nodes = []
@@ -673,7 +687,7 @@ def status_chips(g, prefix, y, pre=""):
                             X(cap_size(0.0135)),
                             ex('Text(LK.%s > 0.5 and ("%s  ·  " .. ({ "-", "TEMP", "FINAL" })[math.floor(LK.%s + 1.5)]) or "")'
                                % (f, lab, f)), rgb))
-    return g.chain(prefix + "C", nodes)
+    return g.chain(prefix + "C", nodes) if chain else nodes
 
 
 def footer_text(static):
@@ -692,27 +706,27 @@ DIAL_C = (0.28, 0.5, 0.31)         # orologio
 
 PANEL_W = 0.295
 PANEL_TOP = 0.645
+PANEL_ROWS = 6                     # pannelli ad altezza fissa: oltre 6 campi la colonna si riduce
 T_CAP = 0.0145                     # altezza delle maiuscole nelle tabelle dei pannelli
 LABEL_COL = 0.108                  # larghezza della colonna etichette (frazione della larghezza)
+TABLE_TOP = PANEL_TOP - 0.062      # prima riga delle tabelle
+PANEL_BOTTOM = round(TABLE_TOP - PANEL_ROWS * PITCH * T_CAP - 0.03, 4)
 
 
 def slate_panels(g, P, base, static):
     """Pannelli: titolo, regia, tre pannelli (produzione / post / tecnico) come tabelle
-    etichetta-valore (2 Text+ per pannello), stato dei reparti e piede con i timecode."""
+    etichetta-valore (2 Text+ per pannello), stato dei reparti e piede con i timecode.
+
+    Leggero: pannelli ad altezza fissa (maschere senza espressioni) e ogni Text+ legge solo
+    i campi della sua colonna."""
     heading = pv(P, "heading")
     cols = slate_columns()
-    # capienza in caratteri della colonna valori, poi riduzione (mai sotto il 70%) se un valore e' lungo
-    capw = (PANEL_W - 0.032 - LABEL_COL) * 0.714 / (0.55 * T_CAP)
-    geo = (cols_fn() + "local C, ml = COLS() "
-           "local f = math.min(1, math.max(0.7, %s * _A / _N / ml)) "
-           "local cap = %s * _N * f local pitch = 1.9 * cap "
-           "local ty = %s - 0.062 "
-           "local bottom = ty - math.max(1, C[1].n, C[2].n, C[3].n) * pitch - 0.03 "
-           % (repr(capw), T_CAP, PANEL_TOP))
+    capw = (PANEL_W - 0.032 - LABEL_COL) * 0.714 / (0.55 * T_CAP)      # capienza in caratteri a grandezza piena
     fill, line = None, None
+    height = PANEL_TOP - PANEL_BOTTOM
     for i, (_, cx, _) in enumerate(cols):
-        fill = g.mask("SPan%dM" % i, "RectangleMask", repr(PANEL_W), X("%s - bottom" % PANEL_TOP, geo),
-                      center=X("Point(%s, (%s + bottom) / 2)" % (cx, PANEL_TOP), geo), chain=fill)
+        fill = g.mask("SPan%dM" % i, "RectangleMask", repr(PANEL_W), repr(height),
+                      center="{ %s, %s }" % (cx, (PANEL_TOP + PANEL_BOTTOM) / 2), chain=fill)
         line = g.mask("SPanL%dM" % i, "RectangleMask", repr(PANEL_W), repr(LINE_W),
                       center="{ %s, %s }" % (cx, PANEL_TOP), chain=line)
     line = g.mask("SRuleM", "RectangleMask", "0.18", repr(LINE_W * 1.2), center="{ 0.5, 0.69 }", chain=line)
@@ -730,32 +744,37 @@ def slate_panels(g, P, base, static):
            ex('Text(LK.Director.Value == "" and "" or ("DIRECTED BY   " .. string.upper(LK.Director.Value)))'),
            tint("Text", 0.9), style="Regular")
     top = g.merge("SMH", top, g.chain("SHd", ["SHeading", "STitle", "SDirector"]))
-    # colonne: intestazione, etichette e valori allineati riga per riga (solo i campi compilati)
-    for i, (title, cx, _) in enumerate(cols):
+    # colonne: intestazione, etichette e valori allineati riga per riga
+    texts = []
+    for i, (title, cx, fields) in enumerate(cols):
         xl = cx - PANEL_W / 2 + 0.016
+        pre = (col_fn(fields) + "local C = COL() "
+               "local f = math.max(0.7, math.min(1, %d / math.max(1, C.n), %s * _A / _N / C.ml)) "
+               "local cap = %s * _N * f local pitch = %s * cap " % (PANEL_ROWS, repr(capw), T_CAP, PITCH))
+        block_y = "%s - C.n * pitch / 2" % TABLE_TOP
         g.text("SCol%d" % i, "{ %s, %s }" % (xl, PANEL_TOP - 0.032), X(cap_size(0.0125)), 'Text("%s")' % title,
                tint("Hi"), align="l")
-        block_y = "ty - C[%d].n * pitch / 2" % (i + 1)
-        g.text("SLab%d" % i, X("Point(%s, %s)" % (xl, block_y), geo), X("2 * cap / _A", geo),
-               ex("Text(C[%d].l)" % (i + 1), geo), tint("Text", 0.55), style="Regular", align="l")
-        g.text("SVal%d" % i, X("Point(%s, %s)" % (xl + LABEL_COL, block_y), geo), X("2 * cap / _A", geo),
-               ex("Text(C[%d].v)" % (i + 1), geo), tint("Text"), style="Semibold", align="l")
-        top = g.merge("SMC%d" % i, top, g.chain("SCo%d" % i, ["SCol%d" % i, "SLab%d" % i, "SVal%d" % i]))
+        g.text("SLab%d" % i, X("Point(%s, %s)" % (xl, block_y), pre), X("2 * cap / _A", pre),
+               ex("Text(C.l)", pre), tint("Text", 0.55), style="Regular", align="l")
+        g.text("SVal%d" % i, X("Point(%s, %s)" % (xl + LABEL_COL, block_y), pre), X("2 * cap / _A", pre),
+               ex("Text(C.v)", pre), tint("Text"), style="Semibold", align="l")
+        texts += ["SCol%d" % i, "SLab%d" % i, "SVal%d" % i]
+    top = g.merge("SMC", top, g.chain("SCo", texts))
     # stato dei reparti sotto i pannelli, poi il piede
-    top = g.merge("SMS", top, status_chips(g, "SSt", "bottom - 0.05", geo))
-    g.text("SFoot", X("Point(0.5, math.max(0.05, bottom - (%s and 0.13 or 0.075)))" % ANY_STATUS, geo),
+    chips = status_chips(g, "SSt", repr(PANEL_BOTTOM - 0.05), chain=False)
+    g.text("SFoot", X("Point(0.5, %s - (%s and 0.13 or 0.075))" % (PANEL_BOTTOM, ANY_STATUS)),
            X(cap_size(0.015)),
            ex('Text(LK.Info.Value .. ((%s) == "" and "" or ("\\n" .. %s)) .. (LK.Note.Value == "" and "" or ("\\n" .. LK.Note.Value)))'
               % (static, static)), tint("Text", 0.75), style="Regular")
-    return g.merge("SMF", top, "SFoot")
+    return g.merge("SMB", top, g.chain("SBt", chips + ["SFoot"]))
 
 
 def info_block(g, name, x, y0, cap, ymin):
     """Lista dei dati (una riga per campo compilato) in un solo Text+ allineato a sinistra, tra y0
     (prima riga) e ymin: con molti campi il testo si riduce per restarci."""
-    pre = info_fn(28) + ("local I = INFO() local c = math.min(%s * _N, (%s - %s) / (1.9 * math.max(0, I.n - 1) + 1)) "
-                         % (cap, y0, ymin))
-    return g.text(name, X("Point(%s, %s - (I.n - 1) * 1.9 * c / 2)" % (x, y0), pre),
+    pre = info_fn(28) + ("local I = INFO() local c = math.min(%s * _N, (%s - %s) / (%s * math.max(0, I.n - 1) + 1)) "
+                         % (cap, y0, ymin, PITCH))
+    return g.text(name, X("Point(%s, %s - (I.n - 1) * %s * c / 2)" % (x, y0, PITCH), pre),
                   X("2 * c / _A", pre), ex("Text(I.s)", pre), tint("Text", 0.92), style="Regular", align="l")
 
 
@@ -872,6 +891,46 @@ def title_image_layer():
     return ("TitleLd", X("Point(x / _W, b[2])", pre), X("s", pre))
 
 
+# ------------------------------------------------------------------ logo e dati sul countdown
+# spunta, etichetta, default, (etichetta sullo schermo, valore) per i ruoli della seconda riga
+CD_FIELDS = [("CdTitle", "Titolo", 1, None), ("CdVersion", "Versione", 0, None),
+             ("CdDirector", "Regia", 1, ("DIRECTOR", "LK.Director.Value")),
+             ("CdProduction", "Produzione", 1, ("PRODUCTION", "LK.Production.Value")),
+             ("CdEditor", "Montaggio", 1, ("EDITOR", "LK.Editor.Value")),
+             ("CdAsst", "Assistente al montaggio", 1, ("ASST. EDITOR", "LK.AsstEditor.Value")),
+             ("CdColorist", "Color", 0, ("COLORIST", "LK.Colorist.Value")),
+             ("CdSound", "Suono", 0, ("SOUND", "LK.Sound.Value")),
+             ("CdCode", "Codice", 0, ("CODE", "LK.Code.Value")),
+             ("CdDate", "Data", 0, ("DATE", DATE_EXPR % TODAY))]
+# spazio libero sopra e sotto il cerchio del countdown (frazione dell'altezza)
+CD_SPACE = "local SP = math.max(0.02, (1 - %s * _A) / 2) " % RING_D
+
+
+def countdown_extras(g):
+    """Logo sopra il cerchio (sulla linea verticale) e dati sotto: presi dai campi gia' compilati."""
+    pre = (CD_SPACE + "local iw, ih = math.max(1, LK.LogoW), math.max(1, LK.LogoH) "
+           "local k = LK.CdLogoSize / 100 local s = math.min(0.30 * _W * k / iw, SP * 0.7 * k * _H / ih) ")
+    logo = ("Logo1Ld", X("Point(0.5, 1 - SP / 2)", pre), X("s", pre))
+    roles = " ".join("r(LK.%s, %s, %s)" % (key, lua_string(lab), v) for key, _, _, rv in CD_FIELDS if rv
+                     for lab, v in [rv])
+    # prima riga titolo / versione, poi i ruoli due per riga
+    info = ("local function CDI() local a, R = '', {} "
+            "local function r(on, l, v) v = tostring(v or '') if on > 0.5 and v ~= '' then R[#R + 1] = l .. '  ' .. v end end "
+            "if LK.CdTitle > 0.5 and LK.Title.Value ~= '' then a = string.upper(LK.Title.Value) end "
+            "if LK.CdVersion > 0.5 and LK.Version.Value ~= '' then a = a .. (a ~= '' and '   ·   ' or '') .. LK.Version.Value end "
+            + roles + " local s, n, ml = a, (a ~= '' and 1 or 0), string.len(a) "
+            "for i = 1, #R, 2 do local l = R[i] .. (R[i + 1] and ('      ' .. R[i + 1]) or '') "
+            "s = s .. (s ~= '' and '\\n' or '') .. l n = n + 1 if string.len(l) > ml then ml = string.len(l) end end "
+            "return { s = s, n = n, ml = math.max(1, ml) } end "
+            "local I = CDI() " + CD_SPACE +
+            "local c = math.min(0.016 * _N, SP * 0.75 / (0.88 + %s * math.max(0, I.n - 1)), 0.36 * _A / (0.74 * I.ml)) "
+            % PITCH)
+    g.text("CdText", X("Point(0.5, SP / 2)", info), X("2 * c / _A", info), ex("Text(I.s)", info), tint("Text", 0.9),
+           outline=("1", "0.1"))
+    return [("CdLogoG", [logo], "LK.CdLogo > 0.5 and " + logo_cond("")),
+            ("CdInfoG", ["CdText"], "LK.CdInfo > 0.5")]
+
+
 # ------------------------------------------------------------------ frame lines e safe area
 GUIDE_CAP = 0.014
 
@@ -882,7 +941,7 @@ def guides_layer(g):
     fmts = [("FLTL", None, None)] + [(k, lab + ":1", ar) for k, lab, ar in FRAMELINES]
     flist = "{ %s }" % ", ".join("{ LK.%s, %s }" % (k, repr(ar) if ar else "0") for k, _, ar in fmts)
     lw = "local lw = math.max(1, math.floor(_H / 1080 * 2 + 0.5)) "
-    pos = ("local cap = %s * _H local pad = 0.008 * _H local st = 1.9 * cap " % GUIDE_CAP)
+    pos = ("local cap = %s * _H local pad = 0.008 * _H local st = %s * cap " % (GUIDE_CAP, PITCH))
     chain, labels = None, []
     for i, (key, lab, ar) in enumerate(fmts, 1):
         geo = ("local ar = %s local aw, ah = _W, _H "
@@ -909,8 +968,7 @@ def guides_layer(g):
         else:
             label = 'on and string.format("TIMELINE %.2f:1  ·  %d × %d", _A, aw, ah) or ""'
         labels.append(g.text("G%sT" % key, X("Point(x, y)", geo + cls + stack + pos + where), X("2 * %s / _A" % GUIDE_CAP),
-                             ex("Text(%s)" % label, geo), tint("Accent", 0.95),
-                             align="l"))
+                             ex("Text(%s)" % label, geo), tint("Guide"), align="l", outline=("1", "0.1")))
     for key, pct, lab in SAFE_AREAS:
         geo = ("local aw, ah = 2 * math.floor(_W * %s / 2 + 0.5), 2 * math.floor(_H * %s / 2 + 0.5) " % (pct, pct)
                + lw + "local on = LK.%s > 0.5 " % key)
@@ -920,8 +978,8 @@ def guides_layer(g):
         pre = geo + pos
         labels.append(g.text("G%sT" % key, X("Point(((_W - aw) / 2 + lw + pad) / _W, 1 - ((_H - ah) / 2 + lw + pad + cap / 2) / _H)", pre),
                              X("2 * %s / _A" % GUIDE_CAP), ex('Text(on and "%s" or "")' % lab, pre),
-                             tint("Accent", 0.7), align="l"))
-    g.background("GLines", color="Accent", scale=0.8, mask=chain)
+                             tint("Guide", 0.85), align="l", outline=("1", "0.1")))
+    g.background("GLines", color="Guide", mask=chain)
     return g.merge("GLay", "GLines", g.chain("GLab", labels))
 
 
@@ -995,12 +1053,18 @@ def head(std=None):
             + uc_combo("LogoPos2", "Posizione del secondo logo", LOGO_POS)
             + uc_slider("LogoSize2", "Larghezza del secondo logo (%)", 5, 100, 12, integer=False)
             + uc_check("LogoOnTail", "Loghi anche sulla coda", 0)
+            + uc_label("SecCd", "Countdown: logo sopra il cerchio, dati sotto")
+            + uc_check("CdLogo", "Logo sopra il countdown", 0)
+            + uc_slider("CdLogoSize", "Dimensione del logo sul countdown (%)", 20, 100, 80, integer=False)
+            + uc_check("CdInfo", "Dati sotto il countdown", 0)
+            + "".join(uc_check(k, "  " + lab, d) for k, lab, d, _ in CD_FIELDS)
             + uc_label("SecLook", "Colori") + color_controls())
     guide = (uc_label("SecGuides", "Frame lines e safe area (sotto i testi, a pixel interi)")
              + uc_check("GuidesSlate", "Sulla slate", 1) + uc_check("GuidesCd", "Sul countdown", 1)
              + uc_check("FLTL", "Formato della timeline", 0)
              + "".join(uc_check(f, "Frame line " + lab + ":1", 0) for f, lab, _ in FRAMELINES)
              + uc_check("SafeAction", "Safe action 93% (EBU R95)", 0) + uc_check("SafeTitle", "Safe title 90%", 0)
+             + uc_color(GUIDE_COLOR[0], GUIDE_COLOR[1], GUIDE_GROUP, GUIDE_COLOR[2])
              + uc_label("SecEnd", "Ultimo fotogramma del leader (il programma parte al successivo)")
              + uc_check("EndDot", "Pallino sull'ultimo fotogramma", 0)
              + uc_combo("EndDotPos", "Posizione del pallino", END_DOT_POS)
@@ -1029,14 +1093,15 @@ def head(std=None):
               ("PopLevel", "0"), ("BeepEach", "0"), ("Logo", '""'), ("LogoPos", "0"), ("LogoSize", "12"),
               ("Logo2", '""'), ("LogoPos2", "1"), ("LogoSize2", "12"),
               ("SlateStyle", "0"), ("TitleImage", '""'), ("TitleImageSize", "100"),
-              ("LogoOnTail", "0"), ("CalOn", "1")]
+              ("LogoOnTail", "0"), ("CalOn", "1"), ("CdLogo", "0"), ("CdLogoSize", "80"), ("CdInfo", "0")]
+    values += [(k, str(d)) for k, _, d, _ in CD_FIELDS]
     values += [(i, str(std.get("slot_defaults", {}).get(c, 0))) for c, i, _ in SLOT_INPUTS]
     values += [(f, '""') for f, _, _ in PRODUCTION_FIELDS + POST_FIELDS if f not in ("Title", "Version")]
     values += [(f, "0") for f, _, _ in STATUSES]
     values += [(f, "0") for f, _, _ in FRAMELINES]
     values += [(f, str(d)) for f, _, d in CALIBRATION]
     values += [(k, "0") for k in HIDDEN_NUM]
-    values += color_values()
+    values += color_values() + [(GUIDE_COLOR[0] + ch, repr(v)) for ch, v in zip(("Red", "Green", "Blue"), GUIDE_COLOR[2])]
 
     g = G()
     g.controls(values, uc)
@@ -1059,7 +1124,7 @@ def head(std=None):
     top = g.dissolve("MSlate", top, s_, ex("(%s) and 1 or 0" % SLATEVIS))
     # countdown + 2-pop, sopra le frame lines (la taratura PNG di Genera sta sulla traccia sopra)
     lead = leader_stack(g, "L", base, 'Text((_REM < %s * _FPS and _REM >= 2 * _FPS) and tostring(math.ceil(_REM / _FPS)) or "")' % C,
-                        sweep_vis="_REM < %s * _FPS and _REM > 2 * _FPS" % C, cd=C)
+                        sweep_vis="_REM < %s * _FPS and _REM > 2 * _FPS" % C, cd=C, extras=countdown_extras(g))
     top = g.dissolve("MLeader", top, lead, ex("(%s) and 1 or 0" % LEADVIS))
     g.text("PicStart", "{ 0.5, 0.5 }", "0.075", 'Text("PICTURE\\nSTART")', tint("Text"), spacing=1.0)
     top = g.gate("MPicStart", top, ["PicStart"], "%s > 0 and _REM == %s * _FPS" % (C, C))
@@ -1216,8 +1281,9 @@ BURN_ROW = (
     "else for l in string.gmatch(seg, '[^\\n]+') do local a, b = string.match(l, '^(%-?%d+)|(%-?%d+)|') "
     "if a and rec >= a + 0 and rec < b + 0 then line = l break end end end "
     "if not line then return nil end "
-    "local a, b, sv, st, sn, sd, au, fr, t1, t2, t3, t4 = string.match(line, "
-    "'^(%-?%d+)|(%-?%d+)|(%-?[%d%.]+)|([%d%.]+)|(%d+)|(%d+)|(%-?%d+)|(%-?%d+)|([^|]*)|([^|]*)|([^|]*)|([^|]*)$') "
+    "local P12 = '^(%-?%d+)|(%-?%d+)|(%-?[%d%.]+)|([%d%.]+)|(%d+)|(%d+)|(%-?%d+)|(%-?%d+)|([^|]*)|([^|]*)|([^|]*)|([^|]*)' "
+    "local a, b, sv, st, sn, sd, au, fr, t1, t2, t3, t4, t5 = string.match(line, P12 .. '|([^|]*)$') "
+    "if not a then a, b, sv, st, sn, sd, au, fr, t1, t2, t3, t4 = string.match(line, P12 .. '$') t5 = '' end "
     "if not a or rec < a + 0 or rec >= b + 0 then return nil end "
     "local e = rec - a local tn, td = math.max(1, LK.TlFps), LK.TlDrop "
     "local function sub(txt) "
@@ -1225,14 +1291,22 @@ BURN_ROW = (
     "txt = string.gsub(txt, '{SRC}', tc((sv + 0) < 0 and -1 or (sv + 0) + e * (st + 0), (sn + 0), (sd + 0))) "
     "txt = string.gsub(txt, '{ATC}', tc((au + 0) < 0 and -1 or (au + 0) + e, tn, td)) "
     "txt = string.gsub(txt, '{FRM}', tostring(fr + e)) return txt end "
-    "return { t1, t2, t3, t4 }, sub end "
-    # testo di un angolo: due righe, o una sola nelle bande sottili del mascherino
-    "local function CORNER(k) local r, sub = ROW() if not r then return '' end "
+    "return { t1, t2, t3, t4, t5 }, sub end "
+    # testo di un angolo (k = 5: alto centro): due righe, o una sola nelle bande sottili del mascherino;
+    # il secondo valore dice se c'e' il testo centrale (gli angoli alti allora si stringono)
+    "local function CORNER(k) local r, sub = ROW() if not r then return '', false end "
     "local parts = {} for x in string.gmatch((r[k] or '') .. '~', '([^~]*)~') do parts[#parts + 1] = x end "
     "local p1, p2 = parts[1] or '', parts[2] or '' local s "
     "if SINGLE then s = p1 .. ((p1 ~= '' and p2 ~= '') and '     ' or '') .. p2 "
     "elseif p1 ~= '' and p2 ~= '' then s = p1 .. '\\n' .. p2 else s = p1 .. p2 end "
-    "return sub(s) end "
+    "return sub(s), (r[5] or '') ~= '' end "
+    # grandezza comune a tutti i blocchi: la piu' grande con cui ognuno sta nella sua larghezza
+    "local function FIT() local best = 2 * CAPE / AR local c5 = false "
+    "for k = 1, 5 do local s, c = CORNER(k) if k == 1 then c5 = c end local m = 1 "
+    "for l in string.gmatch(s, '[^\\n]+') do if string.len(l) > m then m = string.len(l) end end "
+    "local w = PBOX and 0.9 * PB or (k == 5 and 0.28 or ((k <= 2 and c5) and 0.33 or 0.46)) "
+    # larghezza media di un carattere maiuscolo Bold ~0.42 * Size (Open Sans in Resolve)
+    "if s ~= '' then best = math.min(best, w / (0.42 * m)) end end return best end "
     "local function BIG() local r, sub = ROW() if not r then return '' end "
     "local parts = {} for x in string.gmatch((r[4] or '') .. '~', '([^~]*)~') do parts[#parts + 1] = x end "
     "return sub(parts[3] or '') end ")
@@ -1244,6 +1318,11 @@ def burn_x(hx):
     if hx < 0:
         return "(PBOX and PB / 2 or (LK.BAlign < 0.5 and %s or 0.2))" % margin
     return "(PBOX and 1 - PB / 2 or (LK.BAlign < 0.5 and 1 - %s or 0.8))" % margin
+
+
+def burn_xc():
+    """Alto centro: al centro del quadro, o nella banda sinistra se il mascherino e' pillarbox."""
+    return "(PBOX and PB / 2 or 0.5)"
 
 
 def burn_y(top):
@@ -1274,6 +1353,8 @@ def burnin(std=None):
             + uc_slider("BSize", "Altezza testo (% del quadro)", 1, 5, 1.8, integer=False)
             + uc_check("BBands", "Bande semitrasparenti dietro ai dati (senza mascherino)", 0)
             + uc_slider("BBandAlpha", "Opacita' delle bande", 0, 1, 0.6, integer=False)
+            + uc_check("BOutline", "Contorno nero sui dati (leggibili anche sul bianco)", 1)
+            + uc_slider("BOutlineW", "Spessore del contorno", 0, 0.3, 0.08, integer=False)
             + uc_slider("BWaterAlpha", "Opacita' watermark", 0, 1, 0.18, integer=False))
     uc = on_page("Burn-in", main) + on_page("Campi", fields) + on_page("Aspetto", look)
     uc += (uc_hidden("Seg", "Text") + uc_hidden("SegIdx", "Text")
@@ -1285,6 +1366,7 @@ def burnin(std=None):
               ("BRecipient", '""'), ("BInfo", '"Metti il clip sopra il montato (V3/V4) e premi Aggiorna"'),
               ("BFrameMode", "1"), ("BPos", "0"), ("BAlign", "0"), ("BMatte", "0"), ("BMatteRatio", "2.39"),
               ("BMatteAlpha", "1"), ("BSize", "1.8"), ("BBands", "0"), ("BBandAlpha", "0.6"), ("BWaterAlpha", "0.18"),
+              ("BOutline", "1"), ("BOutlineW", "0.08"),
               ("Seg", '""'), ("SegIdx", '""'), ("RecStart", "0"), ("TlFps", "24"), ("TlDrop", "0"),
               ("TlW", "0"), ("TlH", "0")]
     values += [(k, str(v)) for k, v in d.items()]
@@ -1310,23 +1392,26 @@ def burnin(std=None):
     g.background("Band", alpha=("expr", "LK.BBandAlpha"), mask="BandBM")
     top = g.dissolve("GBand", top, g.merge("GBandM1", top, "Band"), bx("(EDGE and LK.BBands > 0.5) and 1 or 0"))
     # angoli: 1 alto-sx, 2 alto-dx, 3 basso-sx, 4 basso-dx; un Text+ per angolo (due righe)
+    outline = [("Enabled2", ("expr", "LK.BOutline")), ("Thickness2", ("expr", "LK.BOutlineW"))] + OUTLINE
     corners = []
-    for corner, (hx, is_top) in enumerate([(-1, True), (1, True), (-1, False), (1, False)], 1):
+    for corner, (hx, is_top) in enumerate([(-1, True), (1, True), (-1, False), (1, False), (0, True)], 1):
         nm = "T%d" % corner
-        maxw = "(PBOX and 0.9 * PB or 0.46)"
-        size = ("(function() local s = CORNER(%d) local m = 1 for l in string.gmatch(s, '[^\\n]+') do "
-                "if string.len(l) > m then m = string.len(l) end end "
-                "return math.min(2 * CAPE / AR, %s / (0.5 * m)) end)()" % (corner, maxw))
+        # grandezza comune (FIT): bande laterali, un terzo del quadro quando in alto c'e' il testo centrale
+        size = "FIT()"
+        if hx == 0:
+            center = bx("Point(%s, PBOX and 0.75 or %s)" % (burn_xc(), burn_y(True)))
+            align = [("HorizontalJustificationNew", "3")]
+        else:
+            center = bx("Point(%s, %s)" % (burn_x(hx), burn_y(is_top)))
+            align = [("HorizontalLeftCenterRight", bx("(PBOX or LK.BAlign > 0.5) and 0 or %d" % hx)),
+                     ("HorizontalJustificationNew", bx("(PBOX or LK.BAlign > 0.5) and 3 or %d" % (0 if hx < 0 else 1)))]
         g._add(nm, "TextPlus", G.CREATOR + [
-            ("Center", bx("Point(%s, %s)" % (burn_x(hx), burn_y(is_top)))), ("Font", '"Open Sans"'),
-            ("Style", '"Bold"'), ("Size", bt(size)), ("StyledText", bt("Text(CORNER(%d))" % corner)),
-            ("Red1", "1"), ("Green1", "1"), ("Blue1", "1"),
-            ("HorizontalLeftCenterRight", bx("(PBOX or LK.BAlign > 0.5) and 0 or %d" % hx)),
-            ("HorizontalJustificationNew", bx("(PBOX or LK.BAlign > 0.5) and 3 or %d" % (0 if hx < 0 else 1))),
-            ("VerticalJustificationNew", "3")])
+            ("Center", center), ("Font", '"Open Sans"'),
+            ("Style", '"Bold"'), ("Size", bt(size)), ("StyledText", bt("Text((CORNER(%d)))" % corner)),
+            ("Red1", "1"), ("Green1", "1"), ("Blue1", "1"), ("VerticalJustificationNew", "3")] + align + outline)
         corners.append(nm)
-    top = g.merge("MTop", top, g.chain("TTop", corners[:2]))
-    top = g.merge("MBottom", top, g.chain("TBot", corners[2:]))
+    top = g.merge("MTop", top, g.chain("TTop", [corners[0], corners[4], corners[1]]))
+    top = g.merge("MBottom", top, g.chain("TBot", corners[2:4]))
     # record TC grande (in basso al centro)
     g._add("Big", "TextPlus", G.CREATOR + [
         ("Center", bx("Point(PBOX and 1 - PB / 2 or 0.5, PBOX and 0.16 or (LBOX and LB + 0.06 or "
@@ -1335,7 +1420,7 @@ def burnin(std=None):
         ("Size", bx("PBOX and math.min(10 * CAP / AR, 0.9 * PB / 4.8) or 10 * CAP / AR")),
         ("StyledText", bt("Text(BIG())")),
         ("Red1", "1"), ("Green1", "1"), ("Blue1", "1"),
-        ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")])
+        ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")] + outline)
     top = g.gate("MBig", top, ["Big"], "LK.BBig > 0.5")
     g.text("Water", "{ 0.5, 0.5 }", "0.06",
            'Text(string.upper(LK.BWaterText.Value) .. (LK.BRecipient.Value == "" and "" or ("\\n" .. LK.BRecipient.Value)))',
@@ -1345,7 +1430,7 @@ def burnin(std=None):
                                         "BWaterText", "BRecipient")]
               + [(k, "Campi") for k, _ in BURN_FIELDS] + [("BFrameMode", "Campi")]
               + [(x, "Aspetto") for x in ("BMatte", "BMatteRatio", "BMatteAlpha", "BPos", "BAlign", "BSize",
-                                          "BBands", "BBandAlpha", "BWaterAlpha")])
+                                          "BBands", "BBandAlpha", "BOutline", "BOutlineW", "BWaterAlpha")])
     return group(BURN_NAME, g, top, inputs)
 
 

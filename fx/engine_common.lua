@@ -116,8 +116,8 @@ local function findTool(cmp, name)
   return nil
 end
 
-local lk = tool
-if not lk or not pcall(function() return lk:GetInput("Preset") end) then lk = findTool(c, "LK") end
+-- pannello: il nodo "LK" della composizione del bottone ("tool" puo' essere un altro nodo)
+local lk = findTool(c, "LK") or tool
 local function get(name, default)
   if not lk then return default end
   local ok, v = pcall(function() return lk:GetInput(name) end)

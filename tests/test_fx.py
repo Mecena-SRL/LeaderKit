@@ -350,9 +350,8 @@ def test_slate_only_filled_fields(built):
     assert r["SLab1.Center"].split(",")[1] == r["SVal1.Center"].split(",")[1]
 
 
-def render_path(tools, output):
+def render_nodes(tools, output):
     """Nodi che Fusion calcola davvero: i Dissolve con Mix 0 o 1 richiedono un solo ingresso."""
-    import collections
     seen = set()
 
     def link(v):
@@ -373,7 +372,12 @@ def render_path(tools, output):
         for v in t["inputs"].values():
             visit(link(v))
     visit(output)
-    return collections.Counter(tools[n]["kind"] for n in seen)
+    return seen
+
+
+def render_path(tools, output):
+    import collections
+    return collections.Counter(tools[n]["kind"] for n in render_nodes(tools, output))
 
 
 def dump_full(setting, fps, w, h, frames_, t, **kw):
@@ -386,7 +390,7 @@ def dump_full(setting, fps, w, h, frames_, t, **kw):
 
 
 FULL = dict(Production="Mecena", Producer="P", Client="C", Agency="A", Code="X1", Episode="1", Language="IT",
-            Director="Regista", Editor="E", Colorist="Co", Sound="S", VFXBy="V", Phase=2, StColor=2, StSound=1,
+            Director="Regista", Editor="E", AsstEditor="AE", Colorist="Co", Sound="S", VFXBy="V", Phase=2, StColor=2, StSound=1,
             StVFX=1, StMusic=2, StTitles=1, Note="nota", AudioFormat="5.1", ColorInfo="Rec.709")
 
 
@@ -529,7 +533,7 @@ def test_engine_burnin_dailies(built, code):
     assert b["start"] == "01:00:00:00" and b["dur"] == 20 * 24          # dal FFOA all'ultimo fotogramma
     assert b["fm"] == "1" and b["flags"] == "010"                        # fase Giornalieri: source TC, niente record
     assert "SC 12 TK 3 CIRCLED" in b["seg"] and "CAM A" in b["seg"] and "A001" in b["seg"]
-    assert "A001C003.mov" in b["seg"] and "SRC {SRC}" in b["seg"]
+    assert "|A001C003~" in b["seg"] and "SRC TC {SRC}" in b["seg"]        # nome file senza estensione, in alto a sx
     src = ((14 * 60 + 22) * 60 + 10) * 24 + 48                          # Start TC + punto d'ingresso nel clip
     assert "|%d.0000|1.000000|24|0|" % src in b["seg"]
     assert "Burn-in" in text and "Burn-in non inserito" not in text
@@ -543,7 +547,7 @@ def test_engine_burnin_sound_and_update(built, code):
     assert b["dur"] == 30 * 24 and b["flags"].startswith("10")        # record TC per suono / mix
     # "Aggiorna dai metadati" rilegge i clip con il contatore VFX da 1001
     assert b["fm"] == "0" and "|1001|" in b["seg"]
-    assert "REC {REC}" in b["seg"] and b["fps"] == "24"
+    assert "REC TC {REC}" in b["seg"] and b["fps"] == "24"
 
 
 def test_engine_burnin_sync_audio_tc(built, code):
@@ -822,8 +826,8 @@ def test_burnin_index_matches_scan(built, code):
     for t_ in (0, 5, 479):
         a = dump_tools(setting, 24, 1920, 1080, 480, t_, Seg=seg, SegIdx=idx_, RecStart=86400, TlFps=24)
         b = dump_tools(setting, 24, 1920, 1080, 480, t_, Seg=seg, RecStart=86400, TlFps=24)
-        assert [a["T%d" % k]["StyledText"] for k in range(1, 5)] == [b["T%d" % k]["StyledText"] for k in range(1, 5)]
-        assert a["T3"]["StyledText"].startswith("SRC 14:22:")
+        assert [a["T%d" % k]["StyledText"] for k in range(1, 6)] == [b["T%d" % k]["StyledText"] for k in range(1, 6)]
+        assert a["T3"]["StyledText"].startswith("SRC TC 14:22:")
 
 
 def test_burnin_binary_search_many_segments(built):
@@ -849,7 +853,7 @@ def test_burnin_is_light(built):
     d = dump_full(setting, 24, 3840, 2160, 480, 10, Seg=seg, SegIdx="000000000000000001", RecStart=86400,
                   BWater=0, TlW=3840, TlH=2160)
     c = render_path(d["tools"], d["output"])
-    assert c["TextPlus"] <= 4 and c["Background"] == 1 and c["Merge"] <= 4, c
+    assert c["TextPlus"] <= 5 and c["Background"] == 1 and c["Merge"] <= 5, c
     text = open(setting).read()
     assert "GetPrefs" in text                                              # solo come ripiego se manca TlW
     assert 'Source = "Seg"' not in text                                   # dati dei clip non visibili nell'Inspector
@@ -863,9 +867,133 @@ def test_every_format_and_rate_evaluates(built, fps, w, h):
     for style in range(4):
         for t_ in (0, n // 3, n - 60, n - 1):
             d = dump_full(HEAD(built), fps, w, h, n, t_, SlateStyle=style, FLTL=1, FL185=1, FL239=1, FL133=1,
-                          SafeAction=1, EndDot=1, Logo="/x.png", LogoW=300, LogoH=300, **FULL)
+                          SafeAction=1, EndDot=1, Logo="/x.png", LogoW=300, LogoH=300, CdLogo=1, CdInfo=1, **FULL)
             for name, tool in d["tools"].items():
                 if tool["kind"] == "TextPlus":
                     cx, cy = tool["inputs"]["Center"]
                     assert -0.01 <= cx <= 1.01 and -0.01 <= cy <= 1.01, (name, cx, cy)
     dump_full(TAIL(built), fps, w, h, n, n // 2)
+
+
+# ------------------------------------------------------------------ 0.12
+def field_reads(d):
+    return sum(d["tools"][n]["reads"] for n in render_nodes(d["tools"], d["output"]))
+
+
+def test_panels_are_light(built):
+    """Pannelli: letture dei campi per fotogramma (erano 713 nella 0.11) e maschere senza espressioni."""
+    d = dump_full(HEAD(built), 24, 3840, 2160, 432, 40, SlateStyle=0, **FULL)
+    assert field_reads(d) <= 300, field_reads(d)
+    for i in range(3):
+        m = d["tools"]["SPan%dM" % i]["inputs"]
+        assert isinstance(m["Height"], float) and abs(m["Height"] - (build_fx.PANEL_TOP - build_fx.PANEL_BOTTOM)) < 1e-9
+    text = open(HEAD(built)).read()
+    assert "COLS()" not in text                                             # niente piu' calcolo di tutte le colonne
+    # ogni tabella legge solo la sua colonna, e con 8 campi si riduce per stare nelle 6 righe
+    lab = d["tools"]["SLab0"]["inputs"]
+    assert lab["StyledText"].count("\n") == 7 and lab["Size"] < d["tools"]["SLab2"]["inputs"]["Size"]
+
+
+def test_assistant_editor_field(built):
+    rows = frames(HEAD(built), 24, 1920, 1080, 18 * 24, idx("cinema", "cinema_dcp"))
+    assert "ASST. EDITOR" not in rows[0]["SLab1.StyledText"]              # vuoto: non compare
+    t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 40, Editor="Ivan", AsstEditor="Anna")
+    assert t["SLab1"]["StyledText"].split("\n")[:2] == ["EDITOR", "ASST. EDITOR"]
+    assert t["SVal1"]["StyledText"].split("\n")[:2] == ["Ivan", "Anna"]
+    assert "AsstEditor" in build_fx.param_names()
+
+
+def test_guides_color_and_outline(built):
+    t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 40, FL239=1, GuideRed=1, GuideGreen=0.5, GuideBlue=0)
+    lab, lines = t["GFL239T"], t["GLines"]
+    assert (lab["Red1"], lab["Green1"], lab["Blue1"]) == (1, 0.5, 0)
+    assert (lines["TopLeftRed"], lines["TopLeftGreen"], lines["TopLeftBlue"]) == (1, 0.5, 0)
+    assert lab["Enabled2"] == 1 and lab["Red2"] == 0 and lab["Thickness2"] > 0          # contorno nero
+    t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 40, FL239=1)
+    assert (t["GFL239T"]["Red1"], t["GFL239T"]["Green1"], t["GFL239T"]["Blue1"]) == (1, 1, 1)   # bianco di default
+    text = open(HEAD(built)).read()
+    assert "ControlGroup = %d" % build_fx.GUIDE_GROUP in text
+
+
+@pytest.mark.parametrize("w,h", [(1920, 1080), (3840, 1920), (1440, 1080), (4096, 1716)])
+def test_countdown_logo_and_info(built, w, h):
+    """Logo sopra il cerchio e dati sotto, dentro lo spazio libero e lontani dalle griglie della taratura."""
+    kw = dict(CdLogo=1, CdInfo=1, Title="Il film", Director="Regista", Editor="Ivan", AsstEditor="Anna",
+              Production="Mecena", Logo="/x/l.png", LogoW=600, LogoH=200)
+    t = dump_tools(HEAD(built), 24, w, h, 432, 300, **kw)
+    space = max(0.02, (1 - build_fx.RING_D * w / h) / 2)
+    assert t["CdLogoG"]["Mix"] == 1 and t["CdInfoG"]["Mix"] == 1
+    lg = t["CdLogoGM1"]
+    assert abs(lg["Center"][1] - (1 - space / 2)) < 1e-9 and lg["Center"][0] == 0.5
+    assert 600 * lg["Size"] <= 0.30 * w + 1e-6 and 200 * lg["Size"] <= space * 0.7 * h + 1e-6
+    tx = t["CdText"]
+    assert tx["StyledText"].split("\n") == ["IL FILM", "DIRECTOR  Regista      PRODUCTION  Mecena",
+                                             "EDITOR  Ivan      ASST. EDITOR  Anna"]
+    assert abs(tx["Center"][1] - space / 2) < 1e-9 and tx["Enabled2"] == 1
+    # il blocco sta nello spazio sotto il cerchio (maiuscole reali 0.88 del modello, interlinea calibrata)
+    cap = tx["Size"] * (w / h) / 2
+    assert cap * (0.88 + build_fx.PITCH * 2) <= space * 0.75 + 1e-9
+    # spenti di default; logo senza file: niente
+    t = dump_tools(HEAD(built), 24, w, h, 432, 300)
+    assert t["CdLogoG"]["Mix"] == 0 and t["CdInfoG"]["Mix"] == 0
+    t = dump_tools(HEAD(built), 24, w, h, 432, 300, CdLogo=1)
+    assert t["CdLogoG"]["Mix"] == 0
+    # sulla slate non compaiono (fanno parte del countdown)
+    t = dump_tools(HEAD(built), 24, w, h, 432, 40, **kw)
+    assert t["MLeader"]["Mix"] == 0
+
+
+def test_image_pick_with_group_tool(tmp_path):
+    """Il bug della 0.11: il bottone riceve un 'tool' che non e' il pannello; il percorso va scritto nel nodo LK."""
+    from PIL import Image
+    png = tmp_path / "logo.png"
+    Image.new("RGBA", (600, 200)).save(png)
+    lib = open(os.path.join(ROOT, "fx", "image.lua")).read()
+    out = run_lua(lib + """
+local function node() local t = { v = {} }
+  function t:GetInput(k) return self.v[k] end
+  function t:SetInput(k, x) self.v[k] = x end
+  return t end
+local lk, group = node(), { }
+function group:GetInput() return nil end
+function group:SetInput() end
+local ld = node()
+local shown = {}
+local c = {}
+function c:FindTool(n) if n == "LK" then return lk elseif n == "Logo1Ld" then return ld end end
+function c:AskUser(t, ctl)
+  if ctl[1][2] == "FileBrowse" then return { File = %r } end
+  shown[#shown + 1] = ctl[1].Default
+end
+local st, written = LK_IMAGE.pick(c, group, "Logo", "Logo1Ld", "LogoW", "LogoH", "Logo")
+print(st, written, lk.v.Logo == %r, ld.Clip == %r, lk.v.LogoW, lk.v.LogoH)
+print(shown[1])
+-- cambio del campo a mano: sync con il gruppo come 'tool'
+lk.v.LogoW = 0
+print(LK_IMAGE.sync(c, group, "Logo", "Logo1Ld", "LogoW", "LogoH"), lk.v.LogoW)
+""" % (str(png), str(png), str(png)))
+    lines = out.split("\n")
+    assert lines[0] == "ok\ttrue\ttrue\ttrue\t600\t200"
+    assert lines[1] == "Logo caricato: %s (600x200 px)." % png                   # esito sempre visibile
+    assert lines[2].startswith("ok") and lines[2].endswith("600")
+
+
+def test_burnin_layout_and_outline(built):
+    setting = os.path.join(built, "LeaderKit Burn-in.setting")
+    seg = ("86400|86880|1000|1|24|0|-1|0|A001C003~A001  ·  CAM A|SC 12 TK 3~|SRC TC {SRC}~AUD TC --|"
+           "REC TC {REC}~FR {FRM}~{REC}|IL FILM  ·  v3~26/09/2026")
+    t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, SegIdx="000000000000000001", RecStart=86400)
+    assert t["T1"]["StyledText"] == "A001C003\nA001  ·  CAM A" and t["T1"]["Center"][0] < 0.1
+    assert t["T5"]["StyledText"] == "IL FILM  ·  v3\n26/09/2026" and t["T5"]["Center"][0] == 0.5
+    assert t["T2"]["StyledText"] == "SC 12 TK 3" and t["T2"]["Center"][0] > 0.9
+    assert t["T3"]["StyledText"] == "SRC TC 00:00:41:16\nAUD TC --"
+    assert t["T4"]["StyledText"] == "REC TC 01:00:00:00\nFR 0"
+    for k in range(1, 6):
+        assert t["T%d" % k]["Enabled2"] == 1 and t["T%d" % k]["Red2"] == 0          # contorno nero di default
+    t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, SegIdx="000000000000000001", RecStart=86400, BOutline=0)
+    assert t["T1"]["Enabled2"] == 0
+    # pillarbox: il testo centrale va nella banda sinistra
+    names = [m for m, _ in build_fx.MATTES]
+    t = dump_tools(setting, 24, 3840, 1920, 480, 0, Seg=seg, SegIdx="000000000000000001", RecStart=86400,
+                   BMatte=names.index("1.33:1 (4:3)"))
+    assert abs(t["T5"]["Center"][0] - t["MatLM"]["Width"] / 2) < 1e-9

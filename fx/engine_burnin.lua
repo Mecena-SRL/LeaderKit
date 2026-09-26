@@ -97,7 +97,13 @@ function BURN.fill(item, lkb, opts)
       if x.st <= a and x.en > a and (not v or x.track > v.track) then v = x end
     end
     local srcv, step, sn, sd, fr0 = -1, 1, r.nominal, r.drop, a - rs
-    local tl1, tl2, tr1, tr2, bl1, bl2 = "", "", "", "", "", ""
+    -- impaginazione (convenzioni dailies / review: dati fuori dall'immagine attiva, etichette
+    -- esplicite SRC TC / REC TC, source a sinistra e record a destra come in Avid):
+    --   alto sx  nome file del clip / reel · camera     alto centro  titolo · versione / data
+    --   alto dx  scena / take / formato · colore        basso sx     SRC TC / AUD TC + sound roll
+    --   basso dx REC TC / contatore fotogrammi          (TC grande in basso al centro)
+    local tl1, tl2, tr1, tr2, bl1, bl2, tc1, tc2 = "", "", "", "", "", "", "", ""
+    local date = ""
     local mpi = v and BURN.mpi(v.item)
     if v then
       clips = clips + 1
@@ -108,7 +114,12 @@ function BURN.fill(item, lkb, opts)
       local base = string.match(stc, "%d+[:;]%d+[:;]%d+[:;.]%d+") and tcToFrames(stc, cr) or 0
       srcv = base + BURN.srcStart(v.item) + (a - v.st) * step
       if frameMode == 0 then fr0 = 1001 + (a - v.st) elseif frameMode == 1 then fr0 = a - v.st end
-      if on("BClip") then tr1 = clean(v.item:GetName()) end
+      if on("BClip") then
+        -- nome del file di camera, senza estensione (si ritrova nel media pool e nei report)
+        local fname = BURN.meta(mpi, { "File Name", "Clip Name" })
+        if fname == "" then fname = clean(v.item:GetName()) end
+        tl1 = (string.gsub(fname, "%.[%w]+$", ""))
+      end
       local sc = BURN.meta(mpi, { "Scene" })
       local shot = BURN.meta(mpi, { "Shot" })
       local tk = BURN.meta(mpi, { "Take" })
@@ -117,17 +128,15 @@ function BURN.fill(item, lkb, opts)
         tk ~= "" and ("TK " .. tk) or "", (good == "1" or string.lower(good) == "true" or string.lower(good) == "yes") and "CIRCLED" or "" }, " ")
       local cam = BURN.meta(mpi, { "Camera #", "Camera", "Angle" })
       local reel = joinb({ BURN.meta(mpi, { "Reel Name", "Reel Number", "Reel" }), BURN.meta(mpi, { "Roll Card #", "Roll/Card" }) }, " / ")
-      tr2 = joinb({ on("BScene") and scene or "", on("BCam") and cam ~= "" and ("CAM " .. cam) or "", on("BReel") and reel or "" })
-      if on("BDate") then
-        local d = BURN.meta(mpi, { "Shoot Day", "Date Recorded", "Date Created" })
-        tl2 = d ~= "" and d or os.date("%d/%m/%Y")
-      end
-    elseif on("BDate") then
-      tl2 = os.date("%d/%m/%Y")
+      tl2 = joinb({ on("BReel") and reel or "", on("BCam") and cam ~= "" and ("CAM " .. cam) or "" }, "  ·  ")
+      tr1 = on("BScene") and scene or ""
+      if on("BDate") then date = BURN.meta(mpi, { "Shoot Day", "Date Recorded", "Date Created" }) end
     end
-    tl1 = joinb({ on("BTitle") and string.upper(title) or "", on("BVersion") and version or "" })
-    tl2 = joinb({ tl2, on("BFormat") and fmt or "", on("BColor") and color or "" })
-    if on("BSrc") then bl1 = "SRC {SRC}" end
+    if on("BDate") and date == "" then date = os.date("%d/%m/%Y") end
+    tc1 = joinb({ on("BTitle") and string.upper(title) or "", on("BVersion") and version or "" }, "  ·  ")
+    tc2 = date
+    tr2 = joinb({ on("BFormat") and fmt or "", on("BColor") and color or "" }, "  ·  ")
+    if on("BSrc") then bl1 = "SRC TC {SRC}" end
     local aud = -1
     if on("BAtc") then
       local au = nil
@@ -142,19 +151,20 @@ function BURN.fill(item, lkb, opts)
         end
         local roll = BURN.meta(ampi, { "Sound Roll #", "Reel Name" })
         if roll == "" then roll = BURN.meta(mpi, { "Sound Roll #" }) end
-        bl2 = "SND {ATC}" .. (roll ~= "" and ("   " .. roll) or "")
+        bl2 = "AUD TC {ATC}" .. (roll ~= "" and ("   " .. roll) or "")
       else
-        bl2 = "SND --"
+        bl2 = "AUD TC --"
       end
     end
-    local br1, br2 = on("BRec") and "REC {REC}" or "", on("BFrame") and "FR {FRM}" or ""
+    local br1, br2 = on("BRec") and "REC TC {REC}" or "", on("BFrame") and "FR {FRM}" or ""
     if tl1 == "" then tl1, tl2 = tl2, "" end
+    if tc1 == "" then tc1, tc2 = tc2, "" end
     if tr1 == "" then tr1, tr2 = tr2, "" end
-    if bl2 == "" then bl2, bl1 = bl1, "" end
-    if br2 == "" then br2, br1 = br1, "" end
-    lines[#lines + 1] = string.format("%d|%d|%s|%s|%d|%d|%d|%d|%s~%s|%s~%s|%s~%s|%s~%s~{REC}",
+    if bl1 == "" then bl1, bl2 = bl2, "" end
+    if br1 == "" then br1, br2 = br2, "" end
+    lines[#lines + 1] = string.format("%d|%d|%s|%s|%d|%d|%d|%d|%s~%s|%s~%s|%s~%s|%s~%s~{REC}|%s~%s",
       a, b, string.format("%.4f", srcv), string.format("%.6f", step), sn, sd, aud, fr0,
-      tl1, tl2, tr1, tr2, bl1, bl2, br1, br2)
+      tl1, tl2, tr1, tr2, bl1, bl2, br1, br2, tc1, tc2)
   end
   -- indice a record fissi (inizio relativo al clip, posizione della riga in Seg): il generatore
   -- trova il segmento del fotogramma con una ricerca binaria, senza rileggere tutto Seg

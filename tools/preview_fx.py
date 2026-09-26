@@ -180,7 +180,8 @@ class Renderer(object):
         size = num(self.inp(name, "Size"), 0.08)
         bold = (self.inp(name, "Style") or "Bold") not in ("Regular", "Light")
         # modello di Text+ usato da LeaderKit: maiuscole alte Size * larghezza / 2 (cap_size in build_fx)
-        font = ImageFont.truetype(FONTS[0] if bold else FONTS[1], max(6, int(size * self.w * 0.5 / 0.729)))
+        # in Resolve 21 le maiuscole di Text+ sono alte ~0.44 * Size * larghezza (misurato)
+        font = ImageFont.truetype(FONTS[0] if bold else FONTS[1], max(6, int(size * self.w * 0.44 / 0.729)))
         cx, cy = pt(self.inp(name, "Center"))
         spacing = num(self.inp(name, "LineSpacing"), 1.0)
         img = Image.new("L", (self.w, self.h), 0)
@@ -201,6 +202,14 @@ class Renderer(object):
                 x = cx * self.w - tw / 2
             d.text((x, y0 + i * lh), line, fill=255, font=font)
         a = np.asarray(img).astype(np.float32) / 255
+        if num(self.inp(name, "Enabled2"), 0) > 0.5:
+            # contorno nero (elemento 2 di Text+): alpha allargata, colore nero sotto il testo
+            r = max(1, int(round(font.size * num(self.inp(name, "Thickness2"), 0.05) * 0.4)))
+            wide = np.asarray(img.filter(ImageFilter.MaxFilter(2 * r + 1))).astype(np.float32) / 255
+            col = [num(self.inp(name, ch), 1) for ch in ("Red1", "Green1", "Blue1")]
+            out[..., 0], out[..., 1], out[..., 2] = a * col[0], a * col[1], a * col[2]
+            out[..., 3] = np.maximum(a, wide)
+            return out
         col = [num(self.inp(name, ch), 1) for ch in ("Red1", "Green1", "Blue1")]
         out[..., 0], out[..., 1], out[..., 2] = a * col[0], a * col[1], a * col[2]
         out[..., 3] = a
