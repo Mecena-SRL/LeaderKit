@@ -55,10 +55,22 @@ local function newTool() local t = { inputs = {} }
   function t:GetInput(k) return self.inputs[k] end
   function t:SetInput(k, v) self.inputs[k] = v end
   return t end
-local function newComp(tool) local c = { tool = tool }
-  function c:FindTool(n) if n == "LK" then return self.tool end end
+-- Loader simulati: il motore imposta Clip (come in Fusion, per assegnazione) e gli input di tenuta
+local function newLoader(name)
+  local ld = { name = name, inputs = {} }
+  function ld:SetInput(k, v) self.inputs[k] = v end
+  function ld:GetAttrs() return {} end
+  return ld
+end
+local function newComp(tool) local c = { tool = tool, loaders = {} }
+  function c:FindTool(n)
+    if n == "LK" then return self.tool end
+    if n:match("Ld$") then self.loaders[n] = self.loaders[n] or newLoader(n); return self.loaders[n] end
+  end
   function c:GetToolList() return {} end
-  function c:AskUser(title, t) print("DIALOG " .. title .. "\n" .. t[1].Default) end
+  function c:Lock() end
+  function c:Unlock() end
+  function c:AskUser(title, t) print("DIALOG " .. title .. "\n" .. tostring(t[1].Default)) end
   return c end
 
 local headTool = newTool()
@@ -68,7 +80,8 @@ headTool.inputs = { Preset = tonumber(opt.preset), Reel = 1, Custom = 0, BarsSec
   SlotCinema = tonumber(opt.SlotCinema or "3"), SlotTV = tonumber(opt.SlotTV or "0"),
   SlotSpot = tonumber(opt.SlotSpot or "3"), SlotStream = tonumber(opt.SlotStream or "3"), DateAuto = 1,
   Title = "Il film", TextRed = 0.5, BeepEach = tonumber(opt.beep), PopLevel = 0,
-  Logo = opt.logo, LogoPos = 0, LogoSize = 20, LogoOnTail = 1,
+  Logo = opt.logo, LogoPos = 0, LogoSize = 20, LogoOnTail = tonumber(opt.logotail or "1"), Logo2 = opt.logo2 or "",
+  LogoPos2 = 1, LogoSize2 = 12, EndDot = tonumber(opt.enddot or "0"),
   SlateStyle = tonumber(opt.style or "0"), TitleImage = opt.titleimg or "", TitleImageSize = 100 }
 local head = setmetatable({ off = 0, dur = tonumber(opt.head) * nominal, name = "LeaderKit Head",
   comp = newComp(headTool) }, Item)
@@ -239,6 +252,8 @@ for _, t in ipairs(tracks.video) do
       print("RESULT burn=" .. tc(it:GetStart()) .. "|" .. it:GetDuration() .. "|" .. tostring(ti.BFrameMode) .. "|" ..
         tostring(ti.BRec) .. tostring(ti.BSrc) .. tostring(ti.BAtc) .. "|" .. tostring(ti.RecStart) .. "|" .. tostring(ti.TlFps))
       print("RESULT burnseg=" .. (tostring(ti.Seg):gsub("\n", " // ")))
+      print("RESULT burnidx=" .. tostring(ti.SegIdx))
+      print("RESULT burnseglen=" .. tostring(#tostring(ti.Seg)))
     end
   end
   if t.name == "LeaderKit Logo" then
@@ -253,6 +268,21 @@ for _, t in ipairs(tracks.video) do
       local pr = it.props or {}
       print(string.format("RESULT track=%s|%s|%d|%s|%s|%s|%s", t.name, tc(it:GetStart()), it:GetDuration(),
         tostring(pr.ZoomX), tostring(pr.Pan), tostring(pr.Tilt), tostring(it.path)))
+    end
+  end
+end
+for _, t in ipairs(tracks.video) do
+  for _, it in ipairs(t.items) do
+    if it.comp and it.comp.loaders then
+      local names = {}
+      for n in pairs(it.comp.loaders) do names[#names + 1] = n end
+      table.sort(names)
+      for _, n in ipairs(names) do
+        local ld, ti = it.comp.loaders[n], it.comp.tool.inputs
+        local pre = ({ Logo1Ld = "Logo", Logo2Ld = "Logo2", TitleLd = "Title" })[n]
+        print(string.format("RESULT loader=%s|%s|%s|%s|%s|%s", it.name, n, tostring(ld.Clip), tostring(ti[pre .. "W"]),
+          tostring(ti[pre .. "H"]), tostring(ld.inputs.HoldLastFrame)))
+      end
     end
   end
 end

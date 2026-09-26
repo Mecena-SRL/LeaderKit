@@ -34,8 +34,9 @@ LeaderKit tra i template). DaVinci Resolve per iPad non è supportato.
    - mette tono, 2-pop e sync audio;
    - crea il **contenitore**, anche senza montato;
    - inserisce la coda sulla stessa traccia, anche oltre la fine della timeline;
-   - aggiunge i marker e crea taratura, loghi, titolo e burn-in;
-   - chiude con un riepilogo di **controlli** (✓/⚠) che dice cosa fare.
+   - aggiunge i marker, crea la taratura e il burn-in, ricarica loghi e titolo in PNG;
+   - chiude con un riepilogo di **controlli** (✓/⚠) che dice cosa fare. Quando qualcosa è
+     fuori standard (frame rate, risoluzione, pallino finale…) Genera avvisa ma non blocca.
 4. **Rimuovi elementi generati** cancella solo ciò che ha creato LeaderKit:
    marker, audio, coda, immagini e burn-in. Il blocco di testa resta.
 
@@ -44,9 +45,12 @@ Tracce create da Genera:
 | Traccia | Contenuto |
 |---|---|
 | LeaderKit Pop (audio) | tono di line-up, 2-pop, sync, tail pop |
-| LeaderKit Grafica | taratura e frame lines sul countdown, quadranti degli stili Quadrante e Orologio |
-| LeaderKit Logo, Logo 2, Logo Titolo | logo di produzione, secondo logo, titolo in PNG |
+| LeaderKit Grafica | taratura sul countdown, quadranti degli stili Quadrante e Orologio |
 | LeaderKit Burn-in | burn-in delle copie di lavoro |
+
+Loghi, titolo in PNG, frame lines, safe area e pallino finale stanno **dentro il
+generatore**: si vedono subito, senza tracce in più. Le tracce Logo della 0.10
+vengono tolte da Genera e da Rimuovi.
 
 Tutte le immagini (taratura, quadranti) vengono disegnate da Genera **pixel per
 pixel alla risoluzione esatta della timeline**. Sono PNG con trasparenza,
@@ -58,12 +62,11 @@ spazio.
 
 | Scheda | Contenuto |
 |---|---|
-| **Progetto** | standard, rullo, durata del programma, slot, break TV, marker, coda, **Genera** / **Rimuovi**, guida timecode e timecode calcolati |
-| **Produzione** | titolo, produzione, produttore, regia, cliente, agenzia, codice (Ad-ID/Clock/Auditel), episodio/rullo, lingua, data con bottone **Oggi** e spunta **Data sempre aggiornata** (vale a ogni render) |
-| **Post** | montaggio, color, suono, VFX, versione, fase di lavorazione, stato dei reparti (TEMP/FINAL), note |
-| **Tecnico** | frame lines 1.33–2.39, safe area 93% e 90%, spazio colore (letto dal progetto), formato audio, livello del pop |
-| **Aspetto** | stile della slate, titolo in PNG, colori (testo, sfondo, grafica, evidenza), logo di produzione e secondo logo (file, posizione, dimensione, anche sulla coda) |
-| **Taratura** | strumenti sul countdown (vedi sotto) |
+| **Progetto** | standard, rullo, durata del programma, slot, break TV, marker, coda, **Genera** / **Rimuovi**, esito e timecode calcolati, durate personalizzate |
+| **Dati** | *Produzione*: titolo, produzione, produttore, regia, cliente, agenzia, codice (Ad-ID/Clock/Auditel), episodio/rullo, lingua, data con bottone **Oggi** e spunta **Data sempre aggiornata**. *Post-produzione*: montaggio, color, suono, VFX, versione, fase, stato dei reparti (TEMP/FINAL), note |
+| **Aspetto** | stile della slate, titolo in PNG, logo e secondo logo con **Scegli…** (posizione, larghezza, anche sulla coda), colori |
+| **Guide** | frame lines (formato della timeline e 1.33–2.39), safe area 93% e 90%, dove mostrarle (slate, countdown), **pallino sull'ultimo fotogramma** |
+| **Tecnico** | spazio colore (letto dal progetto), formato audio, livello del pop, strumenti di taratura |
 
 ## Slate
 
@@ -78,12 +81,39 @@ Quattro stili (Aspetto › Slate):
 
 - **Campi**: compaiono solo quelli compilati. I pannelli si accorciano quando i campi sono pochi e i testi lunghi si riducono, mai sotto l'80%.
 - **Stato dei reparti** (color, suono, VFX, musica, titoli): badge a grandezza fissa, **FINAL** in verde e **TEMP** nel colore evidenza.
-- **Titolo in PNG** (con trasparenza): Genera lo impagina nel riquadro del titolo dello stile scelto, leggendo le proporzioni dal file, e il titolo di testo sparisce.
-- **Loghi**: logo di produzione e secondo logo vanno negli angoli scelti, con margini esatti.
+- **Titolo in PNG** (con trasparenza): **Scegli il titolo in PNG…** lo carica nel generatore e lo
+  impagina subito nel riquadro del titolo dello stile scelto, con le proporzioni del file; il titolo
+  di testo sparisce.
+- **Loghi**: **Scegli il logo…** apre il selettore di Fusion; il logo compare subito nell'angolo
+  scelto, largo la percentuale indicata del quadro, con margini esatti (3,5% / 4%). Il percorso si
+  può anche incollare nel campo. PNG e JPG; Genera lo ricarica nel blocco e, se richiesto, nella coda,
+  e segnala file mancanti o non leggibili.
 - **Layout**: si adatta a 16:9, 2:1, DCI Flat/Scope e 4:3.
 
-Slate, barre e countdown, e i quattro stili tra loro, si alternano con nodi
-Dissolve: Fusion calcola solo la parte visibile.
+Slate, barre e countdown, i quattro stili tra loro e ogni elemento facoltativo
+(guide, loghi, flash, pallino…) si accendono con nodi Dissolve: Fusion calcola
+solo la parte visibile. I testi dei pannelli sono raccolti in pochi Text+ a più
+righe (etichette e valori allineati riga per riga) e le forme dello stesso
+colore usano un solo sfondo con le maschere in catena: sulla slate Pannelli
+Fusion calcola 18 Text+ e 20 Merge invece di 58 e 69.
+
+## Frame lines, safe area e pallino finale
+
+Scheda **Guide**. Sono disegnate nel generatore, **sotto i testi** della slate e
+sotto il countdown (e quindi sotto la taratura), e seguono dal vivo la timeline:
+- **Formato della timeline** e formati 1.33, 1.66, 1.78, 1.85, 2.00, 2.20, 2.39:
+  letterbox o pillarbox in automatico, area attiva a **pixel interi e pari**;
+- ogni linea ha l'etichetta con **formato e risoluzione reale in quella
+  timeline**, per esempio `2.39:1 · 1920 × 804` su 1920×1080, `1.85:1 · 3552 × 1920`
+  su 2:1;
+- safe action 93% e safe title 90%;
+- spunte **Sulla slate** e **Sul countdown**. Di default nessuna guida è attiva.
+
+**Pallino sull'ultimo fotogramma**: il fotogramma prima del FFOA mostra un pallino
+(in alto a destra come i cue mark della pellicola, al centro o in alto a sinistra;
+diametro in % dell'altezza) per dire che il programma parte al fotogramma dopo.
+Spento di default: per gli standard di consegna Genera ricorda che è previsto nero
+fino al FFOA, ma lo lascia se lo vuoi.
 
 ## Countdown e taratura
 
@@ -103,8 +133,10 @@ un PNG statico sopra il countdown:
 - sfera sfumata per il contouring;
 - bianco di picco e bianchi vicini al clip;
 - neri (PLUGE 2/4/8%);
-- etichette fps, risoluzione e formato;
-- frame lines dei formati scelti e safe area.
+- etichette fps, risoluzione e formato.
+
+Frame lines e safe area non sono più nel PNG: stanno nel generatore, sotto i
+testi (vedi sopra).
 
 ## Standard inclusi
 
@@ -170,7 +202,10 @@ Il burn-in legge da Resolve, clip per clip:
 - sound roll e TC dell'audio sotto (per verificare il sync);
 - spazio colore del progetto.
 
-Record TC e contatore fotogrammi sono calcolati a ogni fotogramma. La **fase di
+Record TC e contatore fotogrammi sono calcolati a ogni fotogramma. Il segmento del
+fotogramma si trova con una **ricerca binaria** su un indice scritto da Aggiorna
+(anche con migliaia di tagli ogni fotogramma legge una sola riga), in 4 Text+ (uno
+per angolo). La **fase di
 lavoro** sceglie i campi, che restano modificabili:
 
 | Fase | Campi |
@@ -184,7 +219,9 @@ lavoro** sceglie i campi, che restano modificabili:
 | Suono / mix / VO / doppiaggio | Record TC anche grande, contatore del programma, titolo, versione |
 | Approvazione cliente | Record TC, titolo, versione, data, watermark con destinatario |
 
-**Mascherino** (scheda Aspetto del burn-in):
+**Mascherino** (scheda Aspetto del burn-in). Di default **nessun mascherino e
+nessuna banda**: i dati stanno ai bordi del quadro della timeline, qualunque sia
+(16:9, 2:1, 4:3, DCI…).
 - **Preset**: 1.33, 1.37 Academy, 1.43 IMAX, 1.66, 1.78, 1.85 Flat, 1.90, 2.00,
   2.20, 2.35, 2.39 Scope, 2.76, oppure un rapporto personalizzato con lo slider.
 - **Sulla timeline vera**: il mascherino è calcolato sul rapporto reale della
@@ -196,8 +233,9 @@ lavoro** sceglie i campi, che restano modificabili:
   due righe, i dati diventano una riga sola, ridotta quanto basta.
 - **Pillarbox**: se il formato è più stretto (es. 1.33 su una timeline 2:1 o
   2.39), le bande stanno ai lati e i dati vanno lì.
-- **Formato nativo**: senza mascherino, i dati stanno in bande proprie
-  semitrasparenti o dentro l'immagine (safe 90%).
+- **Formato nativo**: senza mascherino, i dati stanno ai bordi o dentro
+  l'immagine (safe 90%); le **bande semitrasparenti** dietro ai dati sono una
+  spunta, spenta di default.
 
 L'altezza del testo è una percentuale del quadro, quindi resta la stessa su
 16:9, 2:1 e DCI. I dati sono **allineati ai bordi** (sinistra e destra). Se in
@@ -220,8 +258,11 @@ ricostruisci con `python3 tools/build_fx.py`. Ogni preset contiene:
 
 ```
 fx/standards.json     standard, categorie, slot
-fx/engine.lua         motore dei bottoni (Genera, Rimuovi, Aggiorna burn-in)
-fx/overlay.lua        immagini PNG (taratura, frame lines, quadranti) in Lua puro
+fx/engine_common.lua  motore dei bottoni, parte comune (Rimuovi incorpora solo questa)
+fx/engine_burnin.lua  lettura dei metadati e indice del burn-in (Aggiorna, Genera)
+fx/engine.lua         Genera
+fx/image.lua          logo e titolo in PNG nei Loader (Scegli..., Genera)
+fx/overlay.lua        immagini PNG (taratura, quadranti) in Lua puro
 tools/build_fx.py     costruisce dist/LeaderKit-<versione>.drfx (generatori Fusion)
 tools/preview_fx.py   anteprima approssimata di un fotogramma (Pillow)
 tests/                pytest; espressioni e motore eseguiti in Lua 5.4 su comp e timeline simulati
@@ -245,17 +286,24 @@ La prima versione, uno script Python da Workspace › Scripts, è documentata in
 ## Da verificare in Resolve
 
 Verificato in Resolve Studio 21.1 fino alla 0.8: resa, schede, Genera, bip,
-taratura PNG a piena risoluzione e geometria su 2:1. Da confermare sul campo:
+taratura PNG a piena risoluzione e geometria su 2:1. Da confermare sul campo
+(la 0.11 è testata solo su comp e timeline simulati):
 
-1. Riproduzione fluida con i quattro stili di slate: i Dissolve devono
-   calcolare solo la parte visibile.
-2. Ancoraggio a sinistra e a destra dei testi Text+ (burn-in, stili Quadrante e
-   Orologio).
-3. Loghi e titolo PNG: posizione e durata sulla slate e sulla coda.
-4. Coda su timeline vuota con slot lunghi (es. DCP 90': coda a 02:30:08:00).
-5. Burn-in: inserimento automatico con le altre tracce bloccate e nomi dei
+1. Fluidità di slate, countdown e burn-in (Dissolve come interruttori, maschere
+   in catena con l'ingresso EffectMask, elaborazione a 8 bit).
+2. Logo e titolo in PNG nei nodi Loader: bottone **Scegli…** (selettore
+   FileBrowse di Fusion), immagine tenuta per tutta la durata del clip,
+   grandezza con il Size del Merge (pixel del file × Size).
+3. Ancoraggio a sinistra e a destra dei testi Text+ (tabelle dei pannelli,
+   etichette delle guide, burn-in) e interlinea dei testi a più righe.
+4. Spessore dei contorni delle frame lines (BorderWidth dei RectangleMask).
+5. Coda su timeline vuota con slot lunghi (es. DCP 90': coda a 02:30:08:00).
+6. Burn-in: inserimento automatico con le altre tracce bloccate e nomi dei
    metadati delle varie camere (Scene, Take, Camera #, Reel Name, Sound Roll #…).
-6. Voci nascoste in base allo standard e data automatica all'export.
+7. Voci nascoste in base allo standard e data automatica all'export.
+
+Per la riproduzione in tempo reale di blocchi lunghi conviene anche la cache di
+Resolve: Riproduzione › Render Cache › Smart.
 
 ## Roadmap
 

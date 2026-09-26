@@ -38,8 +38,12 @@ def pt(v, d=(0.5, 0.5)):
     return d
 
 
+LOADER_KEYS = {"Logo1Ld": "Logo", "Logo2Ld": "Logo2", "TitleLd": "TitleImage"}
+
+
 class Renderer(object):
-    def __init__(self, data, w, h):
+    def __init__(self, data, w, h, files=None):
+        self.files = files or {}               # file dei Loader (dai parametri Logo=..., TitleImage=...)
         self.tools = data["tools"]
         self.w, self.h = w, h
         self.cache = {}
@@ -84,7 +88,7 @@ class Renderer(object):
             if not solid:
                 inner = (np.abs(rx) <= mw / 2 - bw) & (np.abs(ry) <= mh / 2 - bw)
                 inside = inside & ~inner
-        a = inside.astype(np.float32)
+        a = inside.astype(np.float32) * num(self.inp(name, "Level"), 1)
         soft = num(self.inp(name, "SoftEdge"), 0)
         if soft > 0:
             img = Image.fromarray((a * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(soft * self.w / 2))
@@ -123,6 +127,8 @@ class Renderer(object):
             b = self.image(bg) if bg else out
             f = self.image(fg) if fg else out
             k = num(self.inp(name, "Blend"), 1.0)
+            if fg and self.tools[fg]["kind"] == "Loader":
+                f = self.place(fg, self.inp(name, "Center"), num(self.inp(name, "Size"), 1.0))
             out = b * (1 - f[..., 3:4] * k) + f * k
         elif kind == "Dissolve":
             k = num(self.inp(name, "Mix"), 0.0)
@@ -149,6 +155,23 @@ class Renderer(object):
         self.cache[("i", name)] = out
         return out
 
+    def place(self, loader, center, size):
+        """Immagine del Loader alla sua grandezza in pixel x Size, centrata in Center (come il Merge di Fusion)."""
+        out = np.zeros((self.h, self.w, 4), np.float32)
+        path = self.files.get(LOADER_KEYS.get(loader, ""), "")
+        if not path or not os.path.exists(path):
+            return out
+        img = Image.open(path).convert("RGBA")
+        scale = self.w / float(self.base_w) if getattr(self, "base_w", None) else 1.0
+        iw, ih = max(1, int(img.width * size * scale)), max(1, int(img.height * size * scale))
+        img = img.resize((iw, ih), Image.LANCZOS)
+        cx, cy = pt(center)
+        canvas = Image.new("RGBA", (self.w, self.h), (0, 0, 0, 0))
+        canvas.paste(img, (int(round(cx * self.w - iw / 2)), int(round((1 - cy) * self.h - ih / 2))))
+        a = np.asarray(canvas).astype(np.float32) / 255
+        a[..., :3] *= a[..., 3:4]
+        return a
+
     def text(self, name):
         s = str(self.inp(name, "StyledText", "") or "")
         out = np.zeros((self.h, self.w, 4), np.float32)
@@ -156,13 +179,14 @@ class Renderer(object):
             return out
         size = num(self.inp(name, "Size"), 0.08)
         bold = (self.inp(name, "Style") or "Bold") not in ("Regular", "Light")
-        font = ImageFont.truetype(FONTS[0] if bold else FONTS[1], max(6, int(size * self.w * 0.55)))
+        # modello di Text+ usato da LeaderKit: maiuscole alte Size * larghezza / 2 (cap_size in build_fx)
+        font = ImageFont.truetype(FONTS[0] if bold else FONTS[1], max(6, int(size * self.w * 0.5 / 0.729)))
         cx, cy = pt(self.inp(name, "Center"))
         spacing = num(self.inp(name, "LineSpacing"), 1.0)
         img = Image.new("L", (self.w, self.h), 0)
         d = ImageDraw.Draw(img)
         lines = s.split("\n")
-        lh = font.size * 1.2 * spacing
+        lh = font.size * 1.362 * spacing          # interlinea di Open Sans (ascendente + discendente)
         total = lh * len(lines)
         y0 = (1 - cy) * self.h - total / 2
         anchor = num(self.inp(name, "HorizontalLeftCenterRight"), 0)   # -1 sinistra, 0 centro, 1 destra
@@ -192,7 +216,9 @@ def dump(setting, fps, w, h, frames, t, extra):
 def render(setting, fps=24, w=1920, h=1080, frames=432, t=0, extra=(), scale=1.0):
     data = dump(setting, fps, w, h, frames, t, extra)
     rw, rh = int(w * scale), int(h * scale)
-    r = Renderer(data, rw, rh)
+    files = dict(x.split("=", 1) for x in extra if "=" in x)
+    r = Renderer(data, rw, rh, files)
+    r.base_w = w
     img = r.image(data["output"])
     # sotto: grigio-blu dove l'uscita e' trasparente (per vedere burn-in e mascherino)
     under = np.array([0.27, 0.35, 0.47], dtype=np.float32)

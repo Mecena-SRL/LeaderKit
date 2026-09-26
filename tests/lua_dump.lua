@@ -20,7 +20,8 @@ for k, v in pairs(grp.Tools.LK.Inputs or {}) do
 end
 for i = 7, #arg do
   local k, v = arg[i]:match("([^=]+)=(.*)")
-  if tonumber(v) then LK[k] = tonumber(v) else LK[k] = textval(v) end
+  -- i campi di testo del pannello restano testo anche se il valore sembra un numero
+  if tonumber(v) and type(LK[k]) ~= "table" then LK[k] = tonumber(v) else LK[k] = textval(v) end
 end
 local comp = { RenderStart = 0, RenderEnd = N - 1 }
 function comp:GetPrefs(k)

@@ -2,7 +2,8 @@
 
 Le espressioni vengono estratte dal .setting ed eseguite fotogramma per
 fotogramma con lua5.4 e un comp simulato (tests/lua_harness.lua); il motore
-(fx/engine.lua) gira su un Resolve simulato (tests/engine_harness.lua).
+(fx/engine*.lua) gira su un Resolve simulato (tests/engine_harness.lua).
+Gli interruttori sono Dissolve: Mix 1 = ramo visibile (e calcolato), 0 = ramo spento.
 """
 
 import os
@@ -73,18 +74,18 @@ def test_head_cinema(built, fps, nominal, w, h):
     for r in rows:
         rem = n - r["t"]
         assert on(r, "MSlate.Mix") == (10 * nominal < rem <= 18 * nominal)
-        assert on(r, "MPicStart.Blend") == (rem == 8 * nominal)
+        assert on(r, "MPicStart.Mix") == (rem == 8 * nominal)
         assert on(r, "MLeader.Mix") == (2 * nominal <= rem <= 8 * nominal)
-        assert not on(r, "MBars.Mix") and not on(r, "MFlash.Blend")
+        assert not on(r, "MBars.Mix") and not on(r, "MFlash.Mix")
         digit = r["LDigit.StyledText"]
         if 2 * nominal < rem < 8 * nominal:
             assert digit == str(-(-rem // nominal))
-            assert on(r, "LM4.Blend")
+            assert on(r, "LArmG.Mix")
         elif rem == 2 * nominal:
-            assert digit == "2" and not on(r, "LM4.Blend")
+            assert digit == "2" and not on(r, "LArmG.Mix")
         else:
             assert digit == ""
-        assert not on(r, "MWarn.Blend")
+        assert not on(r, "MWarn.Mix") and not on(r, "MEndDot.Mix") and not on(r, "MGuides.Mix")
     # in Resolve l'altezza dei RectangleMask e' relativa all'altezza dell'immagine:
     # il braccio lungo quanto il raggio (0.18 della larghezza) vale 0.18 * W / H
     assert abs(float(rows[0]["LArm.Height"]) - 0.18 * w / h) < 1e-3
@@ -99,9 +100,9 @@ def test_head_dpp(built):
         assert on(r, "MSlate.Mix") == (75 < rem <= 250)
         assert not on(r, "MLeader.Mix")
         # sync DPP: 2 fotogrammi bianchi a 09:59:57:06 = 69 fotogrammi prima del FFOA
-        assert on(r, "MFlash.Blend") == (rem in (69, 68)), rem
-        assert not on(r, "MWarn.Blend")
-    assert on(rows[300], "SM4.Blend")      # orologio visibile nella slate
+        assert on(r, "MFlash.Mix") == (rem in (69, 68)), rem
+        assert not on(r, "MWarn.Mix")
+    assert on(rows[300], "SClock.Mix")     # orologio visibile nella slate
     assert rows[n - 100]["CkDigit.StyledText"] == "4"
     assert "BROADCAST UK" in rows[300]["SHeading.StyledText"]
 
@@ -109,7 +110,7 @@ def test_head_dpp(built):
 def test_head_flash_scales_with_fps(built):
     n = 30 * 50
     rows = frames(HEAD(built, "broadcast"), 50, 1920, 1080, n, idx("broadcast", "dpp_uk"), cd=0)
-    flash = [n - r["t"] for r in rows if on(r, "MFlash.Blend")]
+    flash = [n - r["t"] for r in rows if on(r, "MFlash.Mix")]
     assert flash == [138, 137, 136, 135]   # 09:59:57:12 @50, 4 fotogrammi (variante SVT)
 
 
@@ -119,15 +120,14 @@ def test_head_rai(built):
     for r in rows:
         rem = n - r["t"]
         assert on(r, "MSlate.Mix") == (rem > 75)
-        assert not on(r, "MLeader.Mix") and not on(r, "MPicStart.Blend") and not on(r, "MFlash.Blend")
+        assert not on(r, "MLeader.Mix") and not on(r, "MPicStart.Mix") and not on(r, "MFlash.Mix")
     assert "LOUDNESS -23,0 LUFS" in rows[0]["SFoot.StyledText"]
-    fmt = [v for k, v in rows[0].items() if k.startswith("SV2_") and k.endswith("StyledText") and "1920 x 1080" in v]
-    assert fmt and "1.78:1" in fmt[0]
+    assert "1920 × 1080   1.78:1" in rows[0]["SVal2.StyledText"]
 
 
 def test_head_length_hint(built):
     rows = frames(HEAD(built), 24, 1920, 1080, 120, idx("cinema", "cinema_dcp"))
-    assert all(on(r, "MWarn.Blend") for r in rows)
+    assert all(on(r, "MWarn.Mix") for r in rows)
     assert "diventa di 18 secondi" in rows[0]["Warn.StyledText"]
     rows = frames(HEAD(built, "broadcast"), 25, 1920, 1080, 120, idx("broadcast", "dpp_uk"), cd=0)
     assert "diventa di 30 secondi" in rows[0]["Warn.StyledText"]
@@ -137,7 +137,7 @@ def test_slate_text(built):
     rows = frames(HEAD(built), 23.976, 1920, 1080, 480, idx("cinema", "cinema_dcp"))
     r = rows[0]
     assert r["SDirector.StyledText"] == "DIRECTED BY   REGISTA"
-    assert any(v == "23.976 fps" for k, v in r.items() if k.startswith("SV2_"))
+    assert "23.976 fps" in r["SVal2.StyledText"].split("|")
     assert "FFOA 01:00:08:00" in r["SFoot.StyledText"]
     assert r["STitle.StyledText"] == "IL FILM"
 
@@ -147,12 +147,12 @@ def test_tail(built, fps, nominal):
     n = 8 * nominal
     rows = frames(TAIL(built), fps, 1920, 1080, n, 0, tail=(1, 0, 4, 7))
     for r in rows:
-        assert on(r, "MPop.Blend") == (r["t"] == 2 * nominal - 1)
-        assert on(r, "MCard.Blend") == (4 * nominal <= r["t"] < 7 * nominal)
-        assert not on(r, "MFlash.Blend")
+        assert on(r, "MPop.Mix") == (r["t"] == 2 * nominal - 1)
+        assert on(r, "MCard.Mix") == (4 * nominal <= r["t"] < 7 * nominal)
+        assert not on(r, "MFlash.Mix") and not on(r, "TLogo1.Mix")
     rows = frames(TAIL(built), fps, 1920, 1080, n, 0, tail=(0, 1, 0, 0))
-    assert [r["t"] for r in rows if on(r, "MFlash.Blend")] == [2 * nominal - 1]
-    assert not any(on(r, "MPop.Blend") or on(r, "MCard.Blend") for r in rows)
+    assert [r["t"] for r in rows if on(r, "MFlash.Mix")] == [2 * nominal - 1]
+    assert not any(on(r, "MPop.Mix") or on(r, "MCard.Mix") for r in rows)
 
 
 @pytest.fixture(scope="module")
@@ -319,9 +319,12 @@ def test_single_generator_and_visibility(built):
         assert name in text
     import re
     scripts = re.findall(r'INPS_ExecuteOnChange = ("(?:[^"\\]|\\.)*")', text)
-    assert len(scripts) == 2                                  # Standard e Durata programma
+    assert len(scripts) == 5                                  # Standard, Durata, titolo PNG e due loghi
     assert "INPB_IC_Visible" in text and 'vis(\\"SlotTV\\"' in text
-    assert 'INPID_InputControl = \"FileControl\"' in text   # logo da file
+    for key in ("LogoPick", "Logo2Pick", "TitlePick"):             # bottoni "Scegli..." (selettore di Fusion)
+        assert "%s = {" % key in text and "FileBrowse" in text
+    for ld in ("Logo1Ld", "Logo2Ld", "TitleLd"):
+        assert "%s = Loader {" % ld in text
     assert "DateToday" in text and "DateAuto" in text
 
 
@@ -338,26 +341,79 @@ def test_spot_empty_timeline_container(code):
 def test_slate_only_filled_fields(built):
     rows = frames(HEAD(built), 24, 1920, 1080, 18 * 24, idx("cinema", "cinema_dcp"))
     r = rows[0]
-    labels = [v for k, v in r.items() if k.startswith("SL") and k.endswith("StyledText") and v]
-    assert "EDITOR" in labels and "PRODUCER" not in labels and "CLIENT" not in labels and "PHASE" not in labels
-    # i campi compilati sono impacchettati: il primo della colonna POST sta in alto a sinistra
-    ed = [k for k, v in r.items() if k.startswith("SV1_") and k.endswith("StyledText") and v == "Montatore"][0]
-    cx, cy = map(float, r[ed.replace("StyledText", "Center")].split(","))
-    assert abs(cx - (0.5 - 0.072)) < 1e-6 and abs(cy - (0.54 - 0.033)) < 1e-6
+    labels = r["SLab1.StyledText"].split("|")
+    assert labels == ["EDITOR", "COLORIST", "VERSION"]              # solo i campi compilati, nell'ordine
+    assert r["SVal1.StyledText"].split("|") == ["Montatore", "Colorista", "v1"]
+    assert "PRODUCER" not in r["SLab0.StyledText"] and "CLIENT" not in r["SLab0.StyledText"]
+    # etichette e valori: stessa grandezza e stesso centro verticale (righe allineate)
+    assert r["SLab1.Size"] == r["SVal1.Size"]
+    assert r["SLab1.Center"].split(",")[1] == r["SVal1.Center"].split(",")[1]
 
 
-def test_generator_is_light(built):
-    """Taratura e frame lines non sono piu' nodi Fusion (erano la causa dei 2.5 fps)."""
+def render_path(tools, output):
+    """Nodi che Fusion calcola davvero: i Dissolve con Mix 0 o 1 richiedono un solo ingresso."""
+    import collections
+    seen = set()
+
+    def link(v):
+        return v["link"] if isinstance(v, dict) and "link" in v else None
+
+    def visit(n):
+        if not n or n in seen or n not in tools:
+            return
+        seen.add(n)
+        t = tools[n]
+        if t["kind"] == "Dissolve":
+            mix = t["inputs"].get("Mix", 0)
+            if mix < 1:
+                visit(link(t["inputs"]["Background"]))
+            if mix > 0:
+                visit(link(t["inputs"]["Foreground"]))
+            return
+        for v in t["inputs"].values():
+            visit(link(v))
+    visit(output)
+    return collections.Counter(tools[n]["kind"] for n in seen)
+
+
+def dump_full(setting, fps, w, h, frames_, t, **kw):
+    import json
+    args = [LUA, os.path.join(ROOT, "tests", "lua_dump.lua"), setting, str(fps), str(w), str(h), str(frames_), str(t)]
+    args += ["%s=%s" % kv for kv in kw.items()]
+    out = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert out.returncode == 0, out.stderr.decode()
+    return json.loads(out.stdout.decode())
+
+
+FULL = dict(Production="Mecena", Producer="P", Client="C", Agency="A", Code="X1", Episode="1", Language="IT",
+            Director="Regista", Editor="E", Colorist="Co", Sound="S", VFXBy="V", Phase=2, StColor=2, StSound=1,
+            StVFX=1, StMusic=2, StTitles=1, Note="nota", AudioFormat="5.1", ColorInfo="Rec.709")
+
+
+@pytest.mark.parametrize("style", [0, 1, 2, 3])
+def test_generator_is_light(built, style):
+    """Budget per fotogramma: prima la slate Pannelli calcolava 58 Text+, 69 Merge e 12 Background."""
+    d = dump_full(HEAD(built), 24, 3840, 2160, 432, 40, SlateStyle=style, **FULL)
+    c = render_path(d["tools"], d["output"])
+    assert c["TextPlus"] <= 20 and c["Merge"] <= 22 and c["Background"] <= 5, c
+    # countdown: cerchi e croce in un solo Background
+    d = dump_full(HEAD(built), 24, 3840, 2160, 432, 300, **FULL)
+    c = render_path(d["tools"], d["output"])
+    assert c["TextPlus"] <= 2 and c["Background"] <= 3 and c["Merge"] <= 4, c
+    # nero prima del programma: solo lo sfondo
+    d = dump_full(HEAD(built), 24, 3840, 2160, 432, 430, **FULL)
+    c = render_path(d["tools"], d["output"])
+    assert c.get("TextPlus", 0) == 0 and c["Background"] == 1 and c.get("Merge", 0) == 0, c
+
+
+def test_setting_size_and_prefs(built):
+    """Meno testo nel comp (piu' leggero da salvare) e comp:GetPrefs mai ripetuto nella stessa espressione."""
     text = open(HEAD(built)).read()
-    tools = [t for t in re.findall(r"^\t\t\t\t(\w+) = (\w+) \{", text, re.M) if not t[1].startswith("Instance")]
-    assert len(tools) < 340, len(tools)
-    # slate, barre e countdown si alternano con Dissolve (Fusion calcola solo l'ingresso attivo)
-    assert ("MSlate", "Dissolve") in tools and ("MLeader", "Dissolve") in tools
-    assert all(("SStyle%d" % i, "Dissolve") in tools for i in (1, 2, 3))      # stili alternativi della slate
-    names = [t[0] for t in tools]
-    assert not any(n.startswith(("St", "Rp", "FL", "Cal", "Pan", "Grey")) for n in names if n != "LK")
-    for key in ("CalOn", "CalStars", "FL185", "Guides", "SafeAction"):     # restano come opzioni per Genera
-        assert "%s = {" % key in text
+    assert len(text) < 520000, len(text)
+    assert build_fx.engine("remove").count("\n") < 400             # Rimuovi non incorpora tutto il motore
+    for expr in re.findall(r'Expression = "((?:[^"\\]|\\.)*)"', text):
+        for key in ("Rate", "Width", "Height"):
+            assert expr.count('Comp.FrameFormat.%s' % key) <= 1, expr[:120]
 
 
 def test_engine_overlay_on_countdown(built, code):
@@ -373,47 +429,59 @@ def test_engine_overlay_on_countdown(built, code):
     assert im.size == (3840, 1920) and im.mode == "RGBA"
     px = im.load()
     assert px[1920, 960 - 200][3] == 0                      # centro trasparente (il countdown resta visibile)
-    x0 = round((3840 - 1920 * 1.85) / 2)                    # frame line 1.85 sul raster 2:1
-    assert px[x0 + 1, 1850][3] == 255 and px[x0 - 3, 1850][3] == 0
-    y0 = round((1920 - 3840 / 2.39) / 2)                    # frame line 2.39: bordo superiore
-    assert px[1920, y0 + 1][3] == 255 and px[1920, y0 - 3][3] == 0
+    # niente frame lines nel PNG: sono nel generatore, sotto i testi
+    y0 = round((1920 - 3840 / 2.39) / 2)
+    assert px[1920, y0 + 1][3] == 0
 
 
-def test_engine_still_tiling(built, code, tmp_path):
-    """Se Resolve accorcia le immagini fisse, taratura e logo vengono ripetuti fino a coprire lo spazio."""
-    from PIL import Image
-    logo = tmp_path / "logo.png"
-    Image.new("RGBA", (40, 20), (255, 0, 0, 255)).save(logo)
-    res, _ = run_engine(code, res="960x540", stilldur="48", logo=str(logo))
+def test_engine_still_tiling(built, code):
+    """Se Resolve accorcia le immagini fisse, la taratura viene ripetuta fino a coprire lo spazio."""
+    res, _ = run_engine(code, res="960x540", stilldur="48")
     gfx = res["gfx"]
     assert sum(int(v.split("|")[1]) for v in gfx) == 6 * 24 + 1 and len(gfx) == 4
-    logos = res["logo"]
-    assert sum(int(v.split("|")[1]) for v in logos) == 8 * 24 + 8 * 24      # slate + coda
-    assert all(v.endswith("|0.2") for v in logos)
 
 
 def test_inspector_pages(built):
     text = open(HEAD(built, "cinema")).read()
-    for page in ("Progetto", "Produzione", "Post", "Tecnico", "Aspetto", "Taratura"):
+    for page in build_fx.PAGES:
         assert 'Page = "%s"' % page in text and 'ICS_ControlPage = "%s"' % page in text
-    import re
+    for page in ("Produzione", "Post", "Taratura"):                   # schede della 0.10 accorpate
+        assert 'Page = "%s"' % page not in text
     inst = re.findall(r"InstanceInput \{[^}]*\}", text)
     assert inst and all("Page = " in i for i in inst)
+    # gli input di servizio non sono pubblicati
+    for key in build_fx.HIDDEN_NUM:
+        assert 'Source = "%s"' % key not in text
 
 
 def test_engine_logo_and_colorinfo(code, tmp_path):
+    from PIL import Image
     logo = tmp_path / "logo.png"
-    logo.write_bytes(b"\x89PNG fake")
+    Image.new("RGBA", (400, 100), (255, 0, 0, 255)).save(logo)
     res, log = run_engine(code, fps="24", df="0", preset="cinema_dcp", head=5, progstart=18, program=60,
                           logo=str(logo))
-    logos = res["logo"]
-    # sopra la slate, 8"; file non PNG: riquadro 20% x 10% della larghezza con le proporzioni del quadro
-    assert logos[0].startswith("00:59:50:00|192|0.1777")
-    assert len(logos) == 2                                    # anche sulla coda
+    loaders = [v.split("|") for v in res["loader"]]
+    # il logo e' caricato nel Loader del blocco ricreato e in quello della coda, con le dimensioni del PNG
+    head = [x for x in loaders if x[0] == "LeaderKit Head" and x[1] == "Logo1Ld"]
+    tail = [x for x in loaders if x[0] == "LeaderKit Tail" and x[1] == "Logo1Ld"]
+    assert head and head[0][2:5] == [str(logo), "400", "100"] and head[0][5] == "1000000"
+    assert tail and tail[0][2:5] == [str(logo), "400", "100"]
+    assert "Logo sulla slate e sulla coda: logo.png, 400x100 px." in log
+    assert "LeaderKit Logo" not in " ".join(res.get("track", []))       # niente piu' tracce per i loghi
     assert "Rec.709 Gamma 2.4" in res["colorinfo"][0]
+    # senza "anche sulla coda" la coda resta senza logo
+    res, log = run_engine(code, fps="24", df="0", preset="cinema_dcp", head=5, progstart=18, program=60,
+                          logo=str(logo), logotail="0")
+    assert not [v for v in res["loader"] if v.startswith("LeaderKit Tail|Logo1Ld")]
+    assert [v for v in res["loader"] if v.startswith("LeaderKit Head|Logo1Ld")]
     res, log = run_engine(code, fps="24", df="0", preset="cinema_dcp", head=5, progstart=18, program=60,
                           logo="/non/esiste.png")
-    assert "Logo non trovato" in log
+    assert "Logo non trovato: /non/esiste.png" in log
+    bad = tmp_path / "logo.psd"
+    bad.write_bytes(b"8BPS not an image we can read")
+    res, log = run_engine(code, fps="24", df="0", preset="cinema_dcp", head=5, progstart=18, program=60,
+                          logo=str(bad))
+    assert "Logo: formato non leggibile" in log
 
 
 def test_engine_dcp_90_empty_timeline_tail(code):
@@ -502,20 +570,23 @@ def dump_tools(setting, fps, w, h, frames_, t, **kw):
 
 
 def test_burnin_matte(built):
-    """Timeline 16:9 con mascherino 2.39: dati nelle bande nere; formato nativo: bande proprie semitrasparenti."""
+    """Timeline 16:9 con mascherino 2.39: dati nelle bande nere; senza mascherino niente bande (default)."""
     setting = os.path.join(built, "LeaderKit Burn-in.setting")
     seg = "86400|86880|1000|1|24|0|-1|0|IL FILM~|CLIP~|SRC {SRC}~|REC {REC}~~{REC}"
     t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=11)
     lb = (1 - (1920 / 1080) / 2.39) / 2
-    assert abs(t["MatTM"]["Height"] - lb) < 1e-3 and t["MatT"]["TopLeftAlpha"] == 1
-    assert t["BandT"]["TopLeftAlpha"] == 0                       # niente bande proprie: c'e' il mascherino
-    assert 1 - lb < t["T11"]["Center"][1] < 1 and t["T11"]["StyledText"] == "IL FILM"
-    assert 0 < t["T41"]["Center"][1] < lb and t["T41"]["StyledText"] == "REC 01:00:00:00"
-    t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=0)
-    assert t["MatTM"]["Height"] == 0 and t["BandT"]["TopLeftAlpha"] == 0.75
+    assert abs(t["MatTM"]["Height"] - lb) < 1e-3 and t["GMat"]["Mix"] == 1 and t["Mat"]["TopLeftAlpha"] == 1
+    assert t["GBand"]["Mix"] == 0                                # niente bande proprie: c'e' il mascherino
+    assert 1 - lb < t["T1"]["Center"][1] < 1 and t["T1"]["StyledText"] == "IL FILM"
+    assert 0 < t["T4"]["Center"][1] < lb and t["T4"]["StyledText"] == "REC 01:00:00:00"
+    # default: nessun mascherino e nessuna banda (prima c'erano bande semitrasparenti sempre accese)
+    t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24)
+    assert t["GMat"]["Mix"] == 0 and t["GBand"]["Mix"] == 0
+    t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BBands=1)
+    assert t["GBand"]["Mix"] == 1 and t["Band"]["TopLeftAlpha"] == 0.6
     # su una timeline 2.39 nativa il mascherino 2.39 non serve
     t = dump_tools(setting, 24, 4096, 1716, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=11)
-    assert t["MatTM"]["Height"] == 0 and t["BandT"]["TopLeftAlpha"] == 0.75
+    assert t["MatTM"]["Height"] == 0 and t["GMat"]["Mix"] == 0
 
 
 def test_burnin_matte_presets_and_custom(built):
@@ -544,39 +615,47 @@ def test_slate_styles_switch(built):
             assert t["SStyle%d" % i]["Mix"] == (1 if i == st else 0)
     t = dump_tools(head, 24, 1920, 1080, 432, 40, SlateStyle=1, Title="Juna", Director="Janicel Diaz")
     assert t["BTitle"]["StyledText"] == "JUNA" and t["BTitle"]["HorizontalLeftCenterRight"] == -1
-    assert t["BI1"]["StyledText"] == "DIRECTOR   Janicel Diaz"
+    assert t["BInfo"]["StyledText"].split("\n")[0] == "DIRECTOR   Janicel Diaz"
     assert t["BFrames"]["StyledText"] == str(432 - 40)
+    # titolo in PNG caricato (dimensioni note): il titolo di testo sparisce e l'immagine va nel riquadro
+    t = dump_tools(head, 24, 1920, 1080, 432, 40, SlateStyle=0, Title="Juna", TitleImage="/x/titolo.png",
+                   TitleW=800, TitleH=200)
+    assert t["STitle"]["StyledText"] == "" and t["STitleImg"]["Mix"] == 1
+    # PNG indicato ma non caricato: resta il titolo di testo
     t = dump_tools(head, 24, 1920, 1080, 432, 40, SlateStyle=0, Title="Juna", TitleImage="/x/titolo.png")
-    assert t["STitle"]["StyledText"] == ""
+    assert t["STitle"]["StyledText"] == "JUNA" and t["STitleImg"]["Mix"] == 0
 
 
 def test_engine_style_dial_and_title_png(built, code, tmp_path):
     from PIL import Image
     title = tmp_path / "titolo.png"
     Image.new("RGBA", (800, 200), (255, 255, 255, 255)).save(title)
-    res, _ = run_engine(code, res="1920x1080", style="1", titleimg=str(title))
+    res, log = run_engine(code, res="1920x1080", style="1", titleimg=str(title))
     tracks = [v.split("|") for v in res["track"]]
     dial = [t for t in tracks if t[0] == "LeaderKit Grafica" and "Quadrante24" in t[6]]
     assert dial and dial[0][1] == "00:59:50:00" and int(dial[0][2]) == 8 * 24      # sopra la slate
-    tit = [t for t in tracks if t[0] == "LeaderKit Logo Titolo"]
-    assert tit and int(tit[0][2]) == 8 * 24
-    # 800x200 adattato al quadro (f = 2.4) nel riquadro 0.42 W x 0.10 H: limita l'altezza (108 px)
-    z = float(tit[0][3])
-    assert abs(z - 108 / (200 * 2.4)) < 1e-6
-    # ancorato a sinistra a 0.53 W, centro a 0.845 H
-    dw = 800 * 2.4 * z
-    assert abs(float(tit[0][4]) - (0.53 * 1920 + dw / 2 - 960)) < 1e-6
-    assert abs(float(tit[0][5]) - (0.845 * 1080 - 540)) < 1e-6
+    assert not [t for t in tracks if t[0] == "LeaderKit Logo Titolo"]
+    tl = [v.split("|") for v in res["loader"] if v.startswith("LeaderKit Head|TitleLd")]
+    assert tl and tl[0][2:5] == [str(title), "800", "200"]
+
+
+def test_title_png_geometry(built):
+    """Titolo 800x200 nello stile Quadrante: riquadro 0.42 W x 0.10 H ancorato a sinistra a 0.53 W."""
+    t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 40, SlateStyle=1, TitleImage="/x/t.png", TitleW=800, TitleH=200)
+    m = t["STitleImgM1"]
+    s = min(0.42 * 1920 / 800, 0.10 * 1080 / 200)                    # limita l'altezza: 108 px
+    assert abs(m["Size"] - s) < 1e-9
+    assert abs(m["Center"][0] - (0.53 * 1920 + 800 * s / 2) / 1920) < 1e-9 and abs(m["Center"][1] - 0.845) < 1e-9
 
 
 def test_burnin_edge_alignment(built):
     setting = os.path.join(built, "LeaderKit Burn-in.setting")
     seg = "86400|86880|1000|1|24|0|-1|0|IL FILM~|CLIP~|SRC {SRC}~|REC {REC}~~{REC}"
     t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg)
-    assert t["T11"]["HorizontalLeftCenterRight"] == -1 and abs(t["T11"]["Center"][0] - 0.02) < 1e-9
-    assert t["T21"]["HorizontalLeftCenterRight"] == 1 and abs(t["T21"]["Center"][0] - 0.98) < 1e-9
+    assert t["T1"]["HorizontalLeftCenterRight"] == -1 and abs(t["T1"]["Center"][0] - 0.02) < 1e-9
+    assert t["T2"]["HorizontalLeftCenterRight"] == 1 and abs(t["T2"]["Center"][0] - 0.98) < 1e-9
     t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, BAlign=1)
-    assert t["T11"]["HorizontalLeftCenterRight"] == 0 and t["T11"]["Center"][0] == 0.2
+    assert t["T1"]["HorizontalLeftCenterRight"] == 0 and t["T1"]["Center"][0] == 0.2
 
 
 def test_burnin_matte_precise_and_data_inside(built):
@@ -587,21 +666,206 @@ def test_burnin_matte_precise_and_data_inside(built):
     # 2.39 su 1920x1080: immagine 1920x804, bande da 138 px
     t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=names.index("2.39:1 (Scope)"))
     assert abs(t["MatTM"]["Height"] * 1080 - 138) < 1e-6
+    assert t["T1"]["StyledText"] == "IL FILM\n24 fps"                     # banda alta: due righe
     # 1.85 su 16:9: banda di 22 px, troppo bassa per due righe -> una riga sola, dentro la banda
     t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=names.index("1.85:1 (Flat)"))
     lb = t["MatTM"]["Height"]
     assert abs(lb * 1080 - (1080 - 2 * round(1920 / 1.85 / 2)) / 2) < 1e-6
-    assert t["T11"]["StyledText"] == "IL FILM     24 fps" and t["T12"]["StyledText"] == ""
-    assert 1 - lb < t["T11"]["Center"][1] < 1 and 0 < t["T41"]["Center"][1] < lb
-    assert t["BandT"]["TopLeftAlpha"] == 0
+    assert t["T1"]["StyledText"] == "IL FILM     24 fps"
+    assert 1 - lb < t["T1"]["Center"][1] < 1 and 0 < t["T4"]["Center"][1] < lb
+    assert t["GBand"]["Mix"] == 0
     # testo abbastanza piccolo da stare nella banda (cap <= banda / 1.7)
-    assert t["T11"]["Size"] <= 2 * (lb / 1.7) / (1920 / 1080) + 1e-9
+    assert t["T1"]["Size"] <= 2 * (lb / 1.7) / (1920 / 1080) + 1e-9
     # 1.33 su 2:1: pillarbox, dati centrati nelle bande laterali
     t = dump_tools(setting, 24, 3840, 1920, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=names.index("1.33:1 (4:3)"))
     pb = t["MatLM"]["Width"]
-    assert abs(t["T11"]["Center"][0] - pb / 2) < 1e-9 and t["T11"]["HorizontalLeftCenterRight"] == 0
-    assert abs(t["T41"]["Center"][0] - (1 - pb / 2)) < 1e-9
-    assert t["BandT"]["TopLeftAlpha"] == 0
+    assert abs(t["T1"]["Center"][0] - pb / 2) < 1e-9 and t["T1"]["HorizontalLeftCenterRight"] == 0
+    assert abs(t["T4"]["Center"][0] - (1 - pb / 2)) < 1e-9
     # la risoluzione scritta da Genera prevale su quella della composizione
     t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=names.index("2.39:1 (Scope)"), TlW=4096, TlH=2160)
     assert abs(t["MatTM"]["Height"] * 2160 - (2160 - 2 * round(4096 / 2.39 / 2)) / 2) < 1e-6
+
+
+
+
+# ------------------------------------------------------------------ 0.11: guide, pallino, logo, burn-in veloce
+@pytest.mark.parametrize("w,h", [(1920, 1080), (3840, 1920), (1440, 1080), (4096, 1716), (1080, 1920)])
+def test_guides_frame_lines(built, w, h):
+    """Frame lines a pixel interi e pari, con formato e risoluzione reale nella timeline; sotto i testi."""
+    t = dump_tools(HEAD(built), 24, w, h, 432, 40, FLTL=1, FL185=1, FL239=1, FL133=1, SafeTitle=1)
+    lw = max(1, int(h / 1080 * 2 + 0.5))
+    for key, ar in (("FL185", 1.85), ("FL239", 2.39), ("FL133", 4 / 3)):
+        m, lab = t["G%sM" % key], t["G%sT" % key]["StyledText"]
+        if ar > w / h + 0.005:
+            aw, ah = w, 2 * int(w / ar / 2 + 0.5)
+        elif ar < w / h - 0.005:
+            aw, ah = 2 * int(h * ar / 2 + 0.5), h
+        else:
+            aw, ah = w, h
+        assert abs(m["Width"] * w - (aw - lw)) < 1e-6 and abs(m["Height"] * h - (ah - lw)) < 1e-6
+        assert m["Level"] == 1 and abs(m["BorderWidth"] * w - lw) < 1e-6
+        assert lab.endswith("%d × %d" % (aw, ah)) and lab.startswith("%.2f:1" % ar if ar != 4 / 3 else "1.33:1")
+    assert t["GFLTLT"]["StyledText"] == "TIMELINE %.2f:1  ·  %d × %d" % (w / h, w, h)
+    assert t["GSafeTitleT"]["StyledText"] == "SAFE TITLE 90%"
+    assert t["GFL166M"]["Level"] == 0 and t["GFL166T"]["StyledText"] == ""      # formati spenti: niente
+    # etichette dentro il quadro
+    for key in ("FLTL", "FL185", "FL239", "FL133"):
+        x, y = t["G%sT" % key]["Center"]
+        assert 0 < x < 1 and 0 < y < 1
+    # sulla slate il livello delle guide sta sotto i testi: la slate parte da MGuides
+    assert t["MGuides"]["Mix"] == 1 and t["SMP"]["Background"]["link"] == "MGuides"
+
+
+def test_guides_1_85_on_16_9_example(built):
+    t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 40, FL239=1, FL185=1)
+    assert t["GFL239T"]["StyledText"] == "2.39:1  ·  1920 × 804"
+    assert t["GFL185T"]["StyledText"] == "1.85:1  ·  1920 × 1038"
+    cap, pad = 0.014 * 1080, 0.008 * 1080
+    assert t["GFL185T"]["HorizontalLeftCenterRight"] == -1 and abs(t["GFL185T"]["Center"][0] - (2 + pad) / 1920) < 1e-9
+    assert abs(t["GFL239T"]["Center"][0] - (2 + pad + 19 * cap) / 1920) < 1e-9      # affiancata alla 1.85
+    assert abs(t["GFL239T"]["Center"][1] - (1 - (138 + 2 + 0.008 * 1080 + 0.007 * 1080) / 1080)) < 1e-9
+
+
+def test_guides_default_off_and_where(built):
+    rows = frames(HEAD(built), 24, 1920, 1080, 18 * 24, idx("cinema", "cinema_dcp"))
+    assert not any(on(r, "MGuides.Mix") for r in rows)                 # default: nessuna guida (niente "mascherino")
+    t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 40, FL185=1, GuidesSlate=0)
+    assert t["MGuides"]["Mix"] == 0
+    t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 300, FL185=1)       # countdown
+    assert t["MGuides"]["Mix"] == 1 and t["LM1"]["Background"]["link"] == "MGuides"
+    t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 300, FL185=1, GuidesCd=0)
+    assert t["MGuides"]["Mix"] == 0
+
+
+@pytest.mark.parametrize("fps,nominal", [(24, 24), (25, 25), (29.97, 30), (50, 50)])
+def test_end_dot_last_frame(built, fps, nominal):
+    """Pallino solo sull'ultimo fotogramma del leader (il programma parte al successivo), solo se attivo."""
+    n = 18 * nominal
+    t = dump_tools(HEAD(built), fps, 1920, 1080, n, n - 1, EndDot=1)
+    assert t["MEndDot"]["Mix"] == 1
+    assert dump_tools(HEAD(built), fps, 1920, 1080, n, n - 2, EndDot=1)["MEndDot"]["Mix"] == 0
+    assert dump_tools(HEAD(built), fps, 1920, 1080, n, n - 1)["MEndDot"]["Mix"] == 0
+    m = t["EndDotM"]
+    assert abs(m["Width"] - 0.05 * 1080 / 1920) < 1e-9                 # 5% dell'altezza, cerchio
+    assert abs(m["Center"][0] - (1 - 0.09 * 1080 / 1920)) < 1e-9 and abs(m["Center"][1] - 0.91) < 1e-9
+    t = dump_tools(HEAD(built), fps, 1440, 1080, n, n - 1, EndDot=1, EndDotPos=1)
+    assert t["EndDotM"]["Center"] == [0.5, 0.5]
+
+
+def test_engine_end_dot_warning(code):
+    res, log = run_engine(code, fps="24", df="0", preset="cinema_dcp", head=5, progstart=18, program=60, enddot=1)
+    assert "Pallino sull'ultimo fotogramma del leader (01:00:07:23)" in log and "nero fino al FFOA" in log
+    assert "Il programma inizia esattamente al FFOA" in log              # avviso, non blocca nulla
+    res, log = run_engine(code, preset="work_dailies", progstart="6", program="20", enddot=1)
+    assert "nero fino al FFOA" not in log and "il programma parte al fotogramma dopo" in log
+
+
+def test_logo_geometry(built):
+    """Logo 400x100 al 12% in alto a destra: riquadro 230 x 115 px, margini 3.5% / 4%."""
+    t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 40, Logo="/x/l.png", LogoW=400, LogoH=100, LogoSize=12)
+    assert t["SLogo1"]["Mix"] == 1
+    m = t["SLogo1M1"]
+    s = min(0.12 * 1920 / 400, 0.06 * 1920 / 100)
+    assert abs(m["Size"] - s) < 1e-9
+    assert abs(m["Center"][0] - (1920 - 0.035 * 1920 - 400 * s / 2) / 1920) < 1e-9
+    assert abs(m["Center"][1] - (1080 - 0.04 * 1080 - 100 * s / 2) / 1080) < 1e-9
+    # secondo logo in alto a sinistra; senza dimensioni (file non caricato) il gate resta chiuso
+    t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 40, Logo2="/x/l2.png", Logo2W=100, Logo2H=100, Logo="/x/l.png")
+    assert t["SLogo2"]["Mix"] == 1 and t["SLogo1"]["Mix"] == 0
+    assert t["SLogo2M1"]["Center"][0] < 0.5
+    t = dump_tools(TAIL(built), 24, 1920, 1080, 192, 10, Logo="/x/l.png", LogoW=400, LogoH=100)
+    assert t["TLogo1"]["Mix"] == 1
+
+
+def run_lua(code):
+    out = subprocess.run([LUA, "-"], input=code.encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert out.returncode == 0, out.stderr.decode()
+    return out.stdout.decode()
+
+
+def test_image_module(tmp_path):
+    """Dimensioni di PNG e JPEG dall'intestazione; Scegli... imposta percorso, Loader e dimensioni."""
+    from PIL import Image
+    png, jpg = tmp_path / "a.png", tmp_path / "b.jpg"
+    Image.new("RGBA", (321, 123)).save(png)
+    Image.new("RGB", (640, 360)).save(jpg, quality=80)
+    lib = open(os.path.join(ROOT, "fx", "image.lua")).read()
+    out = run_lua(lib + """
+print(LK_IMAGE.size(%r))
+print(LK_IMAGE.size(%r))
+local lk = { v = {} }
+function lk:GetInput(k) return self.v[k] end
+function lk:SetInput(k, x) self.v[k] = x end
+local ld = { inp = {} }
+function ld:SetInput(k, x) self.inp[k] = x end
+local c = {}
+function c:FindTool(n) if n == "Logo1Ld" then return ld end end
+function c:AskUser(t, ctl) assert(ctl[1][2] == "FileBrowse"); return { File = ' "' .. %r .. '" ' } end
+print(LK_IMAGE.pick(c, lk, "Logo", "Logo1Ld", "LogoW", "LogoH", "Logo"), lk.v.Logo == %r, ld.Clip == %r, lk.v.LogoW, lk.v.LogoH,
+  ld.inp.HoldLastFrame)
+lk.v.Logo = ""
+print(LK_IMAGE.sync(c, lk, "Logo", "Logo1Ld", "LogoW", "LogoH"), lk.v.LogoW)
+""" % (str(png), str(jpg), str(png), str(png), str(png)))
+    lines = out.split("\n")
+    assert lines[0] == "321\t123" and lines[1] == "640\t360"
+    assert lines[2] == "ok\ttrue\ttrue\t321\t123\t1000000"
+    assert lines[3].startswith("empty") and lines[3].endswith("0")
+
+
+def test_burnin_index_matches_scan(built, code):
+    """L'indice a record fissi scritto dal motore trova lo stesso segmento della scansione completa."""
+    res, _ = run_engine(code, preset="work_dailies", progstart="6", program="20")
+    idx_ = res["burnidx"][0]
+    seg = burn_of(res)["seg"].replace(" // ", "\n")
+    assert len(idx_) % 18 == 0 and idx_[10:18] == "00000001"
+    setting = os.path.join(built, "LeaderKit Burn-in.setting")
+    for t_ in (0, 5, 479):
+        a = dump_tools(setting, 24, 1920, 1080, 480, t_, Seg=seg, SegIdx=idx_, RecStart=86400, TlFps=24)
+        b = dump_tools(setting, 24, 1920, 1080, 480, t_, Seg=seg, RecStart=86400, TlFps=24)
+        assert [a["T%d" % k]["StyledText"] for k in range(1, 5)] == [b["T%d" % k]["StyledText"] for k in range(1, 5)]
+        assert a["T3"]["StyledText"].startswith("SRC 14:22:")
+
+
+def test_burnin_binary_search_many_segments(built):
+    """Mille tagli: ogni fotogramma trova il suo segmento (ricerca binaria)."""
+    lines, idx_, pos = [], "", 1
+    for i in range(1000):
+        a, b = 86400 + i * 5, 86400 + (i + 1) * 5
+        line = "%d|%d|%d|1|24|0|-1|0|CLIP %d~|~|SRC {SRC}~|REC {REC}~~{REC}" % (a, b, i * 1000, i)
+        idx_ += "%010d%08d" % (a - 86400, pos)
+        pos += len(line) + 1
+        lines.append(line)
+    setting = os.path.join(built, "LeaderKit Burn-in.setting")
+    for f in (0, 4, 5, 2503, 4999):
+        t = dump_tools(setting, 24, 1920, 1080, 5000, f, Seg="\n".join(lines), SegIdx=idx_, RecStart=86400, TlFps=24)
+        assert t["T1"]["StyledText"] == "CLIP %d" % (f // 5)
+    t = dump_tools(setting, 24, 1920, 1080, 6000, 5000, Seg="\n".join(lines), SegIdx=idx_, RecStart=86400, TlFps=24)
+    assert t["T1"]["StyledText"] == ""                                    # oltre l'ultimo segmento
+
+
+def test_burnin_is_light(built):
+    setting = os.path.join(built, "LeaderKit Burn-in.setting")
+    seg = "86400|86880|1000|1|24|0|-1|0|IL FILM~24 fps|CLIP~SC 1|SRC {SRC}~SND x|REC {REC}~FR {FRM}~{REC}"
+    d = dump_full(setting, 24, 3840, 2160, 480, 10, Seg=seg, SegIdx="000000000000000001", RecStart=86400,
+                  BWater=0, TlW=3840, TlH=2160)
+    c = render_path(d["tools"], d["output"])
+    assert c["TextPlus"] <= 4 and c["Background"] == 1 and c["Merge"] <= 4, c
+    text = open(setting).read()
+    assert "GetPrefs" in text                                              # solo come ripiego se manca TlW
+    assert 'Source = "Seg"' not in text                                   # dati dei clip non visibili nell'Inspector
+
+
+@pytest.mark.parametrize("fps,w,h", [(23.976, 1920, 1080), (25, 3840, 1920), (29.97, 1440, 1080), (48, 4096, 1716),
+                                     (59.94, 1080, 1920), (30, 720, 576)])
+def test_every_format_and_rate_evaluates(built, fps, w, h):
+    """Ogni espressione di ogni generatore funziona con qualunque formato e frame rate."""
+    n = 30 * int(fps + 0.5)
+    for style in range(4):
+        for t_ in (0, n // 3, n - 60, n - 1):
+            d = dump_full(HEAD(built), fps, w, h, n, t_, SlateStyle=style, FLTL=1, FL185=1, FL239=1, FL133=1,
+                          SafeAction=1, EndDot=1, Logo="/x.png", LogoW=300, LogoH=300, **FULL)
+            for name, tool in d["tools"].items():
+                if tool["kind"] == "TextPlus":
+                    cx, cy = tool["inputs"]["Center"]
+                    assert -0.01 <= cx <= 1.01 and -0.01 <= cy <= 1.01, (name, cx, cy)
+    dump_full(TAIL(built), fps, w, h, n, n // 2)

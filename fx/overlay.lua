@@ -1,6 +1,7 @@
 -- LeaderKit overlay: immagini statiche (PNG RGBA) alla risoluzione esatta della timeline.
--- Taratura, frame lines, safe area ed etichette sono disegnate pixel per pixel e
--- salvate una sola volta; su timeline stanno sopra il leader come still.
+-- Taratura e quadranti delle slate sono disegnati pixel per pixel e salvati una sola
+-- volta; su timeline stanno sopra il leader come still. Frame lines e safe area sono
+-- invece nel generatore (sotto i testi).
 -- Funziona sia in LuaJIT (Fusion) sia in Lua 5.4 (test).
 
 LK_OVERLAY = (function()
@@ -380,14 +381,13 @@ LK_OVERLAY = (function()
 
   -- ------------------------------------------------------------ composizione
   -- spec: { accent = {r,g,b} 0..1, cal = { stars, center, grey, color, ramps, blue, contour, peak, labels },
-  --         framelines = { { ar = 1.85, label = "1.85:1" }, ... }, safeAction, safeTitle, fpsLabel, resLabel }
+  --         fpsLabel, resLabel, dialB / dialC = { cx, cy, r, fps } }
   function M.compose(W, H, spec)
     local cv = canvas(W, H)
     local accent = c8(spec.accent or { 0.85, 0.85, 0.85 })
     local dim = function(k) return { floor(accent[1] * k + 0.5), floor(accent[2] * k + 0.5), floor(accent[3] * k + 0.5) } end
     local lw = max(1, floor(H / 1080 * 2 + 0.5))
     local cal = spec.cal
-    local labels = nil
     local WHITE, BLACK = { 255, 255, 255 }, { 0, 0, 0 }
 
     -- quadranti della slate (stili Quadrante e Orologio)
@@ -440,42 +440,6 @@ LK_OVERLAY = (function()
           local rt = R * 0.74
           cv:text(tostring(k == 0 and 60 or k), cx + sx * rt, cy + sy * rt - lgh / 2, lgh, dim(0.9), "center")
         end
-      end
-    end
-
-    -- frame lines (sul raster reale) ed etichette
-    local gh = max(8, floor(0.016 * H + 0.5))
-    local narrow, wide = {}, {}
-    labels = {}
-    for _, fl in ipairs(spec.framelines or {}) do
-      local ar = fl.ar
-      if ar >= W / H - 0.005 then
-        local h = floor(W / ar + 0.5)
-        local y0 = floor((H - h) / 2 + 0.5)
-        cv:frame(0, y0, W, y0 + h, lw, dim(0.8))
-        wide[#wide + 1] = { label = fl.label, y = y0 + lw + floor(gh * 0.5) }
-      else
-        local w = floor(H * ar + 0.5)
-        local x0 = floor((W - w) / 2 + 0.5)
-        cv:frame(x0, 0, x0 + w, H, lw, dim(0.8))
-        narrow[#narrow + 1] = { x0 = x0, label = fl.label }
-      end
-    end
-    table.sort(wide, function(a, b) return a.y < b.y end)
-    local lastY = -1e9
-    for _, fl in ipairs(wide) do
-      local y = max(fl.y, lastY + floor(gh * 1.6))
-      labels[#labels + 1] = { fl.label, floor(0.53 * W), y }
-      lastY = y
-    end
-    table.sort(narrow, function(a, b) return a.x0 < b.x0 end)
-    for k, fl in ipairs(narrow) do
-      labels[#labels + 1] = { fl.label, fl.x0 + lw + floor(gh * 0.5), floor(0.012 * H) + (k - 1) * floor(gh * 1.9) }
-    end
-    for _, sa in ipairs({ { spec.safeAction, 0.93 }, { spec.safeTitle, 0.90 } }) do
-      if sa[1] then
-        local mw, mh = floor(W * (1 - sa[2]) / 2 + 0.5), floor(H * (1 - sa[2]) / 2 + 0.5)
-        cv:frame(mw, mh, W - mw, H - mh, max(1, floor(lw / 2)), dim(0.5))
       end
     end
 
@@ -580,11 +544,6 @@ LK_OVERLAY = (function()
       end
     end
 
-    for _, l in ipairs(labels or {}) do
-      local pad = floor(gh * 0.3)
-      cv:rect(l[2] - pad, l[3] - pad, l[2] + textWidth(l[1], gh) + pad, l[3] + gh + pad, { 0, 0, 0 }, 0.75)
-      cv:text(l[1], l[2], l[3], gh, dim(0.95))
-    end
     return cv
   end
 
