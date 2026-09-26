@@ -81,6 +81,9 @@ attiva"), se è più stretto diventa pillarbox (bande laterali, es. 1.33 su una
 timeline 2:1 o 2.39), se coincide non si vede. Senza mascherino i dati stanno in
 bande proprie semitrasparenti o dentro l'immagine (safe 90%). L'altezza del
 testo è in percentuale del quadro, quindi resta uguale su 16:9, 2:1 o DCI.
+L'immagine attiva del mascherino è a pixel interi e pari (1920×804 per 2.39 su
+1920×1080) e i dati stanno sempre nelle bande: se la banda è bassa diventano una
+riga sola ridotta, col pillarbox vanno nelle bande laterali.
 I dati sono **allineati ai bordi** (sinistra / destra); se in una versione di
 Resolve l'ancoraggio di Text+ non si comporta come previsto, "Allineamento dei
 dati › Centrati nelle celle" li riporta al centro delle loro celle. I dati si

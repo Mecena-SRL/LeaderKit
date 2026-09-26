@@ -577,3 +577,31 @@ def test_burnin_edge_alignment(built):
     assert t["T21"]["HorizontalLeftCenterRight"] == 1 and abs(t["T21"]["Center"][0] - 0.98) < 1e-9
     t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, BAlign=1)
     assert t["T11"]["HorizontalLeftCenterRight"] == 0 and t["T11"]["Center"][0] == 0.2
+
+
+def test_burnin_matte_precise_and_data_inside(built):
+    """Mascherino a pixel interi e pari; i dati stanno sempre nelle bande del mascherino."""
+    setting = os.path.join(built, "LeaderKit Burn-in.setting")
+    names = [m for m, _ in build_fx.MATTES]
+    seg = "86400|86880|1000|1|24|0|-1|0|IL FILM~24 fps|CLIP~SC 1 TK 2|SRC {SRC}~SND x|REC {REC}~FR {FRM}~{REC}"
+    # 2.39 su 1920x1080: immagine 1920x804, bande da 138 px
+    t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=names.index("2.39:1 (Scope)"))
+    assert abs(t["MatTM"]["Height"] * 1080 - 138) < 1e-6
+    # 1.85 su 16:9: banda di 22 px, troppo bassa per due righe -> una riga sola, dentro la banda
+    t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=names.index("1.85:1 (Flat)"))
+    lb = t["MatTM"]["Height"]
+    assert abs(lb * 1080 - (1080 - 2 * round(1920 / 1.85 / 2)) / 2) < 1e-6
+    assert t["T11"]["StyledText"] == "IL FILM     24 fps" and t["T12"]["StyledText"] == ""
+    assert 1 - lb < t["T11"]["Center"][1] < 1 and 0 < t["T41"]["Center"][1] < lb
+    assert t["BandT"]["TopLeftAlpha"] == 0
+    # testo abbastanza piccolo da stare nella banda (cap <= banda / 1.7)
+    assert t["T11"]["Size"] <= 2 * (lb / 1.7) / (1920 / 1080) + 1e-9
+    # 1.33 su 2:1: pillarbox, dati centrati nelle bande laterali
+    t = dump_tools(setting, 24, 3840, 1920, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=names.index("1.33:1 (4:3)"))
+    pb = t["MatLM"]["Width"]
+    assert abs(t["T11"]["Center"][0] - pb / 2) < 1e-9 and t["T11"]["HorizontalLeftCenterRight"] == 0
+    assert abs(t["T41"]["Center"][0] - (1 - pb / 2)) < 1e-9
+    assert t["BandT"]["TopLeftAlpha"] == 0
+    # la risoluzione scritta da Genera prevale su quella della composizione
+    t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=names.index("2.39:1 (Scope)"), TlW=4096, TlH=2160)
+    assert abs(t["MatTM"]["Height"] * 2160 - (2160 - 2 * round(4096 / 2.39 / 2)) / 2) < 1e-6

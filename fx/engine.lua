@@ -334,6 +334,8 @@ function BURN.fill(item, lkb, opts)
   set(lkb, "RecStart", rs)
   set(lkb, "TlFps", r.nominal)
   set(lkb, "TlDrop", r.drop)
+  set(lkb, "TlW", tonumber(W) or 0)          -- risoluzione vera della timeline per mascherino e testi
+  set(lkb, "TlH", tonumber(H) or 0)
   local msg = string.format("Burn-in %s → %s: %d segmenti, %d clip letti dai metadati.",
     framesToTc(rs, r), framesToTc(re_ - 1, r), #points - 1, clips)
   set(lkb, "BInfo", msg)
