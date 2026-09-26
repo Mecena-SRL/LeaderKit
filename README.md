@@ -92,7 +92,7 @@ montaggio o ai metadati.
 | **Produzione** | titolo, produzione, produttore, regia, cliente, agenzia, codice (Ad-ID/Clock/Auditel), episodio/rullo, lingua, data |
 | **Post** | montaggio, color, suono, VFX, versione, fase di lavorazione, stato color/suono/VFX/musica/titoli (TEMP/FINAL), note |
 | **Tecnico** | frame lines 1.33 / 1.66 / 1.78 / 1.85 / 2.00 / 2.20 / 2.39, safe area 93% e 90%, spazio colore (letto dal progetto), formato audio, livello pop |
-| **Aspetto** | colori di testo, sfondo e grafica; logo scelto con **selettore file** (posizione, dimensione, anche sulla coda) |
+| **Aspetto** | colori di testo, sfondo e grafica; due loghi scelti con il bottone **Scegli il logo…** (o scrivendo il percorso), posizione, dimensione, anche sul countdown e sulla coda |
 | **Taratura** | strumenti sul countdown, ispirati al leader digitale SMPTE RP 428-6: griglie di risoluzione pixel-esatte (righe verticali e orizzontali da 1, 2, 3, 4 px: se quelle da 1 px si impastano, l'immagine è morbida o è stata scalata), mirino centrale, scala di grigi a 11 gradini, patch RGBCMY, rampe continue B/N-R-G-B, verifica del blu (Wratten 47B), sfera sfumata per il contouring, bianco di picco e neri (PLUGE 2/4/8%), etichette fps/risoluzione/formato |
 
 **Slate**: titolo grande (si riduce da solo se è lungo), "Directed by", filo
@@ -110,8 +110,8 @@ pixel alla **risoluzione esatta della timeline** (PNG con trasparenza, in
 `~/.leaderkit`, riusato se nulla cambia) e le mette sulla traccia "LeaderKit
 Grafica" sopra il countdown (e sulla slate, se richiesto). Il generatore Fusion
 disegna solo sfondo, testi, cerchi, braccio e cifre: resta leggero in
-riproduzione. Il logo va sulla traccia "LeaderKit Logo" sopra la slate (e sulla
-coda, se richiesto); se Resolve accorcia le immagini fisse alla durata standard,
+riproduzione. Il logo va sulla traccia "LeaderKit Logo" sopra la slate (e sul
+countdown o sulla coda, se richiesto); se Resolve accorcia le immagini fisse alla durata standard,
 Genera le ripete fino a coprire tutto lo spazio.
 
 ### Standard inclusi
