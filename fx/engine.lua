@@ -1,378 +1,5 @@
--- LeaderKit engine: eseguito dai bottoni del generatore "LeaderKit Head".
--- LK_MODE = "generate" | "remove" (impostato dal bottone).
--- Tutto viene ricalcolato sul frame rate e sul drop-frame reali della timeline.
-
-local MODE = LK_MODE or "generate"
-local PREFIX = "leaderkit"
-local POP_TRACK = "LeaderKit Pop"
-local TAIL_NAME = "LeaderKit Tail"
-local LOGO_TRACK = "LeaderKit Logo"
-local GFX_TRACK = "LeaderKit Grafica"
-local BURN_NAME = "LeaderKit Burn-in"
-local BURN_TRACK = "LeaderKit Burn-in"
-HEAD_NAME = "LeaderKit Head"
-
-local report, warnings = {}, {}
-local function log(s) report[#report + 1] = tostring(s); print("[LeaderKit] " .. tostring(s)) end
-local function warn(s) warnings[#warnings + 1] = tostring(s); print("[LeaderKit] ATTENZIONE: " .. tostring(s)) end
-
-local c = comp or (fusion and fusion:GetCurrentComp())
-
-local function show(title)
-  local text = table.concat(report, "\n")
-  if #warnings > 0 then text = text .. "\n\nATTENZIONE:\n- " .. table.concat(warnings, "\n- ") end
-  print("[LeaderKit] " .. title .. "\n" .. text)
-  local home = os.getenv("HOME") or os.getenv("USERPROFILE")
-  if home then
-    local sep = package.config:sub(1, 1)
-    local f = io.open(home .. sep .. "Desktop" .. sep .. "LeaderKit-riepilogo.txt", "w")
-    if f then f:write(title .. "\n\n" .. text .. "\n"); f:close() end
-  end
-  local shown = false
-  for _, target in ipairs({ c, fusion and fusion:GetCurrentComp() }) do
-    if not shown and target then
-      shown = pcall(function()
-        target:AskUser(title, { { "Esito", "Text", Default = text, Lines = 18, Wrap = true } })
-      end)
-    end
-  end
-end
-
--- ---------------------------------------------------------------- timecode
-local function makeRate(fpsText, dfText)
-  local fps = tonumber(string.match(tostring(fpsText), "[%d%.]+")) or 24
-  local nominal = math.floor(fps + 0.5)
-  local ntsc = math.abs(fps - nominal) > 0.001
-  local df = (tostring(dfText) == "1" or string.find(tostring(fpsText), "DF") ~= nil)
-  if not (ntsc and (nominal == 30 or nominal == 60)) then df = false end
-  local drop = 0
-  if df then drop = (nominal == 30) and 2 or 4 end
-  return { fps = fps, nominal = nominal, ntsc = ntsc, df = df, drop = drop }
-end
-
-local function tcToFrames(tc, r)
-  local h, m, s, f = string.match(tc, "(%d+)[:;](%d+)[:;](%d+)[:;.](%d+)")
-  h, m, s, f = tonumber(h), tonumber(m), tonumber(s), tonumber(f)
-  local frames = ((h * 60 + m) * 60 + s) * r.nominal + f
-  if r.drop > 0 then
-    local totalMin = h * 60 + m
-    frames = frames - r.drop * (totalMin - math.floor(totalMin / 10))
-  end
-  return frames
-end
-
-local function framesToTc(frames, r)
-  frames = math.floor(frames + 0.5)
-  if frames < 0 then return "-" .. framesToTc(-frames, r) end
-  local n = r.nominal
-  if r.drop > 0 then
-    local per10 = n * 600 - r.drop * 9
-    local perMin = n * 60 - r.drop
-    local d = math.floor(frames / per10)
-    local m = frames % per10
-    if m > r.drop then
-      frames = frames + r.drop * 9 * d + r.drop * math.floor((m - r.drop) / perMin)
-    else
-      frames = frames + r.drop * 9 * d
-    end
-  end
-  local sep = (r.drop > 0) and ";" or ":"
-  return string.format("%02d:%02d:%02d%s%02d", math.floor(frames / (n * 3600)),
-    math.floor(frames / (n * 60)) % 60, math.floor(frames / n) % 60, sep, frames % n)
-end
-
--- Le liste restituite dall'API di Resolve possono contenere anche campi
--- numerici (contatori): si tengono solo gli oggetti.
-local function listOf(t)
-  local out = {}
-  if type(t) ~= "table" then return out end
-  local keys = {}
-  for k in pairs(t) do keys[#keys + 1] = k end
-  table.sort(keys, function(a, b)
-    if type(a) == type(b) and (type(a) == "number" or type(a) == "string") then return a < b end
-    return type(a) < type(b)
-  end)
-  for _, k in ipairs(keys) do
-    local v = t[k]
-    if type(v) == "userdata" or type(v) == "table" then
-      out[#out + 1] = v
-    elseif type(k) == "userdata" or type(k) == "table" then
-      out[#out + 1] = k
-    end
-  end
-  return out
-end
-
--- ---------------------------------------------------------------- controlli
-local function findTool(cmp, name)
-  if not cmp then return nil end
-  local t = cmp:FindTool(name)
-  if t then return t end
-  for _, x in ipairs(listOf(cmp:GetToolList(false))) do
-    if x.Name == name then return x end
-  end
-  return nil
-end
-
-local lk = tool
-if not lk or not pcall(function() return lk:GetInput("Preset") end) then lk = findTool(c, "LK") end
-local function get(name, default)
-  if not lk then return default end
-  local ok, v = pcall(function() return lk:GetInput(name) end)
-  if ok and v ~= nil then return v end
-  return default
-end
-local function set(tool, name, value)
-  if tool then pcall(function() tool:SetInput(name, value) end) end
-end
-
--- ---------------------------------------------------------------- Resolve
-local resolve = nil
-pcall(function() local host = fusion or fu; resolve = host:GetResolve() end)
-if not resolve then pcall(function() resolve = Resolve() end) end
-if not resolve then pcall(function() resolve = bmd.scriptapp("Resolve") end) end
-if not resolve then log("API di Resolve non raggiungibile."); show("LeaderKit"); return end
-local project = resolve:GetProjectManager():GetCurrentProject()
-local tl = project and project:GetCurrentTimeline()
-if not tl then log("Nessuna timeline attiva."); show("LeaderKit"); return end
-local pool = project:GetMediaPool()
-local r = makeRate(tl:GetSetting("timelineFrameRate"), tl:GetSetting("timelineDropFrameTimecode"))
-local W, H = tl:GetSetting("timelineResolutionWidth"), tl:GetSetting("timelineResolutionHeight")
-
-local function allItems(kind)
-  local out = {}
-  for t = 1, tl:GetTrackCount(kind) do
-    for _, it in ipairs(listOf(tl:GetItemListInTrack(kind, t))) do out[#out + 1] = { item = it, track = t } end
-  end
-  return out
-end
-
-local function isLeaderKit(entry, kind)
-  local name = entry.item:GetName() or ""
-  if name == TAIL_NAME or name == HEAD_NAME or name == BURN_NAME then return true end
-  if string.sub(name, 1, 10) == "LeaderKit_" then return true end
-  if kind == "audio" and tl:GetTrackName("audio", entry.track) == POP_TRACK then return true end
-  if kind == "video" then
-    local tn = tl:GetTrackName("video", entry.track)
-    if tn == LOGO_TRACK or tn == LOGO_TRACK .. " 2" or tn == LOGO_TRACK .. " Titolo" or tn == GFX_TRACK
-      or tn == BURN_TRACK then return true end
-  end
-  return false
-end
-
-local function cleanup()
-  local nm = 0
-  for frame, info in pairs(tl:GetMarkers() or {}) do
-    if type(info) == "table" and string.sub(tostring(info.customData or ""), 1, #PREFIX) == PREFIX then
-      if tl:DeleteMarkerAtFrame(frame) then nm = nm + 1 end
-    end
-  end
-  local doomed = {}
-  for _, e in ipairs(allItems("audio")) do
-    if isLeaderKit(e, "audio") then doomed[#doomed + 1] = e.item end
-  end
-  for _, e in ipairs(allItems("video")) do
-    local tn = tl:GetTrackName("video", e.track)
-    if e.item:GetName() == TAIL_NAME or tn == LOGO_TRACK or tn == LOGO_TRACK .. " 2"
-      or tn == LOGO_TRACK .. " Titolo" or tn == GFX_TRACK or tn == BURN_TRACK then
-      doomed[#doomed + 1] = e.item
-    end
-  end
-  if #doomed > 0 then tl:DeleteClips(doomed, false) end
-  return nm, #doomed
-end
-
--- ---------------------------------------------------------------- burn-in (copie di lavoro)
-local BURN = {}
-function BURN.isBurn(item)
-  local okk, has = pcall(function()
-    local t = findTool(item:GetFusionCompByIndex(1), "LK")
-    return t ~= nil and t:GetInput("BPhase") ~= nil
-  end)
-  if okk and has then return true end
-  return (item:GetName() or "") == BURN_NAME
-end
-function BURN.lk(item)
-  local okk, t = pcall(function() return findTool(item:GetFusionCompByIndex(1), "LK") end)
-  return okk and t or nil
-end
-local function clean(v)
-  v = tostring(v or "")
-  v = string.gsub(v, "[|~\r\n]", " ")
-  return (string.gsub(string.gsub(v, "^%s+", ""), "%s+$", ""))
-end
-function BURN.meta(mpi, keys)
-  if not mpi then return "" end
-  for _, k in ipairs(keys) do
-    for _, fn in ipairs({ "GetMetadata", "GetClipProperty" }) do
-      local okk, v = pcall(function() return mpi[fn](mpi, k) end)
-      if okk and type(v) ~= "table" and v ~= nil and clean(v) ~= "" then return clean(v) end
-    end
-  end
-  return ""
-end
-function BURN.mpi(it)
-  local okk, m = pcall(function() return it:GetMediaPoolItem() end)
-  return okk and m or nil
-end
-function BURN.srcStart(it)
-  local okk, v = pcall(function() return it:GetSourceStartFrame() end)
-  if okk and type(v) == "number" then return v end
-  okk, v = pcall(function() return it:GetLeftOffset() end)
-  if okk and type(v) == "number" then return v end
-  return 0
-end
-local function joinb(t, sepr)
-  local out = {}
-  for _, v in ipairs(t) do if v and v ~= "" then out[#out + 1] = v end end
-  return table.concat(out, sepr or "   ")
-end
-
--- Riempie un clip Burn-in con i dati dei clip sotto di lui (uno per segmento).
-function BURN.fill(item, lkb, opts)
-  opts = opts or {}
-  local function on(k) local okk, v = pcall(function() return lkb:GetInput(k) end); return okk and (v or 0) > 0.5 end
-  local function txt(k) local okk, v = pcall(function() return lkb:GetInput(k) end); return okk and clean(v) or "" end
-  local rs = item:GetStart()
-  local re_ = rs + item:GetDuration()
-  local function users(kind)
-    local out = {}
-    for _, e in ipairs(allItems(kind)) do
-      local st = e.item:GetStart()
-      local en = st + e.item:GetDuration()
-      local nm = e.item:GetName() or ""
-      if en > rs and st < re_ and not isLeaderKit(e, kind) and string.find(nm, "LeaderKit", 1, true) == nil then
-        out[#out + 1] = { item = e.item, track = e.track, st = st, en = en }
-      end
-    end
-    return out
-  end
-  local vids, auds = users("video"), users("audio")
-  local cuts = { [rs] = true, [re_] = true }
-  for _, v in ipairs(vids) do
-    if v.st > rs and v.st < re_ then cuts[v.st] = true end
-    if v.en > rs and v.en < re_ then cuts[v.en] = true end
-  end
-  local points = {}
-  for f in pairs(cuts) do points[#points + 1] = f end
-  table.sort(points)
-  local title = txt("BTitleText"); if title == "" then title = clean(opts.title) end
-  local version = txt("BVersionText"); if version == "" then version = clean(opts.version) end
-  local fmt = string.format("%g fps  %sx%s", r.fps, tostring(W), tostring(H))
-  local color = ""
-  pcall(function() color = clean(project:GetSetting("colorSpaceOutput")) end)
-  local frameMode = 1
-  pcall(function() frameMode = math.floor((lkb:GetInput("BFrameMode") or 1) + 0.5) end)
-  local lines, clips = {}, 0
-  for i = 1, #points - 1 do
-    local a, b = points[i], points[i + 1]
-    local v = nil
-    for _, x in ipairs(vids) do
-      if x.st <= a and x.en > a and (not v or x.track > v.track) then v = x end
-    end
-    local srcv, step, sn, sd, fr0 = -1, 1, r.nominal, r.drop, a - rs
-    local tl1, tl2, tr1, tr2, bl1, bl2 = "", "", "", "", "", ""
-    local mpi = v and BURN.mpi(v.item)
-    if v then
-      clips = clips + 1
-      local cfps = tonumber(string.match(BURN.meta(mpi, { "FPS" }), "[%d%.]+") or "") or r.fps
-      local stc = BURN.meta(mpi, { "Start TC" })
-      local cr = makeRate(tostring(cfps), string.find(stc, ";", 1, true) and "1" or "0")
-      sn, sd, step = cr.nominal, cr.drop, cfps / r.fps
-      local base = string.match(stc, "%d+[:;]%d+[:;]%d+[:;.]%d+") and tcToFrames(stc, cr) or 0
-      srcv = base + BURN.srcStart(v.item) + (a - v.st) * step
-      if frameMode == 0 then fr0 = 1001 + (a - v.st) elseif frameMode == 1 then fr0 = a - v.st end
-      if on("BClip") then tr1 = clean(v.item:GetName()) end
-      local sc = BURN.meta(mpi, { "Scene" })
-      local shot = BURN.meta(mpi, { "Shot" })
-      local tk = BURN.meta(mpi, { "Take" })
-      local good = BURN.meta(mpi, { "Good Take", "Circled" })
-      local scene = joinb({ sc ~= "" and ("SC " .. sc .. (shot ~= "" and ("/" .. shot) or "")) or "",
-        tk ~= "" and ("TK " .. tk) or "", (good == "1" or string.lower(good) == "true" or string.lower(good) == "yes") and "CIRCLED" or "" }, " ")
-      local cam = BURN.meta(mpi, { "Camera #", "Camera", "Angle" })
-      local reel = joinb({ BURN.meta(mpi, { "Reel Name", "Reel Number", "Reel" }), BURN.meta(mpi, { "Roll Card #", "Roll/Card" }) }, " / ")
-      tr2 = joinb({ on("BScene") and scene or "", on("BCam") and cam ~= "" and ("CAM " .. cam) or "", on("BReel") and reel or "" })
-      if on("BDate") then
-        local d = BURN.meta(mpi, { "Shoot Day", "Date Recorded", "Date Created" })
-        tl2 = d ~= "" and d or os.date("%d/%m/%Y")
-      end
-    elseif on("BDate") then
-      tl2 = os.date("%d/%m/%Y")
-    end
-    tl1 = joinb({ on("BTitle") and string.upper(title) or "", on("BVersion") and version or "" })
-    tl2 = joinb({ tl2, on("BFormat") and fmt or "", on("BColor") and color or "" })
-    if on("BSrc") then bl1 = "SRC {SRC}" end
-    local aud = -1
-    if on("BAtc") then
-      local au = nil
-      for _, x in ipairs(auds) do
-        if x.st <= a and x.en > a and (not au or x.track < au.track) then au = x end
-      end
-      if au then
-        local ampi = BURN.mpi(au.item)
-        local atc = BURN.meta(ampi, { "Start TC" })
-        if string.match(atc, "%d+[:;]%d+[:;]%d+[:;.]%d+") then
-          aud = tcToFrames(atc, r) + BURN.srcStart(au.item) + (a - au.st)
-        end
-        local roll = BURN.meta(ampi, { "Sound Roll #", "Reel Name" })
-        if roll == "" then roll = BURN.meta(mpi, { "Sound Roll #" }) end
-        bl2 = "SND {ATC}" .. (roll ~= "" and ("   " .. roll) or "")
-      else
-        bl2 = "SND --"
-      end
-    end
-    local br1, br2 = on("BRec") and "REC {REC}" or "", on("BFrame") and "FR {FRM}" or ""
-    if tl1 == "" then tl1, tl2 = tl2, "" end
-    if tr1 == "" then tr1, tr2 = tr2, "" end
-    if bl2 == "" then bl2, bl1 = bl1, "" end
-    if br2 == "" then br2, br1 = br1, "" end
-    lines[#lines + 1] = string.format("%d|%d|%s|%s|%d|%d|%d|%d|%s~%s|%s~%s|%s~%s|%s~%s~{REC}",
-      a, b, string.format("%.4f", srcv), string.format("%.6f", step), sn, sd, aud, fr0,
-      tl1, tl2, tr1, tr2, bl1, bl2, br1, br2)
-  end
-  set(lkb, "Seg", table.concat(lines, "\n"))
-  set(lkb, "RecStart", rs)
-  set(lkb, "TlFps", r.nominal)
-  set(lkb, "TlDrop", r.drop)
-  set(lkb, "TlW", tonumber(W) or 0)          -- risoluzione vera della timeline per mascherino e testi
-  set(lkb, "TlH", tonumber(H) or 0)
-  local msg = string.format("Burn-in %s → %s: %d segmenti, %d clip letti dai metadati.",
-    framesToTc(rs, r), framesToTc(re_ - 1, r), #points - 1, clips)
-  set(lkb, "BInfo", msg)
-  return msg, clips
-end
-
-if MODE == "burnin" then
-  local target = nil
-  local cur = tl:GetCurrentVideoItem()
-  if cur and BURN.isBurn(cur) then target = cur end
-  local all = {}
-  for _, e in ipairs(allItems("video")) do if BURN.isBurn(e.item) then all[#all + 1] = e.item end end
-  if not target then target = all[1] end
-  if not target then log("Non trovo il clip LeaderKit Burn-in sulla timeline."); show("LeaderKit Burn-in"); return end
-  local title = ""
-  for _, e in ipairs(allItems("video")) do
-    local t = BURN.lk(e.item)
-    if t and not BURN.isBurn(e.item) then
-      local okk, v = pcall(function() return t:GetInput("Title") end)
-      if okk and v and v ~= "" then title = v; break end
-    end
-  end
-  local msg = BURN.fill(target, BURN.lk(target) or lk, { title = title })
-  log(msg)
-  log("I dati si aggiornano solo con questo bottone: premilo di nuovo dopo aver cambiato montaggio, campi o metadati.")
-  show("LeaderKit Burn-in")
-  return
-end
-
-if MODE == "remove" then
-  local nm, ni = cleanup()
-  log(string.format("Rimossi %d marker e %d clip LeaderKit (audio, coda, taratura, logo). Il clip Head resta.", nm, ni))
-  show("LeaderKit — Rimuovi")
-  return
-end
-
 -- ---------------------------------------------------------------- generate
+-- (eseguito dopo engine_common.lua e engine_burnin.lua)
 local checks = {}
 local function ok(s) checks[#checks + 1] = "✓ " .. s end
 local function bad(s) checks[#checks + 1] = "⚠ " .. s; warnings[#warnings + 1] = s end
@@ -736,6 +363,7 @@ local function ensurePopTrack()
     tl:AddTrack("audio", "mono")
     popTrack = tl:GetTrackCount("audio")
     tl:SetTrackName("audio", popTrack, POP_TRACK)
+    trackNamesChanged()
   end
   return popTrack
 end
@@ -882,6 +510,15 @@ if lfoa then
       set(tlk, "CardText", P.card_text or "")
       set(tlk, "Info", "LFOA " .. framesToTc(lfoa, r) .. "  ·  DURATION " .. durTc)
       for _, k in ipairs(COLORS) do set(tlk, k, get(k, nil)) end
+      local onTail = get("LogoOnTail", 0) > 0.5
+      for _, k in ipairs({ "Logo", "Logo2" }) do set(tlk, k, onTail and get(k, "") or "") end
+      for _, k in ipairs({ "LogoPos", "LogoSize", "LogoPos2", "LogoSize2" }) do set(tlk, k, get(k, nil)) end
+      local tcomp = nil
+      pcall(function() tcomp = tail:GetFusionCompByIndex(1) end)
+      if tlk and tcomp then
+        LK_IMAGE.sync(tcomp, tlk, "Logo", "Logo1Ld", "LogoW", "LogoH")
+        LK_IMAGE.sync(tcomp, tlk, "Logo2", "Logo2Ld", "Logo2W", "Logo2H")
+      end
       ok("Coda " .. framesToTc(tail:GetStart(), r) .. " → " .. framesToTc(tail:GetStart() + tail:GetDuration() - 1, r) .. ".")
       if (P.tail_pop or P.tail_flash) and tail:GetDuration() >= 2 * n then
         local tp = lfoa + 2 * n
@@ -955,6 +592,7 @@ local function videoTrack(name)
   tl:AddTrack("video")
   local t = tl:GetTrackCount("video")
   tl:SetTrackName("video", t, name)
+  trackNamesChanged()
   return t
 end
 
@@ -979,19 +617,16 @@ local function resClass()
   return "SD"
 end
 local accent = { get("AccentRed", 0.85), get("AccentGreen", 0.85), get("AccentBlue", 0.85) }
-local frameLines = {}
-for _, fl in ipairs(LK_FRAMELINES or {}) do
-  if get(fl[1], fl[4] or 0) > 0.5 then frameLines[#frameLines + 1] = { ar = fl[3], label = fl[2] } end
-end
-local guidesOn = get("Guides", 1) > 0.5
-if not guidesOn then frameLines = {} end
-local safeA, safeT = guidesOn and get("SafeAction", 0) > 0.5, guidesOn and get("SafeTitle", 0) > 0.5
 
 local function overlay(kind, spec)
   local key = kind .. "|" .. w .. "x" .. h .. "|" .. table.concat(accent, ",")
-  for _, fl in ipairs(spec.framelines) do key = key .. "|" .. fl.label end
-  for k, v in pairs(spec.cal or {}) do key = key .. "|" .. k .. "=" .. tostring(v) end
-  key = key .. "|" .. tostring(spec.safeAction) .. tostring(spec.safeTitle) .. (spec.fpsLabel or "") .. (spec.resLabel or "")
+  local ck = {}
+  for k, v in pairs(spec.cal or {}) do ck[#ck + 1] = k .. "=" .. tostring(v) end
+  table.sort(ck)
+  key = key .. "|" .. table.concat(ck, "|") .. (spec.fpsLabel or "") .. (spec.resLabel or "")
+  for _, d in ipairs({ spec.dialB, spec.dialC }) do
+    if d then key = key .. string.format("|%g,%g,%g,%g", d.cx, d.cy, d.r, d.fps) end
+  end
   local path = cacheDir .. sep .. string.format("LeaderKit_%s_%dx%d_%s.png", kind, w, h, hash(key))
   local fh = io.open(path, "rb")
   if fh then fh:close(); return path end
@@ -1000,63 +635,19 @@ local function overlay(kind, spec)
   return path
 end
 
-if countFrom > 0 and (get("CalOn", 1) > 0.5 or #frameLines > 0 or safeA or safeT) then
-  local calOn = get("CalOn", 1) > 0.5
-  local cal = nil
-  if calOn then
-    cal = {}
-    for _, k in ipairs(LK_CALIBRATION or {}) do cal[string.lower(string.sub(k, 4))] = get(k, 1) > 0.5 end
-  end
-  local path = overlay(calOn and "Taratura" or "FrameLines", { accent = accent, cal = cal, framelines = frameLines,
-    safeAction = safeA, safeTitle = safeT, fpsLabel = string.format("%g/SEC", r.fps), resLabel = resClass() })
+-- taratura sul countdown (frame lines, safe area e pallino finale sono nel generatore, sotto i testi)
+if countFrom > 0 and get("CalOn", 1) > 0.5 then
+  local cal = {}
+  for _, k in ipairs(LK_CALIBRATION or {}) do cal[string.lower(string.sub(k, 4))] = get(k, 1) > 0.5 end
+  local path = overlay("Taratura", { accent = accent, cal = cal, fpsLabel = string.format("%g/SEC", r.fps), resLabel = resClass() })
   local clip = path and importImage(path)
   if path and not clip then bad("Resolve non ha importato " .. path .. ".") end
   if clip then
     local from = ffoa - countFrom * n
     local len = (countFrom - 2) * n + 1
     local pieces = placeStill(clip, from, len, videoTrack(GFX_TRACK))
-    describe(pieces, (calOn and "Taratura" or "Frame lines") .. " " .. w .. "x" .. h .. " sul countdown", GFX_TRACK)
+    describe(pieces, "Taratura " .. w .. "x" .. h .. " sul countdown", GFX_TRACK)
   end
-end
-if slateSec > 0 and get("GuidesSlate", 0) > 0.5 and (#frameLines > 0 or safeA or safeT) then
-  local path = overlay("FrameLines", { accent = accent, framelines = frameLines, safeAction = safeA, safeTitle = safeT })
-  local clip = path and importImage(path)
-  if clip then
-    local slateAt = head:GetStart() + math.floor(barsSec * n + 0.5)
-    describe(placeStill(clip, slateAt, math.floor(slateSec * n + 0.5), videoTrack(GFX_TRACK)), "Frame lines sulla slate", GFX_TRACK)
-  end
-end
-
--- dimensioni di un PNG (per impaginare titolo e loghi); nil per altri formati
-local function pngSize(path)
-  local fh = io.open(path, "rb")
-  if not fh then return nil end
-  local hd = fh:read(24); fh:close()
-  if not hd or #hd < 24 or hd:sub(1, 8) ~= "\137PNG\r\n\26\n" then return nil end
-  local function be(i) local a, b2, c2, d = hd:byte(i, i + 3); return ((a * 256 + b2) * 256 + c2) * 256 + d end
-  return be(17), be(21)
-end
--- zoom/pan/tilt di Resolve per mettere un'immagine in un riquadro (pixel), con l'immagine adattata al quadro
-local function fitBox(path, bw, bh, cxp, cyp, anchorLeft)
-  local iw, ih = pngSize(path)
-  if not iw or iw <= 0 or ih <= 0 then iw, ih = w, h end
-  local f = math.min(w / iw, h / ih)
-  local z = math.min(bw / (iw * f), bh / (ih * f))
-  local dw, dh = iw * f * z, ih * f * z
-  if anchorLeft == "left" then cxp = cxp + dw / 2 elseif anchorLeft == "right" then cxp = cxp - dw / 2 end
-  return z, cxp - w / 2, cyp - h / 2, dw, dh
-end
-local function placeImage(path, span, track, label, z, pan, tilt)
-  local clip = importImage(path)
-  if not clip then bad("Resolve non ha importato " .. path .. "."); return end
-  local pieces = placeStill(clip, span[1], span[2], track)
-  for _, it in ipairs(pieces) do
-    pcall(function()
-      it:SetProperty("ZoomX", z); it:SetProperty("ZoomY", z)
-      it:SetProperty("Pan", pan); it:SetProperty("Tilt", tilt)
-    end)
-  end
-  describe(pieces, label, tl:GetTrackName("video", track) or "")
 end
 
 local slateStyle = math.floor(get("SlateStyle", 0) + 0.5)
@@ -1064,7 +655,7 @@ local slateSpan = { head:GetStart() + math.floor(barsSec * n + 0.5), math.floor(
 if slateSec > 0 and (slateStyle == 1 or slateStyle == 2) and LK_DIALS then
   local d = LK_DIALS[slateStyle == 1 and "b" or "c"]
   local key = slateStyle == 1 and "dialB" or "dialC"
-  local spec = { accent = accent, framelines = {} }
+  local spec = { accent = accent }
   spec[key] = { cx = d[1], cy = d[2], r = d[3], fps = r.fps }
   local path = overlay(slateStyle == 1 and ("Quadrante" .. math.floor(r.fps + 0.5)) or "Orologio", spec)
   local clip = path and importImage(path)
@@ -1074,65 +665,31 @@ if slateSec > 0 and (slateStyle == 1 or slateStyle == 2) and LK_DIALS then
   end
 end
 
-local titleImg = tostring(get("TitleImage", "") or "")
-titleImg = string.gsub(string.gsub(titleImg, "^%s+", ""), "%s+$", "")
-if titleImg ~= "" and slateSec > 0 then
-  local fh = io.open(titleImg, "rb")
-  if not fh then
-    bad("Titolo in PNG non trovato: " .. titleImg .. " (sceglilo di nuovo nella scheda Aspetto).")
-  else
-    fh:close()
-    local box = (LK_TITLE_BOXES or {})[slateStyle + 1] or { 0.5, 0.8, 0.6, 0.12, "center" }
-    local k = (get("TitleImageSize", 100) or 100) / 100
-    local z, pan, tilt = fitBox(titleImg, box[3] * w * k, box[4] * h * k, box[1] * w, box[2] * h, box[5])
-    if not pngSize(titleImg) then
-      ok("Titolo: non e' un PNG, impaginato supponendo le proporzioni del quadro (meglio un PNG con trasparenza).")
+-- logo, secondo logo e titolo in PNG: dentro il generatore (nodi Loader), visibili subito.
+-- Genera li ricarica nel blocco (anche se e' stato ricreato) e nella coda.
+local IMAGES = { { "Logo", "Logo1Ld", "LogoW", "LogoH", "Logo" }, { "Logo2", "Logo2Ld", "Logo2W", "Logo2H", "Secondo logo" },
+  { "TitleImage", "TitleLd", "TitleW", "TitleH", "Titolo in PNG" } }
+for _, im in ipairs(IMAGES) do
+  local st, path, iw, ih = LK_IMAGE.sync(c, lk, im[1], im[2], im[3], im[4])
+  if st == "ok" then
+    local where = slateSec > 0 and "sulla slate" or "(lo standard non ha slate)"
+    if im[1] ~= "TitleImage" and get("LogoOnTail", 0) > 0.5 then where = where .. " e sulla coda" end
+    ok(string.format("%s %s: %s, %dx%d px.", im[5], where, string.match(path, "[^/\\]+$") or path, iw, ih))
+    if slateSec <= 0 and (im[1] == "TitleImage" or get("LogoOnTail", 0) <= 0.5) then
+      bad(im[5] .. ": lo standard non ha slate" .. (im[1] == "TitleImage" and "." or "; attiva 'Loghi anche sulla coda' (scheda Aspetto) per vederlo."))
     end
-    placeImage(titleImg, slateSpan, videoTrack(LOGO_TRACK .. " Titolo"), "Titolo in PNG sulla slate", z, pan, tilt)
+  elseif st ~= "empty" then
+    bad(LK_IMAGE.message(im[5], st, path))
   end
 end
 
-local LOGOS = { { "Logo", "LogoPos", "LogoSize", LOGO_TRACK, "Logo" },
-  { "Logo2", "LogoPos2", "LogoSize2", LOGO_TRACK .. " 2", "Secondo logo" } }
-for _, L in ipairs(LOGOS) do
-  local logoPath = tostring(get(L[1], "") or "")
-  logoPath = string.gsub(string.gsub(logoPath, "^%s+", ""), "%s+$", "")
-  logoPath = string.gsub(logoPath, "^[\"']", ""); logoPath = string.gsub(logoPath, "[\"']$", "")
-  if logoPath ~= "" then
-    local fh = io.open(logoPath, "rb")
-    if not fh then
-      bad(L[5] .. " non trovato: " .. logoPath .. " (sceglilo di nuovo con il selettore nella scheda Aspetto).")
-    else
-      fh:close()
-      local clip = importImage(logoPath)
-      if not clip then
-        bad("Resolve non ha importato " .. logoPath .. ".")
-      else
-        local size = (get(L[3], 12) or 12) / 100
-        local pos = math.floor(get(L[2], L[1] == "Logo" and 0 or 1) + 0.5)
-        -- riquadro del logo: largo size * W, alto al massimo meta'; angolo esatto a 3.5% / 4% dai bordi
-        local bw, bh = size * w, size * w * 0.5
-        local z, _, _, dw, dh = fitBox(logoPath, bw, bh, 0, 0, "center")
-        local mx, my = w / 2 - 0.035 * w - dw / 2, h / 2 - 0.04 * h - dh / 2
-        local pan, tilt = ({ mx, -mx, mx, -mx, 0 })[pos + 1], ({ my, my, -my, -my, 0 })[pos + 1]
-        local track = videoTrack(L[4])
-        local spans = {}
-        local slateAt = head:GetStart() + math.floor(barsSec * n + 0.5)
-        if slateSec > 0 then spans[#spans + 1] = { slateAt, math.floor(slateSec * n + 0.5), "slate" } end
-        if get("LogoOnTail", 0) > 0.5 and lfoa and tailOn then spans[#spans + 1] = { lfoa + 1, tailLen, "coda" } end
-        if #spans == 0 then bad(L[5] .. ": lo standard non ha slate; attiva 'Anche sulla coda' per vederlo.") end
-        for _, sp in ipairs(spans) do
-          local pieces = placeStill(clip, sp[1], sp[2], track)
-          for _, it in ipairs(pieces) do
-            pcall(function()
-              it:SetProperty("ZoomX", z); it:SetProperty("ZoomY", z)
-              it:SetProperty("Pan", pan); it:SetProperty("Tilt", tilt)
-            end)
-          end
-          describe(pieces, L[5] .. " sulla " .. sp[3], L[4])
-        end
-      end
-    end
+-- elementi fuori standard: si avvisa, ma restano come li hai scelti
+if get("EndDot", 0) > 0.5 then
+  if cat == "work" or cat == "custom" then
+    ok("Pallino sull'ultimo fotogramma del leader (" .. framesToTc(ffoa - 1, r) .. "): il programma parte al fotogramma dopo.")
+  else
+    bad("Pallino sull'ultimo fotogramma del leader (" .. framesToTc(ffoa - 1, r) .. "): " .. (P.name or "lo standard") ..
+      " prevede nero fino al FFOA. Va bene per uso interno; toglilo (scheda Guide) per la consegna.")
   end
 end
 
