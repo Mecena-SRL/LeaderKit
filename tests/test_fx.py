@@ -322,6 +322,7 @@ def test_single_generator_and_visibility(built):
     assert len(scripts) == 2                                  # Standard e Durata programma
     assert "INPB_IC_Visible" in text and 'vis(\\"SlotTV\\"' in text
     assert 'INPID_InputControl = \"FileControl\"' in text   # logo da file
+    assert "LogoPick" in text and "Logo2Pick" in text and "LogoOnCount" in text
     assert "DateToday" in text and "DateAuto" in text
 
 
@@ -412,6 +413,40 @@ def test_engine_logo_and_colorinfo(code, tmp_path):
     res, log = run_engine(code, fps="24", df="0", preset="cinema_dcp", head=5, progstart=18, program=60,
                           logo="/non/esiste.png")
     assert "Logo non trovato" in log
+
+
+def test_engine_logo_countdown_fileurl_and_missing(code, tmp_path):
+    logo = tmp_path / "logo aziendale.png"
+    logo.write_bytes(b"\x89PNG fake")
+    url = "file://" + str(logo).replace(" ", "%20")
+    res, log = run_engine(code, fps="24", df="0", preset="cinema_dcp", head=5, progstart=18, program=60,
+                          logo=url, logocount=1)
+    logos = res["logo"]
+    assert len(logos) == 3                                    # slate, countdown, coda
+    assert "01:00:00:00|145|0.2" in logos                    # countdown da 8 fino al 2 compreso
+    assert "Logo sul countdown" in log
+    res, log = run_engine(code, fps="24", df="0", preset="cinema_dcp", head=5, progstart=18, program=60)
+    assert "logo" not in res
+    assert "nessun file scelto" in log
+
+
+def test_pick_file_button(tmp_path):
+    """Il bottone 'Scegli...' scrive il percorso nel campo; se RequestFile manca usa AskUser."""
+    script = build_fx.pick_file_code("Logo", "LeaderKit - logo")
+    cases = {"function(_, a, b, o) return '/x/logo.png' end": "/x/logo.png",   # selettore di Fusion
+             "function() return nil end": "nil",                            # annullato: nessun cambio
+             "nil": "/y/ask.png"}                                           # nessun selettore: AskUser
+    for host, want in cases.items():
+        f = tmp_path / "pick.lua"
+        f.write_text(
+            "local set = {}\n"
+            "tool = { SetInput = function(_, k, v) set[k] = v end }\n"
+            "comp = { AskUser = function(_, t, c) return { File = '/y/ask.png' } end }\n"
+            "fusion = { RequestFile = %s }\n" % host
+            + script + "\nprint('LOGO=' .. tostring(set.Logo))\n")
+        out = subprocess.run([LUA, str(f)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert out.returncode == 0, out.stderr.decode()
+        assert "LOGO=" + want in out.stdout.decode()
 
 
 def test_engine_dcp_90_empty_timeline_tail(code):

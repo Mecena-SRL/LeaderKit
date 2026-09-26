@@ -1024,13 +1024,32 @@ if slateSec > 0 and get("GuidesSlate", 0) > 0.5 and (#frameLines > 0 or safeA or
   end
 end
 
+-- Percorso scelto nell'Inspector: spazi e virgolette, file://, %20 e percorsi mappati di Fusion (Comp:, UserData:...).
+local function filePath(v)
+  local p = (type(v) == "string") and v or ""
+  p = string.gsub(string.gsub(p, "^%s+", ""), "%s+$", "")
+  p = string.gsub(p, "^[\"']", ""); p = string.gsub(p, "[\"']$", "")
+  if string.match(p, "^file://") then
+    p = string.gsub(string.sub(p, 8), "%%(%x%x)", function(x) return string.char(tonumber(x, 16)) end)
+    if string.match(p, "^/%a:[/\\]") then p = string.sub(p, 2) end
+  end
+  if string.match(p, "^%a[%w ]+:") then
+    local host = fusion or fu
+    for _, mapper in ipairs({ c, host }) do
+      local okm, mp = pcall(function() return mapper:MapPath(p) end)
+      if okm and type(mp) == "string" and mp ~= "" and mp ~= p then p = mp; break end
+    end
+  end
+  return p
+end
+
 local LOGOS = { { "Logo", "LogoPos", "LogoSize", LOGO_TRACK, "Logo" },
   { "Logo2", "LogoPos2", "LogoSize2", LOGO_TRACK .. " 2", "Secondo logo" } }
+local logosSet = 0
 for _, L in ipairs(LOGOS) do
-  local logoPath = tostring(get(L[1], "") or "")
-  logoPath = string.gsub(string.gsub(logoPath, "^%s+", ""), "%s+$", "")
-  logoPath = string.gsub(logoPath, "^[\"']", ""); logoPath = string.gsub(logoPath, "[\"']$", "")
+  local logoPath = filePath(get(L[1], ""))
   if logoPath ~= "" then
+    logosSet = logosSet + 1
     local fh = io.open(logoPath, "rb")
     if not fh then
       bad(L[5] .. " non trovato: " .. logoPath .. " (sceglilo di nuovo con il selettore nella scheda Aspetto).")
@@ -1047,9 +1066,14 @@ for _, L in ipairs(LOGOS) do
         local track = videoTrack(L[4])
         local spans = {}
         local slateAt = head:GetStart() + math.floor(barsSec * n + 0.5)
-        if slateSec > 0 then spans[#spans + 1] = { slateAt, math.floor(slateSec * n + 0.5), "slate" } end
-        if get("LogoOnTail", 0) > 0.5 and lfoa and tailOn then spans[#spans + 1] = { lfoa + 1, tailLen, "coda" } end
-        if #spans == 0 then bad(L[5] .. ": lo standard non ha slate; attiva 'Anche sulla coda' per vederlo.") end
+        if slateSec > 0 then spans[#spans + 1] = { slateAt, math.floor(slateSec * n + 0.5), "sulla slate" } end
+        if get("LogoOnCount", 0) > 0.5 and countFrom > 2 then
+          spans[#spans + 1] = { ffoa - countFrom * n, (countFrom - 2) * n + 1, "sul countdown" }
+        end
+        if get("LogoOnTail", 0) > 0.5 and lfoa and tailOn then spans[#spans + 1] = { lfoa + 1, tailLen, "sulla coda" } end
+        if #spans == 0 then
+          bad(L[5] .. ": lo standard non ha slate; attiva 'Anche sul countdown' o 'Anche sulla coda' per vederlo.")
+        end
         for _, sp in ipairs(spans) do
           local pieces = placeStill(clip, sp[1], sp[2], track)
           for _, it in ipairs(pieces) do
@@ -1058,11 +1082,15 @@ for _, L in ipairs(LOGOS) do
               it:SetProperty("Pan", pan); it:SetProperty("Tilt", tilt)
             end)
           end
-          describe(pieces, L[5] .. " sulla " .. sp[3], L[4])
+          describe(pieces, L[5] .. " " .. sp[3], L[4])
         end
       end
     end
   end
+end
+
+if logosSet == 0 and slateSec > 0 then
+  log("Logo: nessun file scelto (scheda Aspetto › 'Scegli il logo...').")
 end
 
 -- ---------------------------------------------------------------- 5c) burn-in delle copie di lavoro

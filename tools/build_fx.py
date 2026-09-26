@@ -136,12 +136,35 @@ def uc_combo(name, label, items, on_change=None):
             % (name, opts, extra, lua_string(label)))
 
 
+IMAGE_FILTER = "Immagini (*.png *.jpg *.tif *.tga *.exr *.dpx)|*.png;*.jpg;*.jpeg;*.tif;*.tiff;*.tga;*.exr;*.dpx"
+
+
 def uc_file(name, label):
     """Campo percorso con pulsante Sfoglia (importazione del file)."""
     return ("\t\t\t\t\t\t%s = { LINKID_DataType = \"Text\", INPID_InputControl = \"FileControl\", "
             "FC_IsSaver = false, FC_ClipBrowse = false, "
-            "FCS_FilterString = \"Immagini (*.png *.jpg *.tif *.tga *.exr *.dpx)|*.png;*.jpg;*.jpeg;*.tif;*.tiff;*.tga;*.exr;*.dpx\", "
-            "LINKS_Name = %s, },\n" % (name, lua_string(label)))
+            "FCS_FilterString = %s, LINKS_Name = %s, },\n" % (name, lua_string(IMAGE_FILTER), lua_string(label)))
+
+
+def pick_file_code(target, title):
+    """Script del bottone 'Scegli...': il selettore di Fusion (RequestFile) o, se manca, AskUser.
+
+    Il campo FileControl non ha il pulsante Sfoglia nell'Inspector della pagina Edit
+    in tutte le versioni di Resolve: il bottone funziona ovunque funzioni Genera."""
+    return "\n".join([
+        "local p = nil",
+        "local host = fusion or fu",
+        "local asked = pcall(function() p = host:RequestFile('', '', { FReqB_Saving = false, FReqB_SeqGather = false, "
+        "FReqS_Filter = %s, FReqS_Title = %s }) end)" % (lua_string(IMAGE_FILTER), lua_string(title)),
+        "if not asked then     -- selettore non disponibile (annullato = nessun cambio)",
+        "  pcall(function()",
+        "    local cc = comp or host:GetCurrentComp()",
+        "    local r = cc:AskUser(%s, { { 'File', 'FileBrowse', Save = false } })" % lua_string(title),
+        "    if r then p = r.File end",
+        "  end)",
+        "end",
+        "if type(p) == 'string' and p ~= '' then pcall(function() tool:SetInput(%s, p) end) end" % lua_string(target),
+    ])
 
 
 def uc_slider(name, label, lo, hi, default, integer=True):
@@ -385,7 +408,7 @@ LOGO_POS = ["In alto a destra", "In alto a sinistra", "In basso a destra", "In b
 
 def param_names():
     """Parametri del pannello da ricopiare quando Genera ricrea il blocco."""
-    skip = ("Generate", "Remove", "Guide", "Duration", "Info", "ColorInfo", "DateToday")
+    skip = ("Generate", "Remove", "Guide", "Duration", "Info", "ColorInfo", "DateToday", "LogoPick", "Logo2Pick")
     return [src for src, _ in head_inputs() if not src.startswith("Sec") and src not in skip]
 
 
@@ -402,8 +425,8 @@ def head_inputs():
     out += [(x, "Tecnico") for x in ("SafeAction", "SafeTitle", "SecTech", "ColorInfo", "AudioFormat",
                                      "SecAudio", "PopLevel", "BeepEach")]
     out += [("SecLook", "Aspetto")] + [(c, "Aspetto") for c in color_inputs()]
-    out += [(x, "Aspetto") for x in ("SecLogo", "Logo", "LogoPos", "LogoSize", "Logo2", "LogoPos2", "LogoSize2",
-                                     "LogoOnTail")]
+    out += [(x, "Aspetto") for x in ("SecLogo", "Logo", "LogoPick", "LogoPos", "LogoSize", "Logo2", "Logo2Pick",
+                                     "LogoPos2", "LogoSize2", "LogoOnCount", "LogoOnTail")]
     out += [("CalOn", "Taratura")] + [(f, "Taratura") for f, _, _ in CALIBRATION]
     return out
 
@@ -689,11 +712,14 @@ def head(std=None):
     look = (uc_label("SecLook", "Colori") + color_controls()
             + uc_label("SecLogo", "Logo (inserito da Genera sopra la slate, traccia LeaderKit Logo)")
             + uc_file("Logo", "File del logo")
+            + uc_button("LogoPick", "Scegli il logo...", pick_file_code("Logo", "LeaderKit - logo"))
             + uc_combo("LogoPos", "Posizione", LOGO_POS)
             + uc_slider("LogoSize", "Dimensione (%)", 5, 100, 12, integer=False)
             + uc_file("Logo2", "Secondo logo (cliente, distributore...)")
+            + uc_button("Logo2Pick", "Scegli il secondo logo...", pick_file_code("Logo2", "LeaderKit - secondo logo"))
             + uc_combo("LogoPos2", "Posizione del secondo logo", LOGO_POS)
             + uc_slider("LogoSize2", "Dimensione del secondo logo (%)", 5, 100, 12, integer=False)
+            + uc_check("LogoOnCount", "Anche sul countdown", 0)
             + uc_check("LogoOnTail", "Anche sulla coda", 0))
     cal = (uc_check("CalOn", "Strumenti di taratura sul countdown (immagine creata da Genera)", 1)
            + "".join(uc_check(f, label, d) for f, label, d in CALIBRATION))
@@ -709,7 +735,7 @@ def head(std=None):
               ("SafeAction", "0"), ("SafeTitle", "0"), ("ColorInfo", '""'), ("AudioFormat", '""'),
               ("PopLevel", "0"), ("BeepEach", "0"), ("Logo", '""'), ("LogoPos", "0"), ("LogoSize", "12"),
               ("Logo2", '""'), ("LogoPos2", "1"), ("LogoSize2", "12"),
-              ("LogoOnTail", "0"), ("CalOn", "1")]
+              ("LogoOnCount", "0"), ("LogoOnTail", "0"), ("CalOn", "1")]
     values += [(i, str(std.get("slot_defaults", {}).get(c, 0))) for c, i, _ in SLOT_INPUTS]
     values += [(f, '""') for f, _, _ in PRODUCTION_FIELDS + POST_FIELDS if f not in ("Title", "Version")]
     values += [(f, "0") for f, _, _ in STATUSES]

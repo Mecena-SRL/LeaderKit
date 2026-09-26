@@ -68,7 +68,7 @@ headTool.inputs = { Preset = tonumber(opt.preset), Reel = 1, Custom = 0, BarsSec
   SlotCinema = tonumber(opt.SlotCinema or "3"), SlotTV = tonumber(opt.SlotTV or "0"),
   SlotSpot = tonumber(opt.SlotSpot or "3"), SlotStream = tonumber(opt.SlotStream or "3"), DateAuto = 1,
   Title = "Il film", TextRed = 0.5, BeepEach = tonumber(opt.beep), PopLevel = 0,
-  Logo = opt.logo, LogoPos = 0, LogoSize = 20, LogoOnTail = 1 }
+  Logo = opt.logo, LogoPos = 0, LogoSize = 20, LogoOnTail = 1, LogoOnCount = tonumber(opt.logocount or "0") }
 local head = setmetatable({ off = 0, dur = tonumber(opt.head) * nominal, name = "LeaderKit Head",
   comp = newComp(headTool) }, Item)
 table.insert(tracks.video[1].items, head)
