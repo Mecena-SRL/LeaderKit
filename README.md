@@ -343,3 +343,5 @@ Resolve: Riproduzione › Render Cache › Smart.
 - Conferme in Resolve (vedi sopra) e ritocchi grafici.
 - Installer Windows e Linux testati; `.drfx` firmato.
 - Export dei marker in CSV/EDL.
+
+Backlog e priorità della settimana in corso: [`docs/dev-queue.md`](docs/dev-queue.md).
