@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(ROOT, "src"))
 from leaderkit import __version__  # noqa: E402
 from leaderkit.fusion import lua_string  # noqa: E402
 
-RING_D = 0.36
+RING_D = 0.36          # diametro del cerchio del countdown su 16:9 (frazione della larghezza): ora e' _RD
 LINE_W = 0.0025
 # Interlinea dei Text+ a piu' righe rispetto all'altezza delle maiuscole di cap_size(): misurata in
 # Resolve 21 (le maiuscole sono ~0.44 * Size * larghezza, la riga di Open Sans 1.36 em).
@@ -48,6 +48,9 @@ _TOKENS = [
     ("_H", 'local _H = comp:GetPrefs("Comp.FrameFormat.Height")', ()),
     ("_A", "local _A = _W / _H", ("_W", "_H")),
     ("_N", "local _N = math.min(1, _A / 1.6)", ("_A",)),                # su 4:3 / verticale tutto si riduce
+    ("_PX", "local _PX = 1 / _H", ("_H",)),                              # un pixel in frazioni dell'altezza
+    # diametro del cerchio del countdown (frazione della larghezza): min(0.62 H, 0.40 W), come la taratura
+    ("_RD", "local _RD = math.min(0.62 / _A, 0.40)", ("_A",)),
 ]
 
 
@@ -394,6 +397,8 @@ def engine(mode, std=None):
                  + "LK_SLOT_INPUTS = %s\n" % lua_literal(dict((c, i) for c, i, _ in SLOT_INPUTS))
                  + "LK_PARAMS = %s\n" % lua_literal(param_names())
                  + "LK_CALIBRATION = %s\n" % lua_literal([k for k, _, _ in CALIBRATION])
+                 + "LK_GUIDES = %s\n" % lua_literal([[k, "ar", ar] for k, _, ar in FRAMELINES]
+                                                    + [[k, "safe", pct] for k, pct, _ in SAFE_AREAS])
                  + "LK_DIALS = %s\n" % lua_literal({"b": list(DIAL_B), "c": list(DIAL_C)}))
         libs = fx_source("overlay.lua") + "\n" + fx_source("image.lua") + "\n"
         body += "\n" + fx_source("engine.lua")
@@ -468,14 +473,24 @@ FRAMELINES = [("FL133", "1.33", 4.0 / 3.0), ("FL166", "1.66", 1.66), ("FL178", "
               ("FL185", "1.85", 1.85), ("FL200", "2.00", 2.0), ("FL220", "2.20", 2.2), ("FL239", "2.39", 2.39)]
 SAFE_AREAS = [("SafeAction", 0.93, "SAFE ACTION 93%"), ("SafeTitle", 0.90, "SAFE TITLE 90%")]
 GUIDE_KEYS = ["FLTL"] + [k for k, _, _ in FRAMELINES] + [k for k, _, _ in SAFE_AREAS]
-CALIBRATION = [("CalStars", "Griglie di risoluzione 1-4 px (nitidezza, scalatura)", 1), ("CalCenter", "Mirino centrale", 1),
-               ("CalGrey", "Scala di grigi", 1), ("CalColor", "Patch di colore RGBCMY", 1),
-               ("CalRamps", "Rampe B/N, R, G, B", 1), ("CalBlue", "Verifica blu (filtro Wratten 47B)", 1),
-               ("CalContour", "Sfera sfumata (contouring)", 1), ("CalPeak", "Bianco di picco e neri (PLUGE)", 1),
-               ("CalLabels", "Etichette fps / risoluzione", 1)]
+# strumenti di taratura (SMPTE RP 428-6, EBU Tech 3325, ITU-R BT.814): chiave -> modulo di fx/overlay.lua
+CALIBRATION = [("CalStars", "Stelle di Siemens negli angoli (fuoco)", 1),
+               ("CalRes", "Righe 1-4 px e registrazione RGB (nitidezza, scalatura, convergenza)", 1),
+               ("CalDiag", "Zone plate e linee a 45° (aliasing, scalatura)", 1),
+               ("CalGamma", "Verifica del gamma 2.2 / 2.4 / 2.6", 1),
+               ("CalGrey", "Scala di grigi e neri 0-10%", 1), ("CalColor", "Colori RGBCMY 100% / 75%", 1),
+               ("CalChecker", "ColorChecker 24 (sRGB)", 1), ("CalRamps", "Rampe B/N, R, G, B", 1),
+               ("CalBlue", "Verifica del blu (filtro Wratten 47B)", 1),
+               ("CalContour", "Sfera sfumata (contouring)", 1), ("CalPeak", "Bianco di picco e PLUGE", 1),
+               ("CalEdge", "Bordo del raster, angoli e scale di overscan", 1),
+               ("CalCenter", "Mirino centrale", 1), ("CalLabels", "Etichette fps / risoluzione / formato", 1)]
 LOGO_POS = ["In alto a destra", "In alto a sinistra", "In basso a destra", "In basso a sinistra", "Al centro"]
 END_DOT_POS = ["In alto a destra (cue mark)", "Al centro", "In alto a sinistra"]
 HIDDEN_NUM = ["LogoW", "LogoH", "Logo2W", "Logo2H", "TitleW", "TitleH"]
+# immagini create da Genera e caricate nei Loader (percorso e dimensioni in pixel, input di servizio)
+GEN_IMAGES = [("CalImage", "CalLd", "CalW", "CalH"), ("DialBImage", "DialBLd", "DialBW", "DialBH"),
+              ("DialCImage", "DialCLd", "DialCW", "DialCH")]
+HIDDEN_GEN = [k for im in GEN_IMAGES for k in im[2:]]
 
 
 def param_names():
@@ -556,8 +571,11 @@ NO_TITLE_IMG = '(LK.TitleImage.Value == "" or LK.TitleW < 1)'
 PHASE_EXPR = "({ %s })[math.floor(LK.Phase + 1.5)]" % ", ".join(lua_string(x) for x in PHASES)
 
 
-def cap_size(cap):
-    """Size di Text+ per un'altezza delle maiuscole pari a 'cap' (frazione dell'altezza)."""
+def cap_size(cap, px=None):
+    """Size di Text+ per un'altezza delle maiuscole pari a 'cap' (frazione dell'altezza).
+    px: altezza minima delle maiuscole in pixel (leggibilita' su SD / 480p)."""
+    if px:
+        return "2 * math.max((%s) * _N, %s * _PX) / _A" % (cap, repr(px / 0.88))
     return "2 * (%s) / _A * _N" % cap
 
 
@@ -586,36 +604,6 @@ def slate_columns():
     return [("PRODUCTION", 0.19, prod), ("POST", 0.5, post), ("TECHNICAL", 0.81, tech)]
 
 
-def info_groups():
-    cols = slate_columns()
-    prod, post, tech = [c[2] for c in cols]
-    first = [("DIRECTOR", "LK.Director.Value")] + [f for f in prod if f[0] != "DATE"]
-    return [first, post + [("STATUS", status_expr())], tech + [("DATE", DATE_EXPR % TODAY)], [("NOTE", "LK.Note.Value")]]
-
-
-def info_fn(maxlines=16):
-    """Lua: local function INFO() -> { s = righe 'ETICHETTA   valore', n = numero di righe }."""
-    adds = []
-    for grp in info_groups():
-        adds += ["a(%s, %s)" % (lua_string(lab), v) for lab, v in grp] + ["pend = true"]
-    return ("local function INFO() local s, n, pend = '', 0, false "
-            "local function a(l, v) v = tostring(v or '') if v ~= '' and n < %d then "
-            "if pend and n > 0 then s = s .. '\\n' n = n + 1 end pend = false "
-            "s = s .. (n > 0 and '\\n' or '') .. l .. '   ' .. v n = n + 1 end end "
-            "%s return { s = s, n = n } end " % (maxlines, " ".join(adds)))
-
-
-def col_fn(fields):
-    """Lua: local function COL() -> una colonna dei pannelli { l = etichette, v = valori, n = righe,
-    ml = valore piu' lungo }: solo i campi compilati, nell'ordine."""
-    items = ", ".join("{ %s, %s }" % (lua_string(lab), v) for lab, v in fields)
-    return ("local function COL() local l, v, n, ml = '', '', 0, 1 local list = { %s } "
-            "for i = 1, #list do local x = tostring(list[i][2] or '') if x ~= '' then n = n + 1 "
-            "l = l .. (n > 1 and '\\n' or '') .. list[i][1] v = v .. (n > 1 and '\\n' or '') .. x "
-            "if string.len(x) > ml then ml = string.len(x) end end end return { l = l, v = v, n = n, ml = ml } end "
-            % items)
-
-
 # ------------------------------------------------------------------ elementi grafici
 def bars_stack(g):
     """Barre 100% a pieno raster (DPP: bianco, giallo, ciano, verde, magenta, rosso, blu, nero)."""
@@ -632,23 +620,22 @@ def bars_stack(g):
 def leader_stack(g, prefix, base, digit_expr, sweep_vis=None, cd=None, extras=()):
     """Cerchi e croce (un solo Background), braccio rotante e cifra centrale sopra 'base'.
     extras: (nome, livelli, condizione) messi sotto la cifra, ognuno con il suo gate."""
-    r = RING_D / 2.0
-    g.mask(prefix + "RingO", "EllipseMask", repr(RING_D), repr(RING_D), border=repr(LINE_W * 1.6))
-    g.mask(prefix + "RingI", "EllipseMask", repr(RING_D * 0.86), repr(RING_D * 0.86), border=repr(LINE_W),
+    g.mask(prefix + "RingO", "EllipseMask", X("_RD"), X("_RD"), border=repr(LINE_W * 1.6))
+    g.mask(prefix + "RingI", "EllipseMask", X("_RD * 0.86"), X("_RD * 0.86"), border=repr(LINE_W),
            chain=prefix + "RingO")
     g.mask(prefix + "LineH", "RectangleMask", "1", X("%s * _A" % LINE_W), chain=prefix + "RingI")
     g.mask(prefix + "LineV", "RectangleMask", repr(LINE_W), "1", chain=prefix + "LineH")
     g.background(prefix + "Rings", color="Accent", mask=prefix + "LineV")
     top = g.merge(prefix + "M1", base, prefix + "Rings")
     if sweep_vis:
-        g.mask(prefix + "Arm", "RectangleMask", repr(LINE_W * 1.6), X("%s * _A" % r),
-               center=X("Point(0.5, 0.5 + %s * _A)" % (r / 2.0)))
+        g.mask(prefix + "Arm", "RectangleMask", repr(LINE_W * 1.6), X("_RD / 2 * _A"),
+               center=X("Point(0.5, 0.5 + _RD / 4 * _A)"))
         g.background(prefix + "ArmBg", color="Accent", mask=prefix + "Arm")
         g.transform(prefix + "Sweep", prefix + "ArmBg", ex("-360 * math.fmod((%s) * _FPS - _REM, _FPS) / _FPS" % cd))
         top = g.gate(prefix + "ArmG", top, [prefix + "Sweep"], sweep_vis)
     for name, layers, cond in extras:
         top = g.gate(name, top, layers, cond)
-    g.text(prefix + "Digit", "{ 0.5, 0.5 }", "0.30", X(digit_expr), tint("Text"))
+    g.text(prefix + "Digit", "{ 0.5, 0.5 }", X("_RD * 0.30 / 0.36"), X(digit_expr), tint("Text"))
     return g.merge(prefix + "M5", top, prefix + "Digit")
 
 
@@ -666,25 +653,91 @@ def clock_layers(g):
     return ["CkRingBg", "CkSweep", "CkDigit"]
 
 
-def hand(g, name, cx, cy, r0, r1, width, angle, color="Hi"):
-    """Lancetta da r0 a r1 (frazioni dell'altezza) sopra il centro (cx, cy), ruotata di 'angle' gradi."""
-    g.mask(name + "M", "RectangleMask", repr(width), repr(r1 - r0), center="{ %s, %s }" % (cx, cy + (r0 + r1) / 2))
+def info_groups(status=True):
+    cols = slate_columns()
+    prod, post, tech = [c[2] for c in cols]
+    first = [("DIRECTOR", "LK.Director.Value")] + [f for f in prod if f[0] != "DATE"]
+    second = post + ([("STATUS", status_expr())] if status else [])
+    return [first, second, tech + [("DATE", DATE_EXPR % TODAY)], [("NOTE", "LK.Note.Value")]]
+
+
+# Troncamento con "…" a m caratteri, senza spezzare i caratteri UTF-8 (niente string.byte:
+# nelle espressioni di Fusion si usano solo le funzioni di string gia' provate).
+CUT_FN = ("local function CUT(s, m) m = math.max(3, math.floor(m)) if string.len(s) <= m then return s end "
+          "local k = m - 1 while k > 1 and string.match(s, '^[\\128-\\191]', k + 1) do k = k - 1 end "
+          "return string.sub(s, 1, k) .. '…' end ")
+# larghezza media di un carattere rispetto all'altezza delle maiuscole del modello (Open Sans, misurata):
+# etichette maiuscole 0.80, testo misto 0.68, maiuscole Bold 0.72
+CW_MIX, CW_CAPS = 0.68, 0.74
+PX_MIN = 7                         # altezza minima delle maiuscole in pixel (modello): leggibile anche a 480p
+
+
+def info_fn():
+    """Lua: local function INFO() -> righe 'ETICHETTA   valore' (i gruppi separati da una riga vuota)."""
+    adds = []
+    for grp in info_groups(status=False):
+        adds += ["a(%s, %s)" % (lua_string(lab), v) for lab, v in grp] + ["pend = true"]
+    return ("local function INFO() local L, pend = {}, false "
+            "local function a(l, v) v = tostring(v or '') if v ~= '' then "
+            "if pend and #L > 0 then L[#L + 1] = '' end pend = false L[#L + 1] = l .. '   ' .. v end end "
+            "%s return L end " % " ".join(adds))
+
+
+def col_fn(fields):
+    """Lua: local function COL() -> righe compilate di una colonna dei pannelli { {etichetta, valore}, ... }."""
+    items = ", ".join("{ %s, %s }" % (lua_string(lab), v) for lab, v in fields)
+    return ("local function COL() local L, list = {}, { %s } "
+            "for i = 1, #list do local x = tostring(list[i][2] or '') if x ~= '' then L[#L + 1] = { list[i][1], x } end end "
+            "return L end " % items)
+
+
+def fit_cap(cap, width, chars, factor=CW_MIX, px=PX_MIN):
+    """Lua: altezza delle maiuscole (frazione di H) che non supera 'cap', sta in 'width' (frazione di W)
+    per 'chars' caratteri e non scende sotto 'px' pixel."""
+    return ("math.max(math.min((%s) * _N, (%s) * _A / (%s * math.max(1, %s))), %s * _PX)"
+            % (cap, width, factor, chars, px))
+
+
+def text_fit(g, name, center, cap, width, text, rgb, style="Bold", px=PX_MIN, factor=None, align="c", pre=""):
+    """Text+ di una riga (o poche) che si riduce per stare in 'width' (frazione di W), mai sotto 'px'."""
+    factor = factor or (CW_CAPS if style == "Bold" else CW_MIX)
+    p = pre + "local _T = %s local _ML = 1 for l in string.gmatch(_T, '[^\\n]+') do " \
+              "if string.len(l) > _ML then _ML = string.len(l) end end " % text
+    p += "local _C = %s " % fit_cap(cap, width, "_ML", factor, px)
+    return g.text(name, X(center, p) if "Point(" in center else center, X("2 * _C / _A", p), ex("Text(_T)", p),
+                  rgb, style=style, align=align)
+
+
+def hand(g, name, cx, cy, rexpr, f0, f1, width, angle, color="Hi"):
+    """Lancetta da f0 a f1 del raggio R (espressione, frazione dell'altezza) attorno a (cx, cy)."""
+    pre = "local R = %s " % rexpr
+    g.mask(name + "M", "RectangleMask", repr(width), X("R * %s" % repr(f1 - f0), pre),
+           center=X("Point(%s, %s + R * %s)" % (cx, cy, repr((f0 + f1) / 2)), pre))
     g.background(name + "Bg", color=color, mask=name + "M")
     return g.transform(name, name + "Bg", ex(angle), pivot="{ %s, %s }" % (cx, cy))
 
 
-def status_chips(g, prefix, y, pre="", chain=True):
-    """Stato dei reparti: COLOR · FINAL (verde) / TEMP (colore evidenza), affiancati e centrati."""
+def status_chips(g, prefix, y, pre="", chain=True, cx="0.5", width="0.94"):
+    """Stato dei reparti: COLOR · FINAL (verde) / TEMP (colore evidenza), affiancati e centrati in cx,
+    nella larghezza 'width' (frazione di W). Se alla grandezza minima non stanno in una riga vanno su due."""
     n = " + ".join("(LK.%s > 0.5 and 1 or 0)" % f for f, _, _ in STATUSES)
+    geo = pre + ("local _n = %s local _w = %s local _C = math.min(0.0135 * _N, 0.135 * _A * 0.86 / (%s * 13)) "
+                 "local _pr = math.max(1, _n) local _need = %s * 13 * math.max(_C, 6.5 * _PX) / 0.86 / _A "
+                 "if _need * _n > _w and _n > 2 then _pr = math.ceil(_n / 2) end "
+                 "local _st = math.min(0.135, _w / math.max(1, _pr)) "
+                 "_C = math.max(math.min(_C, _st * 0.86 * _A / (%s * 13)), 6.5 * _PX) "
+                 % (n, width, CW_CAPS, CW_CAPS, CW_CAPS))
     nodes = []
     for i, (f, _, lab) in enumerate(STATUSES):
         k = " + ".join(["0"] + ["(LK.%s > 0.5 and 1 or 0)" % x for x, _, _ in STATUSES[:i]])
         fin = "LK.%s > 1.5" % f
         rgb = ["((%s) and 0.40 or LK.HiRed)" % fin, "((%s) and 0.85 or LK.HiGreen)" % fin,
                "((%s) and 0.45 or LK.HiBlue)" % fin]
+        pos = geo + ("local _k = %s local _row = math.floor(_k / _pr) local _col = _k - _row * _pr "
+                     "local _nr = (_row == 0) and math.min(_pr, _n) or (_n - _pr) " % k)
         nodes.append(g.text("%s%d" % (prefix, i),
-                            X("Point(0.5 + ((%s) - ((%s) - 1) / 2) * 0.135, %s)" % (k, n, y), pre),
-                            X(cap_size(0.0135)),
+                            X("Point(%s + (_col - (_nr - 1) / 2) * _st, %s - _row * %s * _C)" % (cx, y, PITCH + 0.6), pos),
+                            X("2 * _C / _A", geo),
                             ex('Text(LK.%s > 0.5 and ("%s  ·  " .. ({ "-", "TEMP", "FINAL" })[math.floor(LK.%s + 1.5)]) or "")'
                                % (f, lab, f)), rgb))
     return g.chain(prefix + "C", nodes) if chain else nodes
@@ -694,6 +747,21 @@ def footer_text(static):
     return 'Text(LK.Info.Value .. ((%s) == "" and "" or ("\\n" .. %s)))' % (static, static)
 
 
+def footer(g, name, static, note=False, top=None, x="0.5", width="0.94"):
+    """Piede: timecode (FFOA / 2-POP / LFOA) e righe fisse dello standard. Ancorato in basso (sopra il
+    margine del 3.5%) o, con 'top', sotto quell'ordinata; si riduce per stare nella larghezza."""
+    s = 'LK.Info.Value .. (_S == "" and "" or ("\\n" .. _S))'
+    if note:
+        s += ' .. (LK.Note.Value == "" and "" or ("\\n" .. LK.Note.Value))'
+    pre = ("local _S = %s local _T = %s local _n, _ML = 0, 1 for l in string.gmatch(_T, '[^\\n]+') do _n = _n + 1 "
+           "if string.len(l) > _ML then _ML = string.len(l) end end _n = math.max(1, _n) " % (static, s))
+    pre += "local _C = %s " % fit_cap("0.0135", width, "_ML", CW_MIX, 6.5)
+    y = ("(%s) - _C / 2 - (_n - 1) * %s * _C / 2" % (top, PITCH)) if top else \
+        ("0.035 + _C / 2 + (_n - 1) * %s * _C / 2" % PITCH)
+    return g.text(name, X("Point(%s, %s)" % (x, y), pre), X("2 * _C / _A", pre), ex("Text(_T)", pre),
+                  tint("Text", 0.72), style="Regular")
+
+
 # ------------------------------------------------------------------ stili della slate
 SLATE_STYLES = ["Pannelli (produzione / post / tecnico)", "Quadrante (fotogrammi, dati a destra)",
                 "Orologio (titolo e dati a destra)", "Minimale (titolo al centro)"]
@@ -701,14 +769,14 @@ SLATE_STYLES = ["Pannelli (produzione / post / tecnico)", "Quadrante (fotogrammi
 # ancora "center" = x e' il centro, "left" = x e' il bordo sinistro.
 TITLE_BOXES = [(0.5, 0.815, 0.60, 0.11, "center"), (0.53, 0.845, 0.42, 0.10, "left"),
                (0.58, 0.80, 0.38, 0.16, "left"), (0.5, 0.60, 0.70, 0.18, "center")]
-DIAL_B = (0.27, 0.5, 0.36)         # quadrante: centro x (W), centro y (H), raggio (H)
-DIAL_C = (0.28, 0.5, 0.31)         # orologio
+# quadranti: centro x (W), centro y (H), raggio (espressione, frazione di H): stretti sui formati stretti
+DIAL_B = (0.27, 0.5, "math.min(0.36, 0.22 * _A)")
+DIAL_C = (0.28, 0.5, "math.min(0.31, 0.20 * _A)")
 
 PANEL_W = 0.295
 PANEL_TOP = 0.645
-PANEL_ROWS = 6                     # pannelli ad altezza fissa: oltre 6 campi la colonna si riduce
+PANEL_ROWS = 8                     # pannelli ad altezza fissa: 8 righe (la colonna piu' lunga)
 T_CAP = 0.0145                     # altezza delle maiuscole nelle tabelle dei pannelli
-LABEL_COL = 0.108                  # larghezza della colonna etichette (frazione della larghezza)
 TABLE_TOP = PANEL_TOP - 0.062      # prima riga delle tabelle
 PANEL_BOTTOM = round(TABLE_TOP - PANEL_ROWS * PITCH * T_CAP - 0.03, 4)
 
@@ -718,10 +786,10 @@ def slate_panels(g, P, base, static):
     etichetta-valore (2 Text+ per pannello), stato dei reparti e piede con i timecode.
 
     Leggero: pannelli ad altezza fissa (maschere senza espressioni) e ogni Text+ legge solo
-    i campi della sua colonna."""
+    i campi della sua colonna. La colonna delle etichette e' larga quanto l'etichetta piu' lunga,
+    i valori troppo lunghi per il pannello vengono troncati con "…"."""
     heading = pv(P, "heading")
     cols = slate_columns()
-    capw = (PANEL_W - 0.032 - LABEL_COL) * 0.714 / (0.55 * T_CAP)      # capienza in caratteri a grandezza piena
     fill, line = None, None
     height = PANEL_TOP - PANEL_BOTTOM
     for i, (_, cx, _) in enumerate(cols):
@@ -736,101 +804,146 @@ def slate_panels(g, P, base, static):
     top = g.merge("SMP", base, "SPanFill")
     top = g.merge("SMA", top, "SAccent")
     # intestazione, titolo, regia
-    g.text("SHeading", "{ 0.5, 0.925 }", X(cap_size(0.016)), ex('Text(%s .. "   ·   LEADERKIT")' % heading), tint("Hi"))
-    title_size = X("math.min(2 * 0.068 / _A * _N, 1.9 / math.max(1, string.len(LK.Title.Value)))")
+    text_fit(g, "SHeading", "{ 0.5, 0.925 }", "0.016", "0.9", '%s .. "   ·   LEADERKIT"' % heading, tint("Hi"))
+    title_size = X("math.max(math.min(2 * 0.068 / _A * _N, 1.9 / math.max(1, string.len(LK.Title.Value))), 2 * 12 * _PX / _A)")
     g.text("STitle", "{ 0.5, 0.815 }", title_size,
            ex('Text(%s and string.upper(LK.Title.Value) or "")' % NO_TITLE_IMG), tint("Text"))
-    g.text("SDirector", "{ 0.5, 0.735 }", X(cap_size(0.024)),
-           ex('Text(LK.Director.Value == "" and "" or ("DIRECTED BY   " .. string.upper(LK.Director.Value)))'),
-           tint("Text", 0.9), style="Regular")
+    text_fit(g, "SDirector", "{ 0.5, 0.735 }", "0.024", "0.9",
+             '(LK.Director.Value == "" and "" or ("DIRECTED BY   " .. string.upper(LK.Director.Value)))',
+             tint("Text", 0.9), style="Regular", factor=CW_CAPS)
     top = g.merge("SMH", top, g.chain("SHd", ["SHeading", "STitle", "SDirector"]))
     # colonne: intestazione, etichette e valori allineati riga per riga
     texts = []
+    inner = PANEL_W - 0.032
     for i, (title, cx, fields) in enumerate(cols):
         xl = cx - PANEL_W / 2 + 0.016
-        pre = (col_fn(fields) + "local C = COL() "
-               "local f = math.max(0.7, math.min(1, %d / math.max(1, C.n), %s * _A / _N / C.ml)) "
-               "local cap = %s * _N * f local pitch = %s * cap " % (PANEL_ROWS, repr(capw), T_CAP, PITCH))
-        block_y = "%s - C.n * pitch / 2" % TABLE_TOP
-        g.text("SCol%d" % i, "{ %s, %s }" % (xl, PANEL_TOP - 0.032), X(cap_size(0.0125)), 'Text("%s")' % title,
+        pre = (col_fn(fields) + CUT_FN + "local L = COL() local n, mll, mlv = #L, 1, 1 "
+               "for i = 1, n do mll = math.max(mll, string.len(L[i][1])) mlv = math.max(mlv, string.len(L[i][2])) end "
+               "local PW = %s * _A local cap0 = %s * _N "
+               "local f = math.max(0.7, math.min(1, %d / math.max(1, n), PW / ((0.80 * mll + 1.2 + %s * mlv) * cap0))) "
+               "local cap = math.max(cap0 * f, %s * _PX) local LW = (0.80 * mll + 1.2) * cap "
+               "local mc = (PW - LW) / (%s * cap) local l, v = '', '' "
+               "for i = 1, n do l = l .. (i > 1 and '\\n' or '') .. L[i][1] v = v .. (i > 1 and '\\n' or '') .. CUT(L[i][2], mc) end "
+               "local pitch = %s * cap "
+               % (repr(inner), T_CAP, PANEL_ROWS, CW_MIX, PX_MIN, CW_MIX, PITCH))
+        block_y = "%s - (n - 1) * pitch / 2" % TABLE_TOP
+        g.text("SCol%d" % i, "{ %s, %s }" % (xl, PANEL_TOP - 0.032), X(cap_size(0.0125, 6.5)), 'Text("%s")' % title,
                tint("Hi"), align="l")
         g.text("SLab%d" % i, X("Point(%s, %s)" % (xl, block_y), pre), X("2 * cap / _A", pre),
-               ex("Text(C.l)", pre), tint("Text", 0.55), style="Regular", align="l")
-        g.text("SVal%d" % i, X("Point(%s, %s)" % (xl + LABEL_COL, block_y), pre), X("2 * cap / _A", pre),
-               ex("Text(C.v)", pre), tint("Text"), style="Semibold", align="l")
+               ex("Text(l)", pre), tint("Text", 0.55), style="Regular", align="l")
+        g.text("SVal%d" % i, X("Point(%s + LW / _A, %s)" % (xl, block_y), pre), X("2 * cap / _A", pre),
+               ex("Text(v)", pre), tint("Text"), style="Semibold", align="l")
         texts += ["SCol%d" % i, "SLab%d" % i, "SVal%d" % i]
     top = g.merge("SMC", top, g.chain("SCo", texts))
-    # stato dei reparti sotto i pannelli, poi il piede
+    # stato dei reparti sotto i pannelli, poi il piede (sotto lo stato)
     chips = status_chips(g, "SSt", repr(PANEL_BOTTOM - 0.05), chain=False)
-    g.text("SFoot", X("Point(0.5, %s - (%s and 0.13 or 0.075))" % (PANEL_BOTTOM, ANY_STATUS)),
-           X(cap_size(0.015)),
-           ex('Text(LK.Info.Value .. ((%s) == "" and "" or ("\\n" .. %s)) .. (LK.Note.Value == "" and "" or ("\\n" .. LK.Note.Value)))'
-              % (static, static)), tint("Text", 0.75), style="Regular")
-    return g.merge("SMB", top, g.chain("SBt", chips + ["SFoot"]))
+    foot = footer(g, "SFoot", static, note=True,
+                  top="%s - (%s and 0.085 or 0.04)" % (PANEL_BOTTOM, ANY_STATUS))
+    return g.merge("SMB", top, g.chain("SBt", chips + [foot]))
 
 
-def info_block(g, name, x, y0, cap, ymin):
-    """Lista dei dati (una riga per campo compilato) in un solo Text+ allineato a sinistra, tra y0
-    (prima riga) e ymin: con molti campi il testo si riduce per restarci."""
-    pre = info_fn(28) + ("local I = INFO() local c = math.min(%s * _N, (%s - %s) / (%s * math.max(0, I.n - 1) + 1)) "
-                         % (cap, y0, ymin, PITCH))
-    return g.text(name, X("Point(%s, %s - (I.n - 1) * %s * c / 2)" % (x, y0, PITCH), pre),
-                  X("2 * c / _A", pre), ex("Text(I.s)", pre), tint("Text", 0.92), style="Regular", align="l")
+def info_block(g, name, x, x1, y0, cap, ymin):
+    """Dati (una riga 'ETICHETTA   valore' per campo compilato) tra y0 (prima riga) e ymin, da x a x1:
+    su due colonne se in una sola diventerebbero troppo piccoli; righe troppo lunghe troncate con "…".
+    Ritorna i due Text+ (colonne)."""
+    pre = (info_fn() + CUT_FN +
+           "local L = INFO() local n = #L local W1, HH = (%s - %s) * _A, %s - %s "
+           "local function ML(a, b) local m = 1 for i = a, b do m = math.max(m, string.len(L[i])) end return m end "
+           "local ea, sb, cw = n, n + 1, W1 "
+           "local c = math.min(%s * _N, HH / (%s * math.max(0, n - 1) + 1), W1 / (%s * ML(1, n))) "
+           "if n > 8 and c < 0.8 * %s * _N then "
+           "local best, bd = nil, 1e9 for i = 2, n - 1 do "
+           "if L[i] == '' and math.abs(i - (n + 1) / 2) < bd then best, bd = i, math.abs(i - (n + 1) / 2) end end "
+           "if best then ea, sb = best - 1, best + 1 else ea = math.floor(n / 2) sb = ea + 1 end "
+           "cw = W1 / 2 - 0.015 * _A "
+           "c = math.min(%s * _N, HH / (%s * math.max(ea, n - sb + 1) - %s + 1), cw / (%s * math.max(ML(1, ea), ML(sb, n)))) end "
+           "c = math.max(c, %s * _PX) local mc = cw / (%s * c) "
+           "local function J(a, b) local s = '' for i = a, b do s = s .. (i > a and '\\n' or '') .. CUT(L[i], mc) end return s end "
+           % (x1, x, y0, ymin, cap, PITCH, CW_MIX, cap, cap, PITCH, PITCH, CW_MIX, PX_MIN, CW_MIX))
+    out = []
+    for k, (a, b, xx) in enumerate([("1", "ea", x), ("sb", "n", "%s + (%s - %s) / 2 + 0.0075" % (x, x1, x))]):
+        nm = name if k == 0 else name + "2"
+        rows = "(%s - %s + 1)" % (b, a)
+        g.text(nm, X("Point(%s, %s - (%s - 1) * %s * c / 2)" % (xx, y0, rows, PITCH), pre),
+               X("2 * c / _A", pre), ex("Text(%s <= %s and J(%s, %s) or '')" % (a, b, a, b), pre),
+               tint("Text", 0.92), style="Regular", align="l")
+        out.append(nm)
+    return out
 
 
-def common_footer(g, name, static):
-    return g.text(name, "{ 0.5, 0.07 }", X(cap_size(0.0135)), ex(footer_text(static)), tint("Text", 0.7),
-                  style="Regular")
+def dial_layer(ld, kind):
+    """PNG del quadrante (disegnato da Genera) centrato sul quadrante, alla scala del quadro."""
+    cx, cy, r = DIAL_B if kind == "b" else DIAL_C
+    pre = "local R = %s local S = 2 * math.ceil(R * _H * 1.04 + 2) " % r
+    key = "Dial%s" % kind.upper()
+    return (ld, X("Point(%s, %s)" % (cx, cy)), X("S / math.max(1, LK.%sW)" % key, pre))
+
+
+def dial_cond(kind):
+    key = "Dial%s" % kind.upper()
+    return 'LK.%sImage.Value ~= "" and LK.%sW > 0' % (key, key)
 
 
 def slate_style_b(g, P, base, static):
-    """Quadrante: a sinistra il quadrante dei fotogrammi del secondo (disegnato da Genera in PNG)
-    con la tacca che gira; a destra titolo, dati e fotogrammi al FFOA."""
+    """Quadrante: a sinistra il quadrante dei fotogrammi del secondo (PNG di Genera nel Loader DialBLd)
+    con la tacca che gira, i secondi e i fotogrammi al FFOA; a destra titolo, standard, dati e stato."""
     cx, cy, r = DIAL_B
-    top = g.merge("BMh", base, hand(g, "BHand", cx, cy, r * 0.66, r * 0.785, 0.007,
-                                    "-360 * (_FPS - 1 - ((_REM - 1) % _FPS)) / _FPS"))
-    g.text("BSec", "{ %s, %s }" % (cx, cy + 0.03), X(cap_size(0.16)), ex("Text(tostring(math.ceil(_REM / _FPS)))"),
-           tint("Text"))
-    g.text("BFps", "{ %s, %s }" % (cx, cy - 0.17), X(cap_size(0.022)),
+    R = "local R = %s " % r
+    top = g.gate("BDial", base, [dial_layer("DialBLd", "b")], dial_cond("b"))
+    # senza PNG (Genera non ancora premuto): la corona resta comunque visibile
+    g.mask("BRingO", "EllipseMask", X("R * 2 / _A", R), X("R * 2 / _A", R), center="{ %s, %s }" % (cx, cy),
+           border=repr(LINE_W * 1.6))
+    g.mask("BRingI", "EllipseMask", X("R * 1.6 / _A", R), X("R * 1.6 / _A", R), center="{ %s, %s }" % (cx, cy),
+           border=repr(LINE_W), chain="BRingO")
+    g.background("BRingBg", color="Accent", mask="BRingI")
+    top = g.gate("BRingG", top, ["BRingBg"], "not (%s)" % dial_cond("b"))
+    top = g.merge("BMh", top, hand(g, "BHand", cx, cy, r, 0.66, 0.785, 0.007,
+                                   "-360 * (_FPS - 1 - ((_REM - 1) % _FPS)) / _FPS"))
+    g.text("BFps", X("Point(%s, %s + 0.43 * R)" % (cx, cy), R), X("2 * math.max(0.052 * R, 6.5 * _PX) / _A", R),
            'Text(string.format("SEC / %g FPS", comp:GetPrefs("Comp.FrameFormat.Rate")))', tint("Text", 0.8))
-    x = 0.53
+    g.text("BSec", X("Point(%s, %s + 0.08 * R)" % (cx, cy), R), X("2 * 0.40 * R / _A", R),
+           ex("Text(tostring(math.ceil(_REM / _FPS)))"), tint("Text"))
+    g.text("BFrames", X("Point(%s, %s - 0.27 * R)" % (cx, cy), R), X("2 * 0.13 * R / _A", R),
+           ex("Text(tostring(_REM))"), tint("Text", 0.85), style="Light")
+    g.text("BFramesL", X("Point(%s, %s - 0.43 * R)" % (cx, cy), R), X("2 * math.max(0.045 * R, 6.5 * _PX) / _A", R),
+           'Text("FRAMES TO FFOA")', tint("Text", 0.6), style="Regular")
+    x, x1 = 0.53, 0.97
     g.text("BTitle", "{ %s, 0.845 }" % x,
-           X("math.min(2 * 0.05 / _A * _N, 0.8 / math.max(1, string.len(LK.Title.Value)))"),
+           X("math.max(math.min(2 * 0.05 / _A * _N, 1.15 / math.max(1, string.len(LK.Title.Value))), 2 * 9 * _PX / _A)"),
            ex('Text(%s and string.upper(LK.Title.Value) or "")' % NO_TITLE_IMG), tint("Text"), align="l")
-    g.text("BHead", "{ %s, 0.765 }" % x, X(cap_size(0.016)), "Text(%s)" % pv(P, "heading"), tint("Hi"), align="l")
-    info_block(g, "BInfo", x, "0.70", 0.0175, "0.19")
-    g.text("BFrames", "{ %s, 0.125 }" % x, X(cap_size(0.062)), ex("Text(tostring(_REM))"), tint("Text", 0.85),
-           style="Light", align="l")
-    g.text("BFramesL", "{ %s, 0.058 }" % x, X(cap_size(0.016)), 'Text("frames to FFOA")', tint("Text", 0.6),
-           style="Regular", align="l")
-    common_footer(g, "Foot1", static)
-    return g.merge("BMt", top, g.chain("BTx", ["BSec", "BFps", "BTitle", "BHead", "BInfo", "BFrames", "BFramesL",
-                                               "Foot1"]))
+    text_fit(g, "BHead", "{ %s, 0.765 }" % x, "0.016", repr(x1 - x), pv(P, "heading"), tint("Hi"), align="l")
+    info = info_block(g, "BInfo", x, x1, "0.70", 0.0175, "0.28")
+    chips = status_chips(g, "BSt", "0.225", chain=False, cx=repr((x + x1) / 2), width=repr(x1 - x))
+    foot = footer(g, "Foot1", static)
+    return g.merge("BMt", top, g.chain("BTx", ["BFps", "BSec", "BFrames", "BFramesL", "BTitle", "BHead"] + info
+                                       + chips + [foot]))
 
 
 def slate_style_c(g, P, base, static):
-    """Orologio: cerchio con lancetta dei secondi al FFOA (tacche disegnate da Genera in PNG);
-    a destra titolo (testo o PNG), intestazione e dati."""
+    """Orologio: cerchio con lancetta dei secondi al FFOA (tacche e numeri: PNG di Genera nel Loader
+    DialCLd); a destra titolo (testo o PNG), intestazione, dati e stato."""
     cx, cy, r = DIAL_C
-    g.mask("CRing", "EllipseMask", X("%s * 2 / _A" % r), X("%s * 2 / _A" % r), center="{ %s, %s }" % (cx, cy),
+    R = "local R = %s " % r
+    g.mask("CRing", "EllipseMask", X("R * 2 / _A", R), X("R * 2 / _A", R), center="{ %s, %s }" % (cx, cy),
            border=repr(LINE_W * 0.8))
-    g.mask("CHub", "EllipseMask", X("%s * 0.56 / _A" % r), X("%s * 0.56 / _A" % r), center="{ %s, %s }" % (cx, cy),
+    g.mask("CHub", "EllipseMask", X("R * 0.56 / _A", R), X("R * 0.56 / _A", R), center="{ %s, %s }" % (cx, cy),
            border=repr(LINE_W * 0.8), chain="CRing")
     g.background("CRingBg", color="Accent", mask="CHub")
     top = g.merge("CMr", base, "CRingBg")
-    top = g.merge("CMa", top, hand(g, "CHand", cx, cy, r * 0.30, r * 0.93, 0.0022,
+    top = g.gate("CDial", top, [dial_layer("DialCLd", "c")], dial_cond("c"))
+    top = g.merge("CMa", top, hand(g, "CHand", cx, cy, r, 0.30, 0.93, 0.0022,
                                    "-6 * math.floor((_REM - 1) / _FPS)", color="Text"))
-    g.text("CSec", "{ %s, %s }" % (cx, cy), X(cap_size(0.05)), ex("Text(tostring(math.ceil(_REM / _FPS)))"),
+    g.text("CSec", "{ %s, %s }" % (cx, cy), X("2 * 0.15 * R / _A", R), ex("Text(tostring(math.ceil(_REM / _FPS)))"),
            tint("Text"))
-    x = 0.58
+    x, x1 = 0.58, 0.97
     g.text("CTitle", "{ %s, 0.80 }" % x,
-           X("math.min(2 * 0.06 / _A * _N, 0.75 / math.max(1, string.len(LK.Title.Value)))"),
+           X("math.max(math.min(2 * 0.06 / _A * _N, 1.0 / math.max(1, string.len(LK.Title.Value))), 2 * 9 * _PX / _A)"),
            ex('Text(%s and string.upper(LK.Title.Value) or "")' % NO_TITLE_IMG), tint("Hi"), align="l")
-    g.text("CHead", "{ %s, 0.69 }" % x, X(cap_size(0.016)), "Text(%s)" % pv(P, "heading"), tint("Text", 0.8),
-           align="l")
-    info_block(g, "CInfo", x, "0.625", 0.017, "0.12")
-    common_footer(g, "Foot2", static)
-    return g.merge("CMt", top, g.chain("CTx", ["CSec", "CTitle", "CHead", "CInfo", "Foot2"]))
+    text_fit(g, "CHead", "{ %s, 0.69 }" % x, "0.016", repr(x1 - x), pv(P, "heading"), tint("Text", 0.8), align="l")
+    info = info_block(g, "CInfo", x, x1, "0.625", 0.017, "0.28")
+    chips = status_chips(g, "CSt", "0.225", chain=False, cx=repr((x + x1) / 2), width=repr(x1 - x))
+    foot = footer(g, "Foot2", static)
+    return g.merge("CMt", top, g.chain("CTx", ["CSec", "CTitle", "CHead"] + info + chips + [foot]))
 
 
 def slate_style_d(g, P, base, static):
@@ -838,25 +951,26 @@ def slate_style_d(g, P, base, static):
     g.mask("DRule", "RectangleMask", "0.12", repr(LINE_W * 1.2), center="{ 0.5, 0.42 }")
     g.background("DRuleBg", color="Hi", mask="DRule")
     top = g.merge("DMr", base, "DRuleBg")
-    g.text("DHead", "{ 0.5, 0.80 }", X(cap_size(0.016)), "Text(%s)" % pv(P, "heading"), tint("Hi"))
-    g.text("DTitle", "{ 0.5, 0.60 }", X("math.min(2 * 0.09 / _A * _N, 2.2 / math.max(1, string.len(LK.Title.Value)))"),
+    text_fit(g, "DHead", "{ 0.5, 0.80 }", "0.016", "0.9", pv(P, "heading"), tint("Hi"))
+    g.text("DTitle", "{ 0.5, 0.60 }",
+           X("math.max(math.min(2 * 0.09 / _A * _N, 2.2 / math.max(1, string.len(LK.Title.Value))), 2 * 12 * _PX / _A)"),
            ex('Text(%s and string.upper(LK.Title.Value) or "")' % NO_TITLE_IMG), tint("Text"))
-    g.text("DDir", "{ 0.5, 0.47 }", X(cap_size(0.024)),
-           ex('Text(LK.Director.Value == "" and "" or ("DIRECTED BY   " .. string.upper(LK.Director.Value)))'),
-           tint("Text", 0.85), style="Regular")
+    text_fit(g, "DDir", "{ 0.5, 0.47 }", "0.024", "0.9",
+             '(LK.Director.Value == "" and "" or ("DIRECTED BY   " .. string.upper(LK.Director.Value)))',
+             tint("Text", 0.85), style="Regular", factor=CW_CAPS)
     parts = ["LK.Version.Value", "LK.Duration.Value", DATE_EXPR % TODAY,
              'string.format("%g fps", comp:GetPrefs("Comp.FrameFormat.Rate"))',
              'string.format("%d × %d", _W, _H)', "LK.ColorInfo.Value", "LK.AudioFormat.Value"]
     line = ("(function() local s = '' local function a(v) v = tostring(v or '') "
             "if v ~= '' then if s ~= '' then s = s .. '   ·   ' end s = s .. v end end "
             + " ".join("a(%s)" % p for p in parts) + " return s end)()")
-    g.text("DLine", "{ 0.5, 0.36 }", X(cap_size(0.016)), ex("Text(%s)" % line), tint("Text", 0.9), style="Regular")
+    text_fit(g, "DLine", "{ 0.5, 0.36 }", "0.016", "0.94", line, tint("Text", 0.9), style="Regular")
     who = ("(function() local s = '' local function a(l, v) if v ~= '' then if s ~= '' then s = s .. '      ' end "
            "s = s .. l .. '  ' .. v end end a('PRODUCTION', LK.Production.Value) a('PRODUCER', LK.Producer.Value) "
            "a('EDITOR', LK.Editor.Value) a('CLIENT', LK.Client.Value) return s end)()")
-    g.text("DWho", "{ 0.5, 0.31 }", X(cap_size(0.0135)), "Text(%s)" % who, tint("Text", 0.65), style="Regular")
-    common_footer(g, "Foot3", static)
-    top = g.merge("DMt", top, g.chain("DTx", ["DHead", "DTitle", "DDir", "DLine", "DWho", "Foot3"]))
+    text_fit(g, "DWho", "{ 0.5, 0.31 }", "0.0135", "0.94", who, tint("Text", 0.65), style="Regular", px=6.5)
+    foot = footer(g, "Foot3", static)
+    top = g.merge("DMt", top, g.chain("DTx", ["DHead", "DTitle", "DDir", "DLine", "DWho", foot]))
     return g.merge("DMs", top, status_chips(g, "DSt", "0.21"))
 
 
@@ -903,32 +1017,66 @@ CD_FIELDS = [("CdTitle", "Titolo", 1, None), ("CdVersion", "Versione", 0, None),
              ("CdCode", "Codice", 0, ("CODE", "LK.Code.Value")),
              ("CdDate", "Data", 0, ("DATE", DATE_EXPR % TODAY))]
 # spazio libero sopra e sotto il cerchio del countdown (frazione dell'altezza)
-CD_SPACE = "local SP = math.max(0.02, (1 - %s * _A) / 2) " % RING_D
+CD_SPACE = "local SP = math.max(0.02, (1 - _RD * _A) / 2) "
+BOX_LW = "local blw = math.max(1, math.floor(_H / 1080 * 2 + 0.5)) "
+# riquadro del logo (pixel): alto 0.72 dello spazio sopra il cerchio x la dimensione scelta (al massimo il 14%
+# del lato corto), largo quanto serve al logo (da quadrato a 2.6 volte l'altezza, mai piu' del cerchio)
+CD_LOGO = (CD_SPACE + BOX_LW + "local iw, ih = math.max(1, LK.LogoW), math.max(1, LK.LogoH) "
+           "local bh = math.min(0.72 * SP * _H, 0.2 * math.min(_W, _H)) * math.min(1.4, math.max(0.2, LK.CdLogoSize / 100)) "
+           "bh = math.max(8, math.floor(bh / 2 + 0.5) * 2) "
+           "local pad = math.floor(0.13 * bh + 0.5) local lh = bh - 2 * pad local lw = lh * iw / ih "
+           "local mw = math.min(2.6 * bh, _RD * _W) - 2 * pad if lw > mw then lw = mw lh = lw * ih / iw end "
+           "local bw = math.max(bh, math.floor((lw + 2 * pad) / 2 + 0.5) * 2) local cy = 1 - SP / 2 ")
 
 
-def countdown_extras(g):
-    """Logo sopra il cerchio (sulla linea verticale) e dati sotto: presi dai campi gia' compilati."""
-    pre = (CD_SPACE + "local iw, ih = math.max(1, LK.LogoW), math.max(1, LK.LogoH) "
-           "local k = LK.CdLogoSize / 100 local s = math.min(0.30 * _W * k / iw, SP * 0.7 * k * _H / ih) ")
-    logo = ("Logo1Ld", X("Point(0.5, 1 - SP / 2)", pre), X("s", pre))
+def cd_data_pre():
+    """Lua: dati sotto il cerchio (titolo / versione, poi i ruoli scelti) e il loro riquadro in pixel,
+    stretto sul testo. I ruoli vanno due per riga o uno per riga, come vengono piu' grandi."""
     roles = " ".join("r(LK.%s, %s, %s)" % (key, lua_string(lab), v) for key, _, _, rv in CD_FIELDS if rv
                      for lab, v in [rv])
-    # prima riga titolo / versione, poi i ruoli due per riga
-    info = ("local function CDI() local a, R = '', {} "
+    return (CD_SPACE + BOX_LW +
+            "local R, a = {}, '' "
             "local function r(on, l, v) v = tostring(v or '') if on > 0.5 and v ~= '' then R[#R + 1] = l .. '  ' .. v end end "
             "if LK.CdTitle > 0.5 and LK.Title.Value ~= '' then a = string.upper(LK.Title.Value) end "
             "if LK.CdVersion > 0.5 and LK.Version.Value ~= '' then a = a .. (a ~= '' and '   ·   ' or '') .. LK.Version.Value end "
-            + roles + " local s, n, ml = a, (a ~= '' and 1 or 0), string.len(a) "
-            "for i = 1, #R, 2 do local l = R[i] .. (R[i + 1] and ('      ' .. R[i + 1]) or '') "
-            "s = s .. (s ~= '' and '\\n' or '') .. l n = n + 1 if string.len(l) > ml then ml = string.len(l) end end "
-            "return { s = s, n = n, ml = math.max(1, ml) } end "
-            "local I = CDI() " + CD_SPACE +
-            "local c = math.min(0.016 * _N, SP * 0.75 / (0.88 + %s * math.max(0, I.n - 1)), 0.36 * _A / (0.74 * I.ml)) "
-            % PITCH)
-    g.text("CdText", X("Point(0.5, SP / 2)", info), X("2 * c / _A", info), ex("Text(I.s)", info), tint("Text", 0.9),
-           outline=("1", "0.1"))
-    return [("CdLogoG", [logo], "LK.CdLogo > 0.5 and " + logo_cond("")),
-            ("CdInfoG", ["CdText"], "LK.CdInfo > 0.5")]
+            + roles + " "
+            "local MW, MH = _RD * _W * 0.98, math.min(0.80 * SP * _H, 0.36 * math.min(_W, _H)) local pad = 0.12 * MH "
+            "local function lay(k) local s, n, ml = a, (a ~= '' and 1 or 0), string.len(a) "
+            "for i = 1, #R, k do local l = R[i] if k == 2 and R[i + 1] then l = l .. '      ' .. R[i + 1] end "
+            "s = s .. (s ~= '' and '\\n' or '') .. l n = n + 1 ml = math.max(ml, string.len(l)) end "
+            "local c = math.min(0.018 * _N * _H, (MH - 2 * pad) / (0.88 + %s * math.max(0, n - 1)), "
+            "(MW - 2 * pad) / (0.70 * math.max(1, ml))) return s, n, ml, c end "
+            "local s1, n1, m1, c1 = lay(2) local s2, n2, m2, c2 = lay(1) "
+            "local S, N, ML, CP = s1, n1, m1, c1 if c2 > c1 * 1.12 then S, N, ML, CP = s2, n2, m2, c2 end "
+            "CP = math.max(CP, 6.5) "
+            "local dw = math.floor(math.min(MW, 0.70 * ML * CP + 2 * pad + 0.6 * CP) / 2 + 0.5) * 2 "
+            "local dh = math.floor(math.min(MH, (0.88 + %s * math.max(0, N - 1)) * CP + 2 * pad) / 2 + 0.5) * 2 "
+            % (PITCH, PITCH))
+
+
+def countdown_extras(g):
+    """Logo sopra il cerchio e dati sotto, ognuno in un riquadro nero con il bordo nel colore della
+    grafica (come i moduli della taratura), sopra frame lines e taratura; nella colonna del cerchio."""
+    logo_on = "LK.CdLogo > 0.5 and " + logo_cond("")
+    info_on = "LK.CdInfo > 0.5"
+    data = cd_data_pre()
+    # riquadri: un Background nero e uno per i bordi, maschere in catena accese dal loro interruttore
+    g.mask("CdBoxLF", "RectangleMask", X("bw / _W", CD_LOGO), X("bh / _H", CD_LOGO), center=X("Point(0.5, cy)", CD_LOGO),
+           level=X("(%s) and 1 or 0" % logo_on))
+    g.mask("CdBoxDF", "RectangleMask", X("dw / _W", data), X("dh / _H", data), center=X("Point(0.5, SP / 2)", data),
+           level=X("(%s and N > 0) and 1 or 0" % info_on, data), chain="CdBoxLF")
+    g.mask("CdBoxLB", "RectangleMask", X("(bw - blw) / _W", CD_LOGO), X("(bh - blw) / _H", CD_LOGO),
+           center=X("Point(0.5, cy)", CD_LOGO), border=X("blw / _W", CD_LOGO), level=X("(%s) and 1 or 0" % logo_on))
+    g.mask("CdBoxDB", "RectangleMask", X("(dw - blw) / _W", data), X("(dh - blw) / _H", data),
+           center=X("Point(0.5, SP / 2)", data), border=X("blw / _W", data),
+           level=X("(%s and N > 0) and 1 or 0" % info_on, data), chain="CdBoxLB")
+    g.background("CdBoxFill", rgb=["0", "0", "0"], mask="CdBoxDF")
+    g.background("CdBoxLine", color="Accent", mask="CdBoxDB")
+    logo = ("Logo1Ld", X("Point(0.5, cy)", CD_LOGO), X("lw / iw", CD_LOGO))
+    g.text("CdText", X("Point(0.5, SP / 2)", data), X("2 * CP / _W", data), ex("Text(S)", data), tint("Text", 0.92))
+    return [("CdBoxG", ["CdBoxFill", "CdBoxLine"], "(%s) or (%s)" % (logo_on, info_on)),
+            ("CdLogoG", [logo], logo_on),
+            ("CdInfoG", ["CdText"], info_on)]
 
 
 # ------------------------------------------------------------------ frame lines e safe area
@@ -1000,7 +1148,6 @@ def head(std=None):
     SLATEVIS = "(_REM <= (%s + %s + %s) * _FPS and _REM > (%s + %s) * _FPS)" % (S, GP, C, GP, C)
     LEADVIS = "(%s > 0 and _REM <= %s * _FPS and (_REM > 2 * _FPS or (_REM == 2 * _FPS and %s > 0.5)))" % (C, C, POP)
     ANY_GUIDE = "((%s) > 0.5)" % " + ".join("LK.%s" % k for k in GUIDE_KEYS)
-    GUIDEVIS = "(%s and ((%s and LK.GuidesSlate > 0.5) or (%s and LK.GuidesCd > 0.5)))" % (ANY_GUIDE, SLATEVIS, LEADVIS)
     static = pv(P, "slate_lines", fn=lambda p: "\n".join(x for x in p.get("slate_lines", []) if "{" not in x))
     vis = visibility_script(std)
 
@@ -1054,13 +1201,14 @@ def head(std=None):
             + uc_slider("LogoSize2", "Larghezza del secondo logo (%)", 5, 100, 12, integer=False)
             + uc_check("LogoOnTail", "Loghi anche sulla coda", 0)
             + uc_label("SecCd", "Countdown: logo sopra il cerchio, dati sotto")
-            + uc_check("CdLogo", "Logo sopra il countdown", 0)
-            + uc_slider("CdLogoSize", "Dimensione del logo sul countdown (%)", 20, 100, 80, integer=False)
-            + uc_check("CdInfo", "Dati sotto il countdown", 0)
+            + uc_check("CdLogo", "Logo sopra il countdown (riquadro nero)", 0)
+            + uc_slider("CdLogoSize", "Dimensione del riquadro del logo (%)", 20, 140, 70, integer=False)
+            + uc_check("CdInfo", "Dati sotto il countdown (riquadro nero)", 0)
             + "".join(uc_check(k, "  " + lab, d) for k, lab, d, _ in CD_FIELDS)
             + uc_label("SecLook", "Colori") + color_controls())
-    guide = (uc_label("SecGuides", "Frame lines e safe area (sotto i testi, a pixel interi)")
-             + uc_check("GuidesSlate", "Sulla slate", 1) + uc_check("GuidesCd", "Sul countdown", 1)
+    guide = (uc_label("SecGuides", "Frame lines e safe area (a pixel interi)")
+             + uc_check("GuidesSlate", "Sulla slate (sotto i testi)", 1)
+             + uc_check("GuidesCd", "Sul countdown e la taratura (Genera impagina la taratura dentro)", 1)
              + uc_check("FLTL", "Formato della timeline", 0)
              + "".join(uc_check(f, "Frame line " + lab + ":1", 0) for f, lab, _ in FRAMELINES)
              + uc_check("SafeAction", "Safe action 93% (EBU R95)", 0) + uc_check("SafeTitle", "Safe title 90%", 0)
@@ -1078,7 +1226,7 @@ def head(std=None):
             + uc_label("SecCal", "Taratura sul countdown (immagine creata da Genera)")
             + uc_check("CalOn", "Strumenti di taratura", 1)
             + "".join(uc_check(f, label, d) for f, label, d in CALIBRATION))
-    hidden = "".join(uc_hidden(k) for k in HIDDEN_NUM)
+    hidden = "".join(uc_hidden(k) for k in HIDDEN_NUM + HIDDEN_GEN) + "".join(uc_hidden(im[0], "Text") for im in GEN_IMAGES)
     uc = (on_page("Progetto", prog) + on_page("Dati", data) + on_page("Aspetto", look)
           + on_page("Guide", guide) + on_page("Tecnico", tech) + hidden)
 
@@ -1093,14 +1241,14 @@ def head(std=None):
               ("PopLevel", "0"), ("BeepEach", "0"), ("Logo", '""'), ("LogoPos", "0"), ("LogoSize", "12"),
               ("Logo2", '""'), ("LogoPos2", "1"), ("LogoSize2", "12"),
               ("SlateStyle", "0"), ("TitleImage", '""'), ("TitleImageSize", "100"),
-              ("LogoOnTail", "0"), ("CalOn", "1"), ("CdLogo", "0"), ("CdLogoSize", "80"), ("CdInfo", "0")]
+              ("LogoOnTail", "0"), ("CalOn", "1"), ("CdLogo", "0"), ("CdLogoSize", "70"), ("CdInfo", "0")]
     values += [(k, str(d)) for k, _, d, _ in CD_FIELDS]
     values += [(i, str(std.get("slot_defaults", {}).get(c, 0))) for c, i, _ in SLOT_INPUTS]
     values += [(f, '""') for f, _, _ in PRODUCTION_FIELDS + POST_FIELDS if f not in ("Title", "Version")]
     values += [(f, "0") for f, _, _ in STATUSES]
     values += [(f, "0") for f, _, _ in FRAMELINES]
     values += [(f, str(d)) for f, _, d in CALIBRATION]
-    values += [(k, "0") for k in HIDDEN_NUM]
+    values += [(k, "0") for k in HIDDEN_NUM + HIDDEN_GEN] + [(im[0], '""') for im in GEN_IMAGES]
     values += color_values() + [(GUIDE_COLOR[0] + ch, repr(v)) for ch, v in zip(("Red", "Green", "Blue"), GUIDE_COLOR[2])]
 
     g = G()
@@ -1108,11 +1256,19 @@ def head(std=None):
     g.loader("TitleLd")
     g.loader("Logo1Ld")
     g.loader("Logo2Ld")
+    for _, ld, _, _ in GEN_IMAGES:
+        g.loader(ld)
     g.background("Bg", color="Bg")
     # barre
     top = g.dissolve("MBars", "Bg", bars_stack(g), ex("(%s) and 1 or 0" % BARSVIS))
-    # frame lines e safe area subito sopra lo sfondo, sotto slate e countdown
-    base = g.gate("MGuides", "Bg", [guides_layer(g)], GUIDEVIS)
+    # frame lines e safe area: sulla slate subito sopra lo sfondo (sotto i testi); sul countdown sopra
+    # la taratura (PNG di Genera nel Loader CalLd, a tutto quadro) e sotto cerchio, riquadri e cifra
+    guides = guides_layer(g)
+    base = g.gate("MGuides", "Bg", [guides], "%s and LK.GuidesSlate > 0.5" % ANY_GUIDE)
+    cal_on = ('LK.CalOn > 0.5 and LK.CalImage.Value ~= "" and LK.CalW > 0 and LK.CalH > 0 '
+              'and math.abs(LK.CalW / LK.CalH - _A) < 0.01')
+    cbase = g.gate("MCal", "Bg", [("CalLd", X("Point(0.5, 0.5)"), X("_W / math.max(1, LK.CalW)"))], cal_on)
+    cbase = g.gate("MGuidesCd", cbase, [guides], "%s and LK.GuidesCd > 0.5" % ANY_GUIDE)
     # slate: quattro stili alternati, poi titolo in PNG, loghi e orologio ident
     s_ = slate_panels(g, P, base, static)
     for i, fn in ((1, slate_style_b), (2, slate_style_c), (3, slate_style_d)):
@@ -1123,7 +1279,7 @@ def head(std=None):
     s_ = g.gate("SClock", s_, clock_layers(g), "%s > 0.5" % CLOCK)
     top = g.dissolve("MSlate", top, s_, ex("(%s) and 1 or 0" % SLATEVIS))
     # countdown + 2-pop, sopra le frame lines (la taratura PNG di Genera sta sulla traccia sopra)
-    lead = leader_stack(g, "L", base, 'Text((_REM < %s * _FPS and _REM >= 2 * _FPS) and tostring(math.ceil(_REM / _FPS)) or "")' % C,
+    lead = leader_stack(g, "L", cbase, 'Text((_REM < %s * _FPS and _REM >= 2 * _FPS) and tostring(math.ceil(_REM / _FPS)) or "")' % C,
                         sweep_vis="_REM < %s * _FPS and _REM > 2 * _FPS" % C, cd=C, extras=countdown_extras(g))
     top = g.dissolve("MLeader", top, lead, ex("(%s) and 1 or 0" % LEADVIS))
     g.text("PicStart", "{ 0.5, 0.5 }", "0.075", 'Text("PICTURE\\nSTART")', tint("Text"), spacing=1.0)

@@ -374,44 +374,18 @@ local goodVariant = nil
 local audioOk, audioFail = 0, 0
 local function placeOn(clip, frame, len, track, mediaType, src)
   src = src or 0
-  local still = mediaType == 1
-  local list = (goodVariant and not still) and { goodVariant } or VARIANTS
-  local shorter = nil
+  local list = goodVariant and { goodVariant } or VARIANTS
   for _, v in ipairs(list) do
     local info = { mediaPoolItem = clip, recordFrame = frame, trackIndex = track, startFrame = src,
       endFrame = src + len - 1 + v.extra, mediaType = v.mediaType and mediaType or nil }
     local placed = listOf(pool:AppendToTimeline({ info }))
     if placed[1] then
       local st, d = placed[1]:GetStart(), placed[1]:GetDuration()
-      if st == frame and d == len then
-        if not still then goodVariant = v end
-        if shorter then pcall(function() tl:DeleteClips({ shorter }, false) end) end
-        return placed[1]
-      end
-      if still and st == frame and d > 0 and d < len and not shorter then
-        shorter = placed[1]      -- immagine fissa piu' corta: la si tiene se non c'e' di meglio
-      else
-        tl:DeleteClips(placed, false)
-      end
+      if st == frame and d == len then goodVariant = v; return placed[1] end
+      tl:DeleteClips(placed, false)
     end
   end
-  return shorter
-end
-
--- Immagine fissa su [frame, frame+len): se Resolve la accorcia alla durata
--- standard delle immagini, la si ripete fino a coprire tutto l'intervallo.
-local function placeStill(clip, frame, len, track)
-  local pieces, pos, remaining = {}, frame, len
-  for _ = 1, 200 do
-    if remaining <= 0 then break end
-    local it = placeOn(clip, pos, remaining, track, 1)
-    if not it and remaining > n then it = placeOn(clip, pos, n, track, 1) end
-    if not it then break end
-    local d = it:GetDuration()
-    pieces[#pieces + 1] = it
-    pos, remaining = pos + d, remaining - d
-  end
-  return pieces, remaining <= 0
+  return nil
 end
 
 local function placeAudio(clip, frame, len, label)
@@ -569,22 +543,7 @@ end
 if audioOk == 1 then ok("1 clip audio posizionato sulla traccia '" .. POP_TRACK .. "'.")
 elseif audioOk > 1 then ok(audioOk .. " clip audio posizionati sulla traccia '" .. POP_TRACK .. "'.") end
 
--- ---------------------------------------------------------------- 5b) taratura, frame lines, logo
-local function importImage(path)
-  local folder = mediaFolder()
-  local name = string.match(path, "[^/\\]+$") or path
-  if folder then
-    for _, clip in ipairs(listOf(folder:GetClipList())) do
-      if clip:GetName() == name then return clip end
-    end
-  end
-  local prev = pool:GetCurrentFolder()
-  if folder then pool:SetCurrentFolder(folder) end
-  local items = pool:ImportMedia({ path })
-  if prev then pool:SetCurrentFolder(prev) end
-  return listOf(items)[1]
-end
-
+-- ---------------------------------------------------------------- 5b) taratura, quadranti, logo
 local function videoTrack(name)
   for t = 1, tl:GetTrackCount("video") do
     if tl:GetTrackName("video", t) == name then return t end
@@ -596,72 +555,80 @@ local function videoTrack(name)
   return t
 end
 
-local function describe(pieces, label, track)
-  if #pieces == 0 then bad(label .. ": immagine non posizionata sulla traccia '" .. track .. "'."); return end
-  if #pieces > 1 then
-    ok(label .. " (traccia '" .. track .. "', " .. #pieces .. " pezzi: Resolve limita la durata delle immagini fisse).")
-  else
-    ok(label .. " (traccia '" .. track .. "').")
-  end
-end
-
 local w, h = tonumber(W) or 1920, tonumber(H) or 1080
 local function hash(str)
   local hv = 5381
   for i = 1, #str do hv = (hv * 33 + string.byte(str, i)) % 2147483647 end
   return string.format("%08x", hv)
 end
+-- classe del formato per l'etichetta della taratura (anche verticali e 4:3)
 local function resClass()
-  if w >= 7680 then return "8K" elseif w >= 3996 then return "4K DCI" elseif w >= 3840 then return "UHD"
-  elseif w >= 1998 then return "2K DCI" elseif w >= 1920 then return "HD" end
+  local long, short = math.max(w, h), math.min(w, h)
+  if long >= 7680 then return "8K" elseif long >= 3996 and w >= 3996 then return "4K DCI"
+  elseif long >= 3840 then return "UHD" elseif long >= 1998 and w >= 1998 then return "2K DCI"
+  elseif long >= 1920 or short >= 1080 then return "HD" elseif short >= 720 then return "HD 720" end
   return "SD"
 end
 local accent = { get("AccentRed", 0.85), get("AccentGreen", 0.85), get("AccentBlue", 0.85) }
 
-local function overlay(kind, spec)
-  local key = kind .. "|" .. w .. "x" .. h .. "|" .. table.concat(accent, ",")
-  local ck = {}
-  for k, v in pairs(spec.cal or {}) do ck[#ck + 1] = k .. "=" .. tostring(v) end
-  table.sort(ck)
-  key = key .. "|" .. table.concat(ck, "|") .. (spec.fpsLabel or "") .. (spec.resLabel or "")
-  for _, d in ipairs({ spec.dialB, spec.dialC }) do
-    if d then key = key .. string.format("|%g,%g,%g,%g", d.cx, d.cy, d.r, d.fps) end
-  end
-  local path = cacheDir .. sep .. string.format("LeaderKit_%s_%dx%d_%s.png", kind, w, h, hash(key))
-  local fh = io.open(path, "rb")
-  if fh then fh:close(); return path end
-  local okr, err = LK_OVERLAY.render(path, w, h, spec)
-  if not okr then bad("Immagine " .. kind .. " non creata: " .. tostring(err)); return nil end
-  return path
+-- chiave del file in cache: tutti i valori della spec, in ordine
+local function specKey(v)
+  if type(v) ~= "table" then return tostring(v) end
+  local keys = {}
+  for k in pairs(v) do keys[#keys + 1] = tostring(k) end
+  table.sort(keys)
+  local out = {}
+  for _, k in ipairs(keys) do out[#out + 1] = k .. "=" .. specKey(v[k] == nil and v[tonumber(k)] or v[k]) end
+  return "{" .. table.concat(out, ",") .. "}"
 end
 
--- taratura sul countdown (frame lines, safe area e pallino finale sono nel generatore, sotto i testi)
+-- PNG disegnato una volta sola (riusato se nulla cambia) e caricato nel Loader del generatore:
+-- Fusion lo tiene in cache per tutto il clip, niente tracce in piu' ne' immagini fisse accorciate.
+local function genImage(kind, spec, render, key, ldName, wKey, hKey, label)
+  local path = cacheDir .. sep .. string.format("LeaderKit_%s_%dx%d_%s.png", kind, w, h, hash(kind .. w .. "x" .. h .. specKey(spec)))
+  local fh = io.open(path, "rb")
+  if fh then fh:close() else
+    local okr, err = render(path)
+    if not okr then bad(label .. ": immagine non creata (" .. tostring(err) .. ")."); path = "" end
+  end
+  set(lk, key, path)
+  local st = LK_IMAGE.sync(c, lk, key, ldName, wKey, hKey, path)
+  if path ~= "" and st ~= "ok" then bad(LK_IMAGE.message(label, st, path)) end
+  return st == "ok" and path or nil
+end
+
+-- taratura sul countdown, a tutto quadro: sotto frame lines, cerchio, logo e dati (sono nel generatore)
 if countFrom > 0 and get("CalOn", 1) > 0.5 then
   local cal = {}
   for _, k in ipairs(LK_CALIBRATION or {}) do cal[string.lower(string.sub(k, 4))] = get(k, 1) > 0.5 end
-  local path = overlay("Taratura", { accent = accent, cal = cal, fpsLabel = string.format("%g/SEC", r.fps), resLabel = resClass() })
-  local clip = path and importImage(path)
-  if path and not clip then bad("Resolve non ha importato " .. path .. ".") end
-  if clip then
-    local from = ffoa - countFrom * n
-    local len = (countFrom - 2) * n + 1
-    local pieces = placeStill(clip, from, len, videoTrack(GFX_TRACK))
-    describe(pieces, "Taratura " .. w .. "x" .. h .. " sul countdown", GFX_TRACK)
+  local spec = { accent = accent, cal = cal, fpsLabel = string.format("%g/SEC", r.fps), resLabel = resClass(),
+    cdLogo = get("CdLogo", 0) > 0.5 and get("Logo", "") ~= "", cdInfo = get("CdInfo", 0) > 0.5 }
+  -- con le frame lines sul countdown i moduli stanno dentro l'area comune delle linee accese
+  if get("GuidesCd", 1) > 0.5 then
+    local list = {}
+    for _, gd in ipairs(LK_GUIDES or {}) do
+      if get(gd[1], 0) > 0.5 then list[#list + 1] = gd[2] == "safe" and { safe = gd[3] } or { ar = gd[3] } end
+    end
+    if #list > 0 then spec.inner = LK_OVERLAY.innerRect(w, h, list) end
   end
+  local path = genImage("Taratura", spec, function(p) return LK_OVERLAY.render(p, w, h, spec) end,
+    "CalImage", "CalLd", "CalW", "CalH", "Taratura")
+  if path then
+    ok(string.format("Taratura %dx%d sul countdown (nel generatore, sotto frame lines, logo e dati)%s.", w, h,
+      spec.inner and "; moduli dentro le frame lines accese" or ""))
+  end
+else
+  set(lk, "CalImage", "")
+  LK_IMAGE.sync(c, lk, "CalImage", "CalLd", "CalW", "CalH", "")
 end
 
-local slateStyle = math.floor(get("SlateStyle", 0) + 0.5)
-local slateSpan = { head:GetStart() + math.floor(barsSec * n + 0.5), math.floor(slateSec * n + 0.5) }
-if slateSec > 0 and (slateStyle == 1 or slateStyle == 2) and LK_DIALS then
-  local d = LK_DIALS[slateStyle == 1 and "b" or "c"]
-  local key = slateStyle == 1 and "dialB" or "dialC"
-  local spec = { accent = accent }
-  spec[key] = { cx = d[1], cy = d[2], r = d[3], fps = r.fps }
-  local path = overlay(slateStyle == 1 and ("Quadrante" .. math.floor(r.fps + 0.5)) or "Orologio", spec)
-  local clip = path and importImage(path)
-  if clip then
-    describe(placeStill(clip, slateSpan[1], slateSpan[2], videoTrack(GFX_TRACK)),
-      (slateStyle == 1 and "Quadrante" or "Orologio") .. " della slate " .. w .. "x" .. h, GFX_TRACK)
+-- quadranti degli stili Quadrante e Orologio: entrambi pronti, cosi' cambiando stile non manca nulla
+if slateSec > 0 then
+  for _, d in ipairs({ { "b", "DialBImage", "DialBLd", "DialBW", "DialBH", "Quadrante" },
+                       { "c", "DialCImage", "DialCLd", "DialCW", "DialCH", "Orologio" } }) do
+    local spec = { accent = accent, fps = r.fps }
+    genImage(d[6] .. math.floor(r.fps + 0.5), spec, function(p) return LK_OVERLAY.renderDial(p, d[1], w, h, spec) end,
+      d[2], d[3], d[4], d[5], d[6] .. " della slate")
   end
 end
 

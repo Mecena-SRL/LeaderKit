@@ -96,6 +96,8 @@ LK_IMAGE = (function()
       pcall(function() ld:SetInput("Loop", 1) end)
       pcall(function() ld:SetInput("HoldFirstFrame", 1000000) end)
       pcall(function() ld:SetInput("HoldLastFrame", 1000000) end)
+      -- PNG con trasparenza non premoltiplicata: bordi puliti nel Merge
+      pcall(function() ld:SetInput("PostMultiplyByAlpha", 1) end)
       pcall(function() c:Unlock() end)
       if not w then
         pcall(function()

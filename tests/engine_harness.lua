@@ -83,6 +83,10 @@ headTool.inputs = { Preset = tonumber(opt.preset), Reel = 1, Custom = 0, BarsSec
   Logo = opt.logo, LogoPos = 0, LogoSize = 20, LogoOnTail = tonumber(opt.logotail or "1"), Logo2 = opt.logo2 or "",
   LogoPos2 = 1, LogoSize2 = 12, EndDot = tonumber(opt.enddot or "0"),
   SlateStyle = tonumber(opt.style or "0"), TitleImage = opt.titleimg or "", TitleImageSize = 100 }
+-- in_<Input>=valore: qualunque altro input del pannello (es. in_FL239=1)
+for k, v in pairs(opt) do
+  if k:sub(1, 3) == "in_" then headTool.inputs[k:sub(4)] = tonumber(v) or v end
+end
 local head = setmetatable({ off = 0, dur = tonumber(opt.head) * nominal, name = "LeaderKit Head",
   comp = newComp(headTool) }, Item)
 table.insert(tracks.video[1].items, head)
@@ -279,7 +283,8 @@ for _, t in ipairs(tracks.video) do
       table.sort(names)
       for _, n in ipairs(names) do
         local ld, ti = it.comp.loaders[n], it.comp.tool.inputs
-        local pre = ({ Logo1Ld = "Logo", Logo2Ld = "Logo2", TitleLd = "Title" })[n]
+        local pre = ({ Logo1Ld = "Logo", Logo2Ld = "Logo2", TitleLd = "Title", CalLd = "Cal", DialBLd = "DialB",
+          DialCLd = "DialC" })[n]
         print(string.format("RESULT loader=%s|%s|%s|%s|%s|%s", it.name, n, tostring(ld.Clip), tostring(ti[pre .. "W"]),
           tostring(ti[pre .. "H"]), tostring(ld.inputs.HoldLastFrame)))
       end
