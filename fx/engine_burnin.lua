@@ -90,6 +90,26 @@ function BURN.fill(item, lkb, opts)
   local frameMode = 1
   pcall(function() frameMode = math.floor((lkb:GetInput("BFrameMode") or 1) + 0.5) end)
   local lines, clips = {}, 0
+  -- lunghezze massime (in caratteri) di ogni blocco su tutto il programma: il generatore ne ricava
+  -- la grandezza del testo e l'impaginazione senza rileggere i dati a ogni fotogramma
+  local lens = { {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0} }
+  local function ulen(x)
+    x = string.gsub(string.gsub(x, "{[RSA][ERT][CC]}", "00:00:00:00"), "{FRM}", "0000000")
+    local _, nch = string.gsub(x, "[^\128-\191]", "")
+    return nch
+  end
+  local function measure(k, p1, p2)
+    local L = lens[k]
+    local a, b = ulen(p1), ulen(p2)
+    L[1] = math.max(L[1], a, b)
+    L[2] = math.max(L[2], a + b + ((a > 0 and b > 0) and 5 or 0))
+    local nst = 0
+    for q in string.gmatch(p1 .. "  ·  " .. p2 .. "  ·  ", "(.-)  ·  ") do
+      if q ~= "" then nst = nst + 1; L[3] = math.max(L[3], ulen(q)) end
+    end
+    L[4] = math.max(L[4], (a > 0 and 1 or 0) + (b > 0 and 1 or 0))
+    L[5] = math.max(L[5], nst)
+  end
   for i = 1, #points - 1 do
     local a, b = points[i], points[i + 1]
     local v = nil
@@ -162,6 +182,7 @@ function BURN.fill(item, lkb, opts)
     if tr1 == "" then tr1, tr2 = tr2, "" end
     if bl1 == "" then bl1, bl2 = bl2, "" end
     if br1 == "" then br1, br2 = br2, "" end
+    measure(1, tl1, tl2); measure(2, tr1, tr2); measure(3, bl1, bl2); measure(4, br1, br2); measure(5, tc1, tc2)
     lines[#lines + 1] = string.format("%d|%d|%s|%s|%d|%d|%d|%d|%s~%s|%s~%s|%s~%s|%s~%s~{REC}|%s~%s",
       a, b, string.format("%.4f", srcv), string.format("%.6f", step), sn, sd, aud, fr0,
       tl1, tl2, tr1, tr2, bl1, bl2, br1, br2, tc1, tc2)
@@ -175,6 +196,9 @@ function BURN.fill(item, lkb, opts)
   end
   set(lkb, "Seg", table.concat(lines, "\n"))
   set(lkb, "SegIdx", table.concat(idx))
+  local ls = {}
+  for k = 1, 5 do ls[k] = table.concat(lens[k], ",") end
+  set(lkb, "BLens", table.concat(ls, "|"))
   set(lkb, "RecStart", rs)
   set(lkb, "TlFps", r.nominal)
   set(lkb, "TlDrop", r.drop)

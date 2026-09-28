@@ -723,8 +723,9 @@ def test_burnin_matte_precise_and_data_inside(built):
     # 1.33 su 2:1: pillarbox, dati centrati nelle bande laterali
     t = dump_tools(setting, 24, 3840, 1920, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=names.index("1.33:1 (4:3)"))
     pb = t["MatLM"]["Width"]
-    assert abs(t["T1"]["Center"][0] - pb / 2) < 1e-9 and t["T1"]["HorizontalLeftCenterRight"] == 0
-    assert abs(t["T4"]["Center"][0] - (1 - pb / 2)) < 1e-9
+    # nelle bande laterali: ancorati al bordo esterno (0.13: righe impilate)
+    assert abs(t["T1"]["Center"][0] - 0.05 * pb) < 1e-9 and t["T1"]["HorizontalLeftCenterRight"] == -1
+    assert abs(t["T4"]["Center"][0] - (1 - 0.05 * pb)) < 1e-9
     # la risoluzione scritta da Genera prevale su quella della composizione
     t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=names.index("2.39:1 (Scope)"), TlW=4096, TlH=2160)
     assert abs(t["MatTM"]["Height"] * 2160 - (2160 - 2 * round(4096 / 2.39 / 2)) / 2) < 1e-6
@@ -1046,3 +1047,72 @@ def test_burnin_layout_and_outline(built):
     t = dump_tools(setting, 24, 3840, 1920, 480, 0, Seg=seg, SegIdx="000000000000000001", RecStart=86400,
                    BMatte=names.index("1.33:1 (4:3)"))
     assert abs(t["T5"]["Center"][0] - t["MatLM"]["Width"] / 2) < 1e-9
+
+
+# ------------------------------------------------------------------ 0.13
+BURN_SEG = ("86400|86880|1000|1|24|0|90000|0|A001C003_260926_R2AB~A001  ·  CAM A|SC 12A  TK 4~|"
+            "SRC TC {SRC}~AUD TC {ATC}  ·  SR 012|REC TC {REC}~FR {FRM}~{REC}|LA LUNGA NOTTE  ·  v12~26/09/2026")
+BURN_LENS = "20,33,20,2,3|10,10,10,1,1|18,39,18,2,3|18,24,18,2,2|22,35,14,2,3"
+
+
+def burn_tools(w, h, **kw):
+    setting = os.path.join(ROOT, "dist", "LeaderKit Burn-in.setting")
+    return dump_tools(setting, 24, w, h, 480, 0, Seg=BURN_SEG, SegIdx="000000000000000001", RecStart=86400,
+                      TlW=w, TlH=h, BLens=BURN_LENS, **kw)
+
+
+def burn_cap_px(t, k, w, h):
+    return t["T%d" % k]["Size"] * w / 2          # maiuscole del modello in pixel (Size = 2 * cap / AR)
+
+
+def test_engine_burnin_lengths(built, code):
+    """Aggiorna scrive le lunghezze massime dei blocchi: il generatore non rilegge i dati per la grandezza."""
+    res, _ = run_engine(code, preset="work_dailies", fps="24", program=10)
+    lens = res["burnlens"][0].split("|")
+    assert len(lens) == 5 and all(len(x.split(",")) == 5 for x in lens)
+    assert int(lens[2].split(",")[0]) >= len("SRC TC 00:00:00:00")          # {SRC} contato come timecode
+
+
+def test_burnin_matte_pillarbox_stacked(built):
+    """4:3 su 16:9: righe impilate nelle bande laterali, leggibili (non piu' minuscole)."""
+    t = burn_tools(1920, 1080, BMatte=1)
+    assert t["T1"]["StyledText"] == "A001C003_260926_R2AB\nA001\nCAM A"
+    assert t["T3"]["StyledText"] == "SRC TC 00:00:41:16\nAUD TC 01:02:30:00\nSR 012"
+    for k in range(1, 6):
+        assert burn_cap_px(t, k, 1920, 1080) >= 12
+    pb = (1920 - 1440) / 2 / 1920
+    assert abs(t["T1"]["Center"][0] - 0.05 * pb) < 1e-9 and abs(t["T4"]["Center"][0] - (1 - 0.05 * pb)) < 1e-9
+    assert t["T1"]["HorizontalLeftCenterRight"] == -1 and t["T4"]["HorizontalLeftCenterRight"] == 1
+    # la stessa grandezza per tutti i blocchi e per tutto il programma (non cambia a ogni stacco)
+    assert len(set(round(t["T%d" % k]["Size"], 9) for k in range(1, 6))) == 1
+
+
+def test_burnin_narrow_band_falls_back(built):
+    """480p con 4:3: la banda di 107 px non basta, i dati tornano ai bordi del quadro (leggibili)."""
+    t = burn_tools(854, 480, BMatte=1)
+    assert t["T1"]["StyledText"] == "A001C003_260926_R2AB\nA001  ·  CAM A"
+    assert t["T1"]["Center"][0] < 0.05 and burn_cap_px(t, 1, 854, 480) >= 8.5
+    # 1.85 su 16:9 a 480p: banda di 9 px, dati dentro l'immagine
+    t = burn_tools(854, 480, BMatte=6)
+    assert abs(t["T1"]["Center"][1] - 0.93) < 1e-9
+
+
+@pytest.mark.parametrize("w,h", [(640, 480), (854, 480), (1280, 720), (1920, 1080), (3840, 2160), (4096, 1716), (1080, 1920)])
+def test_burnin_legible_everywhere(built, w, h):
+    """Nessun mascherino, 2.39, 1.85, 4:3 e dentro l'immagine: mai sotto gli 8 px e mai fuori dal quadro."""
+    for kw in (dict(), dict(BMatte=11), dict(BMatte=6), dict(BMatte=1), dict(BPos=1)):
+        t = burn_tools(w, h, **kw)
+        for k in range(1, 6):
+            c = burn_cap_px(t, k, w, h)
+            assert c >= 7.9, (kw, k, c)
+            x, y = t["T%d" % k]["Center"]
+            assert 0 < x < 1 and 0 < y < 1
+
+
+def test_engine_fusion_output_cache(built, code):
+    """Genera accende la cache dell'uscita Fusion su leader e coda (playback fluido); se l'API manca lo dice."""
+    res, log = run_engine(code, fps="24")
+    assert res["headcache"] == ["On"] and res["tailcache"] == ["On"]
+    assert "Cache dell'uscita Fusion accesa" in log
+    res, log = run_engine(code, fps="24", nocache=1)
+    assert "Render Cache Fusion Output" in log

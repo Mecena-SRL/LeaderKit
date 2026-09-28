@@ -735,6 +735,33 @@ do
   end
 end
 
+-- ---------------------------------------------------------------- 5d) cache dell'uscita Fusion
+-- Leader e coda cambiano solo con Genera: con la cache dell'uscita Fusion accesa Resolve li
+-- prerenderizza (Riproduzione › Render Cache › Smart o User) e il playback e' quello di un file.
+-- Il burn-in (trasparente, lungo quanto il programma) resta in Auto.
+do
+  local vals = {}
+  pcall(function() if resolve.CACHE_ENABLED ~= nil then vals[#vals + 1] = resolve.CACHE_ENABLED end end)
+  vals[#vals + 1] = "On"
+  vals[#vals + 1] = 1
+  local done, total = 0, 0
+  for _, e in ipairs(allItems("video")) do
+    local nm = e.item:GetName() or ""
+    if e.item == head or nm == TAIL_NAME then
+      total = total + 1
+      for _, v in ipairs(vals) do
+        local okc, res = pcall(function() return e.item:SetFusionOutputCache(v) end)
+        if okc and res then done = done + 1; break end
+      end
+    end
+  end
+  if total > 0 and done == total then
+    ok("Cache dell'uscita Fusion accesa su leader e coda: con Riproduzione › Render Cache › Smart (o User) Resolve li prerenderizza e il playback e' fluido.")
+  elseif total > 0 then
+    bad("Cache dell'uscita Fusion non impostabile da script: clic destro sul blocco LeaderKit › Render Cache Fusion Output › On (anche sulla coda) per un playback fluido.")
+  end
+end
+
 -- ---------------------------------------------------------------- 6) slate, guida, note
 do
   local parts = {}

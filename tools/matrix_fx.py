@@ -120,11 +120,26 @@ def head_frame(out_dir, w, h, t, extra, scale):
     return preview_fx.render(setting, 24, w, h, 432, t, params(extra), scale)
 
 
+def blens(seg):
+    """Come BURN.fill (fx/engine_burnin.lua): lunghezze massime di ogni blocco."""
+    import re
+    parts = seg.split("|")[8:]
+    out = []
+    for k, blk in enumerate(parts[:5]):
+        p = (blk.split("~") + ["", ""])[:2]
+        ul = [len(re.sub(r"\{(SRC|REC|ATC)\}", "00:00:00:00", re.sub(r"\{FRM\}", "0000000", x))) for x in p]
+        pieces = [q for q in (p[0] + "  ·  " + p[1]).split("  ·  ") if q]
+        st = [len(re.sub(r"\{(SRC|REC|ATC)\}", "00:00:00:00", re.sub(r"\{FRM\}", "0000000", q))) for q in pieces]
+        out.append("%d,%d,%d,%d,%d" % (max(ul), ul[0] + ul[1] + (5 if ul[0] and ul[1] else 0), max(st or [0]),
+                                        sum(1 for x in ul if x), len(pieces)))
+    return "|".join(out)
+
+
 def burn_frame(w, h, extra, scale):
     setting = os.path.join(ROOT, "dist", "LeaderKit Burn-in.setting")
     seg = ("86400|86880|1000|1|24|0|90000|0|A001C003_260926_R2AB~A001  ·  CAM A|SC 12A  SH 3  TK 4 ★~|"
            "SRC TC {SRC}~AUD TC {ATC}  ·  SR 012|REC TC {REC}~FR {FRM}~{REC}|LA LUNGA NOTTE  ·  v12~26/09/2026")
-    base = dict(Seg=seg, SegIdx="000000000000000001", RecStart=86400, TlW=w, TlH=h)
+    base = dict(Seg=seg, SegIdx="000000000000000001", RecStart=86400, TlW=w, TlH=h, BLens=blens(seg))
     base.update(extra)
     return preview_fx.render(setting, 24, w, h, 480, 10, params(base), scale)
 
@@ -139,6 +154,7 @@ SCREENS = {
     "burnin": lambda o, w, h, s: burn_frame(w, h, {}, s),
     "burnin43": lambda o, w, h, s: burn_frame(w, h, dict(BMatte=1), s),
     "burnin239": lambda o, w, h, s: burn_frame(w, h, dict(BMatte=11), s),
+    "burnin185": lambda o, w, h, s: burn_frame(w, h, dict(BMatte=6), s),
     "burnin_in": lambda o, w, h, s: burn_frame(w, h, dict(BPos=1), s),
 }
 
@@ -176,6 +192,8 @@ def main():
     ap.add_argument("--maxw", type=int, default=1280, help="larghezza massima di calcolo dell'anteprima")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
+    import build_fx
+    build_fx.build()                     # generatori aggiornati in dist/
     make_logo()
     fmts = [f for f in FORMATS if not a.formats or any(x in f[0] for x in a.formats.split(","))]
     for scr in a.only.split(","):

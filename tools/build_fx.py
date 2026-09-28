@@ -29,7 +29,6 @@ sys.path.insert(0, os.path.join(ROOT, "src"))
 from leaderkit import __version__  # noqa: E402
 from leaderkit.fusion import lua_string  # noqa: E402
 
-RING_D = 0.36          # diametro del cerchio del countdown su 16:9 (frazione della larghezza): ora e' _RD
 LINE_W = 0.0025
 # Interlinea dei Text+ a piu' righe rispetto all'altezza delle maiuscole di cap_size(): misurata in
 # Resolve 21 (le maiuscole sono ~0.44 * Size * larghezza, la riga di Open Sans 1.36 em).
@@ -1404,18 +1403,38 @@ def burn_phase_script():
 BURN_GEO = (
     'local W = LK.TlW > 0 and LK.TlW or comp:GetPrefs("Comp.FrameFormat.Width") '
     'local H = LK.TlH > 0 and LK.TlH or comp:GetPrefs("Comp.FrameFormat.Height") '
-    "local AR = W / H local mi = math.floor(LK.BMatte + 0.5) "
+    "local AR = W / H local REF = math.min(W, H) local mi = math.floor(LK.BMatte + 0.5) "
     "local MR = (mi == %d) and LK.BMatteRatio or (({ %s })[mi + 1] or 0) "
     # immagine attiva in pixel interi e pari (es. 1920 x 804 per 2.39 su 1920 x 1080)
     "local LB = (MR > AR + 0.01) and (H - 2 * math.floor(W / MR / 2 + 0.5)) / (2 * H) or 0 "
     "local PB = (MR > 0 and MR < AR - 0.01) and (W - 2 * math.floor(H * MR / 2 + 0.5)) / (2 * W) or 0 "
-    "local CAP = LK.BSize * 0.01 local INSIDE = LK.BPos > 0.5 "
-    "local LBOX = (not INSIDE) and LB > 0 local PBOX = (not INSIDE) and PB > 0 "
-    "local SINGLE = LBOX and LB < 3.2 * CAP "                      # banda sottile: una riga sola
-    "local CAPE = SINGLE and math.min(CAP, LB / 1.7) or CAP "
-    "local EDGE = (not INSIDE) and not LBOX and not PBOX "        # senza mascherino: ai bordi del quadro
-    "local BAND = 4.6 * CAP "
+    # maiuscole (frazione di H): percentuale del lato corto, mai sotto 9 px; MINC = minimo nelle bande
+    "local CAP = math.max(LK.BSize / 100 * REF, 9) / H local MINC = math.max(0.011 * REF, 8) / H "
+    "local INSIDE = LK.BPos > 0.5 "
     % (len(MATTES) - 1, ", ".join(repr(max(r, 0)) for _, r in MATTES)))
+
+# Impaginazione, calcolata solo con numeri: le lunghezze massime dei testi di ogni blocco (su tutto il
+# programma) le scrive Aggiorna in LK.BLens, cosi' la grandezza non cambia a ogni stacco e non serve
+# rileggere la riga del fotogramma. Modi: EDGE ai bordi del quadro, IN dentro l'immagine (safe),
+# LB2 / LB1 nelle bande del letterbox (due righe o una), PB nelle bande laterali (righe impilate).
+# Se una banda e' troppo stretta per un testo leggibile i dati vanno dentro l'immagine.
+BURN_LAY = (
+    "local LN = {} for a, b, c, d, e in string.gmatch(LK.BLens.Value, '(%%d+),(%%d+),(%%d+),(%%d+),(%%d+)') do "
+    "LN[#LN + 1] = { a + 0, b + 0, c + 0, d + 0, e + 0 } end "
+    "for k = #LN + 1, 5 do LN[k] = { 22, 34, 20, 2, 3 } end "
+    "local C5 = LN[5][1] > 0 "
+    "local WID = { C5 and 0.33 or 0.46, C5 and 0.33 or 0.46, 0.46, 0.46, 0.28 } "
+    "local function FITW(i, w) local c = 9 for k = 1, 5 do if LN[k][i] > 0 then "
+    "c = math.min(c, w[k] * AR / (%s * LN[k][i])) end end return c end "
+    "local MODE, C = 'EDGE', 0 "
+    "if INSIDE or (LB <= 0 and PB <= 0) then MODE, C = (INSIDE and 'IN' or 'EDGE'), math.min(CAP, FITW(1, WID)) "
+    "elseif LB > 0 then local c2 = math.min(CAP, LB / 3.2, FITW(1, WID)) local c1 = math.min(CAP, LB / 1.7, FITW(2, WID)) "
+    "if c2 >= MINC and c2 >= 0.9 * c1 then MODE, C = 'LB2', c2 elseif c1 >= MINC then MODE, C = 'LB1', c1 "
+    "else MODE, C = 'IN', math.min(CAP, FITW(1, WID)) end "
+    "else local w = 0.9 * PB local cp = math.min(CAP, FITW(3, { w, w, w, w, w })) "
+    "if cp >= MINC then MODE, C = 'PB', cp else MODE, C = 'EDGE', math.min(CAP, FITW(1, WID)) end end "
+    "local PC = %s * C local function HB(n) return (math.max(1, n) - 1) * PC + 0.88 * C end "
+    % (0.76, PITCH))
 
 # Riga del fotogramma corrente: ricerca binaria su LK.SegIdx (O(log n) anche con migliaia di
 # tagli), con i segnaposto {REC} {SRC} {ATC} {FRM} calcolati qui. Solo funzioni sicure nelle
@@ -1448,44 +1467,42 @@ BURN_ROW = (
     "txt = string.gsub(txt, '{ATC}', tc((au + 0) < 0 and -1 or (au + 0) + e, tn, td)) "
     "txt = string.gsub(txt, '{FRM}', tostring(fr + e)) return txt end "
     "return { t1, t2, t3, t4, t5 }, sub end "
-    # testo di un angolo (k = 5: alto centro): due righe, o una sola nelle bande sottili del mascherino;
-    # il secondo valore dice se c'e' il testo centrale (gli angoli alti allora si stringono)
-    "local function CORNER(k) local r, sub = ROW() if not r then return '', false end "
+    # testo di un blocco (k = 5: alto centro): due righe, una sola nelle bande sottili, righe impilate
+    # (separate da "  ·  ") nelle bande laterali
+    "local function CORNER(k) local r, sub = ROW() if not r then return '' end "
     "local parts = {} for x in string.gmatch((r[k] or '') .. '~', '([^~]*)~') do parts[#parts + 1] = x end "
-    "local p1, p2 = parts[1] or '', parts[2] or '' local s "
-    "if SINGLE then s = p1 .. ((p1 ~= '' and p2 ~= '') and '     ' or '') .. p2 "
+    "local p1, p2 = parts[1] or '', parts[2] or '' local s = '' "
+    "if MODE == 'PB' then for q in string.gmatch(p1 .. '  ·  ' .. p2 .. '  ·  ', '(.-)  ·  ') do "
+    "if q ~= '' then s = s .. (s ~= '' and '\\n' or '') .. q end end "
+    "elseif MODE == 'LB1' then s = p1 .. ((p1 ~= '' and p2 ~= '') and '     ' or '') .. p2 "
     "elseif p1 ~= '' and p2 ~= '' then s = p1 .. '\\n' .. p2 else s = p1 .. p2 end "
-    "return sub(s), (r[5] or '') ~= '' end "
-    # grandezza comune a tutti i blocchi: la piu' grande con cui ognuno sta nella sua larghezza
-    "local function FIT() local best = 2 * CAPE / AR local c5 = false "
-    "for k = 1, 5 do local s, c = CORNER(k) if k == 1 then c5 = c end local m = 1 "
-    "for l in string.gmatch(s, '[^\\n]+') do if string.len(l) > m then m = string.len(l) end end "
-    "local w = PBOX and 0.9 * PB or (k == 5 and 0.28 or ((k <= 2 and c5) and 0.33 or 0.46)) "
-    # larghezza media di un carattere maiuscolo Bold ~0.42 * Size (Open Sans in Resolve)
-    "if s ~= '' then best = math.min(best, w / (0.42 * m)) end end return best end "
+    "return sub(s) end "
     "local function BIG() local r, sub = ROW() if not r then return '' end "
     "local parts = {} for x in string.gmatch((r[4] or '') .. '~', '([^~]*)~') do parts[#parts + 1] = x end "
     "return sub(parts[3] or '') end ")
 
 
 def burn_x(hx):
-    """Ascissa: bande laterali (pillarbox), bordo (margine), o celle centrate."""
-    margin = "(INSIDE and 0.05 or 0.02)"
+    """Ascissa: bande laterali (PB), bordo (margine), o celle centrate."""
+    margin = "(MODE == 'IN' and 0.05 or 0.02)"
     if hx < 0:
-        return "(PBOX and PB / 2 or (LK.BAlign < 0.5 and %s or 0.2))" % margin
-    return "(PBOX and 1 - PB / 2 or (LK.BAlign < 0.5 and 1 - %s or 0.8))" % margin
+        return "(MODE == 'PB' and (LK.BAlign < 0.5 and 0.05 * PB or PB / 2) or (LK.BAlign < 0.5 and %s or 0.2))" % margin
+    return "(MODE == 'PB' and (LK.BAlign < 0.5 and 1 - 0.05 * PB or 1 - PB / 2) or (LK.BAlign < 0.5 and 1 - %s or 0.8))" % margin
 
 
 def burn_xc():
-    """Alto centro: al centro del quadro, o nella banda sinistra se il mascherino e' pillarbox."""
-    return "(PBOX and PB / 2 or 0.5)"
+    """Alto centro: al centro del quadro, o nella banda sinistra sotto il primo blocco (PB)."""
+    return "(MODE == 'PB' and PB / 2 or 0.5)"
 
 
-def burn_y(top):
-    """Ordinata del blocco (una o due righe) di un angolo."""
-    if top:
-        return ("(LBOX and 1 - LB / 2 or (PBOX and 0.95 - 0.9 * CAPE or (INSIDE and 0.93 or 1 - BAND / 2)))")
-    return "(LBOX and LB / 2 or (PBOX and 0.05 + 0.9 * CAPE or (INSIDE and 0.07 or BAND / 2)))"
+def burn_y(k):
+    """Ordinata del blocco k (1 alto-sx, 2 alto-dx, 3 basso-sx, 4 basso-dx, 5 alto centro)."""
+    if k in (1, 2, 5):
+        pb = "0.96 - HB(LN[%d][5]) / 2" % k if k != 5 else "0.96 - HB(LN[1][5]) - 1.4 * C - HB(LN[5][5]) / 2"
+        return ("(MODE == 'PB' and (%s) or ((MODE == 'LB2' or MODE == 'LB1') and 1 - LB + math.min(LB / 2, 0.075) or "
+                "(MODE == 'IN' and 0.93 or 1 - 2.3 * C)))" % pb)
+    return ("(MODE == 'PB' and (0.04 + HB(LN[%d][5]) / 2) or ((MODE == 'LB2' or MODE == 'LB1') and LB - math.min(LB / 2, 0.075) or "
+            "(MODE == 'IN' and 0.07 or 2.3 * C)))" % k)
 
 
 def burnin(std=None):
@@ -1513,7 +1530,7 @@ def burnin(std=None):
             + uc_slider("BOutlineW", "Spessore del contorno", 0, 0.3, 0.08, integer=False)
             + uc_slider("BWaterAlpha", "Opacita' watermark", 0, 1, 0.18, integer=False))
     uc = on_page("Burn-in", main) + on_page("Campi", fields) + on_page("Aspetto", look)
-    uc += (uc_hidden("Seg", "Text") + uc_hidden("SegIdx", "Text")
+    uc += (uc_hidden("Seg", "Text") + uc_hidden("SegIdx", "Text") + uc_hidden("BLens", "Text")
            + "".join(uc_hidden(k) for k in ("RecStart", "TlFps", "TlDrop", "TlW", "TlH")))
     d = dict((k, 0) for k, _ in BURN_FIELDS)
     for k in BURN_PHASES[2][1]:
@@ -1523,7 +1540,7 @@ def burnin(std=None):
               ("BFrameMode", "1"), ("BPos", "0"), ("BAlign", "0"), ("BMatte", "0"), ("BMatteRatio", "2.39"),
               ("BMatteAlpha", "1"), ("BSize", "1.8"), ("BBands", "0"), ("BBandAlpha", "0.6"), ("BWaterAlpha", "0.18"),
               ("BOutline", "1"), ("BOutlineW", "0.08"),
-              ("Seg", '""'), ("SegIdx", '""'), ("RecStart", "0"), ("TlFps", "24"), ("TlDrop", "0"),
+              ("Seg", '""'), ("SegIdx", '""'), ("BLens", '""'), ("RecStart", "0"), ("TlFps", "24"), ("TlDrop", "0"),
               ("TlW", "0"), ("TlH", "0")]
     values += [(k, str(v)) for k, v in d.items()]
     g.controls(values, uc)
@@ -1531,8 +1548,11 @@ def burnin(std=None):
     def bx(body):
         return ("expr", "(function() %s return %s end)()" % (BURN_GEO, body))
 
+    def bl(body):
+        return ("expr", "(function() %s %s return %s end)()" % (BURN_GEO, BURN_LAY, body))
+
     def bt(body):
-        return ("expr", "(function() %s %s return %s end)()" % (BURN_GEO, BURN_ROW, body))
+        return ("expr", "(function() %s %s %s return %s end)()" % (BURN_GEO, BURN_LAY, BURN_ROW, body))
 
     g.background("Bg", rgb=["0", "0", "0"], alpha="0")
     # mascherino: bande sopra/sotto (letterbox) o ai lati (pillarbox), un solo Background
@@ -1543,37 +1563,37 @@ def burnin(std=None):
     g.background("Mat", alpha=("expr", "LK.BMatteAlpha"), mask="MatRM")
     top = g.dissolve("GMat", "Bg", g.merge("GMatM1", "Bg", "Mat"), bx("(LB > 0 or PB > 0) and 1 or 0"))
     # bande semitrasparenti facoltative (spente di default)
-    g.mask("BandTM", "RectangleMask", "1.02", bx("BAND"), center=bx("Point(0.5, 1 - BAND / 2)"))
-    g.mask("BandBM", "RectangleMask", "1.02", bx("BAND"), center=bx("Point(0.5, BAND / 2)"), chain="BandTM")
+    g.mask("BandTM", "RectangleMask", "1.02", bl("4.6 * C"), center=bl("Point(0.5, 1 - 2.3 * C)"))
+    g.mask("BandBM", "RectangleMask", "1.02", bl("4.6 * C"), center=bl("Point(0.5, 2.3 * C)"), chain="BandTM")
     g.background("Band", alpha=("expr", "LK.BBandAlpha"), mask="BandBM")
-    top = g.dissolve("GBand", top, g.merge("GBandM1", top, "Band"), bx("(EDGE and LK.BBands > 0.5) and 1 or 0"))
+    top = g.dissolve("GBand", top, g.merge("GBandM1", top, "Band"),
+                     bl("(MODE == 'EDGE' and LK.BBands > 0.5) and 1 or 0"))
     # angoli: 1 alto-sx, 2 alto-dx, 3 basso-sx, 4 basso-dx; un Text+ per angolo (due righe)
     outline = [("Enabled2", ("expr", "LK.BOutline")), ("Thickness2", ("expr", "LK.BOutlineW"))] + OUTLINE
     corners = []
-    for corner, (hx, is_top) in enumerate([(-1, True), (1, True), (-1, False), (1, False), (0, True)], 1):
+    for corner, hx in enumerate([-1, 1, -1, 1, 0], 1):
         nm = "T%d" % corner
-        # grandezza comune (FIT): bande laterali, un terzo del quadro quando in alto c'e' il testo centrale
-        size = "FIT()"
         if hx == 0:
-            center = bx("Point(%s, PBOX and 0.75 or %s)" % (burn_xc(), burn_y(True)))
+            center = bl("Point(%s, %s)" % (burn_xc(), burn_y(corner)))
             align = [("HorizontalJustificationNew", "3")]
         else:
-            center = bx("Point(%s, %s)" % (burn_x(hx), burn_y(is_top)))
-            align = [("HorizontalLeftCenterRight", bx("(PBOX or LK.BAlign > 0.5) and 0 or %d" % hx)),
-                     ("HorizontalJustificationNew", bx("(PBOX or LK.BAlign > 0.5) and 3 or %d" % (0 if hx < 0 else 1)))]
+            center = bl("Point(%s, %s)" % (burn_x(hx), burn_y(corner)))
+            # ancorati al bordo (anche nelle bande laterali), o centrati nelle celle: solo il pannello
+            align = [("HorizontalLeftCenterRight", ("expr", "LK.BAlign > 0.5 and 0 or %d" % hx)),
+                     ("HorizontalJustificationNew", ("expr", "LK.BAlign > 0.5 and 3 or %d" % (0 if hx < 0 else 1)))]
         g._add(nm, "TextPlus", G.CREATOR + [
             ("Center", center), ("Font", '"Open Sans"'),
-            ("Style", '"Bold"'), ("Size", bt(size)), ("StyledText", bt("Text((CORNER(%d)))" % corner)),
+            ("Style", '"Bold"'), ("Size", bl("2 * C / AR")), ("StyledText", bt("Text((CORNER(%d)))" % corner)),
             ("Red1", "1"), ("Green1", "1"), ("Blue1", "1"), ("VerticalJustificationNew", "3")] + align + outline)
         corners.append(nm)
     top = g.merge("MTop", top, g.chain("TTop", [corners[0], corners[4], corners[1]]))
     top = g.merge("MBottom", top, g.chain("TBot", corners[2:4]))
     # record TC grande (in basso al centro)
     g._add("Big", "TextPlus", G.CREATOR + [
-        ("Center", bx("Point(PBOX and 1 - PB / 2 or 0.5, PBOX and 0.16 or (LBOX and LB + 0.06 or "
-                      "(INSIDE and 0.15 or BAND + 0.055)))")),
+        ("Center", bl("Point(MODE == 'PB' and 1 - PB / 2 or 0.5, MODE == 'PB' and 0.5 or "
+                      "((MODE == 'LB2' or MODE == 'LB1') and LB + 0.06 or (MODE == 'IN' and 0.15 or 4.6 * C + 0.055)))")),
         ("Font", '"Open Sans"'), ("Style", '"Bold"'),
-        ("Size", bx("PBOX and math.min(10 * CAP / AR, 0.9 * PB / 4.8) or 10 * CAP / AR")),
+        ("Size", bl("MODE == 'PB' and math.min(10 * CAP / AR, 0.9 * PB / 4.8) or 10 * CAP / AR")),
         ("StyledText", bt("Text(BIG())")),
         ("Red1", "1"), ("Green1", "1"), ("Blue1", "1"),
         ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")] + outline)

@@ -47,6 +47,10 @@ function Item:SetProperty(k, v) self.props = self.props or {}; self.props[k] = v
 function Item:GetMediaPoolItem() return self.mpi end
 function Item:GetSourceStartFrame() return self.srcin or 0 end
 function Item:GetTrackTypeAndIndex() return self.where end
+function Item:SetFusionOutputCache(v)
+  if opt.nocache == "1" then error("API non disponibile") end
+  self.fcache = v; return v == "On"
+end
 
 local tracks = { video = { { name = "Video 1", items = {} } }, audio = { { name = "Audio 1", items = {} } } }
 local markers = {}
@@ -257,6 +261,7 @@ for _, t in ipairs(tracks.video) do
         tostring(ti.BRec) .. tostring(ti.BSrc) .. tostring(ti.BAtc) .. "|" .. tostring(ti.RecStart) .. "|" .. tostring(ti.TlFps))
       print("RESULT burnseg=" .. (tostring(ti.Seg):gsub("\n", " // ")))
       print("RESULT burnidx=" .. tostring(ti.SegIdx))
+      print("RESULT burnlens=" .. tostring(ti.BLens))
       print("RESULT burnseglen=" .. tostring(#tostring(ti.Seg)))
     end
   end
@@ -294,6 +299,7 @@ end
 for _, it in ipairs(tracks.video[1].items) do
   if it.name == "LeaderKit Tail" then
     local ti = it.comp.tool.inputs
+    print("RESULT tailcache=" .. tostring(it.fcache))
     print("RESULT tail=start=" .. tc(it:GetStart()) .. " dur=" .. it:GetDuration() .. " pop=" .. tostring(ti.TailPop) ..
       " flash=" .. tostring(ti.TailFlash) .. " card=" .. tostring(ti.CardText) .. " info=" .. tostring(ti.Info))
   end
@@ -301,6 +307,7 @@ end
 for _, it in ipairs(tracks.video[1].items) do
   if it.name == "LeaderKit Head" then
     print("RESULT head=" .. tc(it:GetStart()) .. "|" .. it:GetDuration() .. "|" .. tostring(it.comp.tool.inputs.Title))
+    print("RESULT headcache=" .. tostring(it.fcache))
     print("RESULT duration=" .. tostring(it.comp.tool.inputs.Duration))
     print("RESULT colorinfo=" .. tostring(it.comp.tool.inputs.ColorInfo))
     print("RESULT date=" .. tostring(it.comp.tool.inputs.Date))
