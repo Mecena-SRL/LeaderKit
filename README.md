@@ -149,7 +149,7 @@ fino al FFOA, ma lo lascia se lo vuoi.
 |---|---|---|
 | **Standard** | come il leader SMPTE / Academy: due cerchi spessi, croce a tutto quadro, cifra Bold | i moduli nelle posizioni del leader SMPTE RP 428-6, al massimo il 15% dell'altezza |
 | **Pannelli** | leader classico: disco grigio dentro il cerchio, cerchi sottili, croce solo attorno al cerchio | sfondo antracite; stelle negli angoli dell'area utile; due schede grigie accanto al cerchio (**Nitidezza e gamma**, **Livelli e colore**) con tessere senza bordo e didascalia sotto ognuna |
-| **Quadrante** | i test diventano la ghiera: grigi e neri 0-10% come arco a sinistra, colori saturi e desaturati come arco a destra, 60 tacche, cifra Light | tessere rotonde lungo la ghiera con didascalia, stelle rotonde negli angoli |
+| **Quadrante** | i test diventano la ghiera: grigi e neri 0-10% come arco a sinistra, colori saturi e desaturati come arco a destra, 60 tacche, cifra Light | tessere grandi con angoli arrotondati (il test riempie la tessera) lungo la ghiera, didascalia a lato verso l'esterno; stelle di Siemens a disco negli angoli |
 
 Il countdown (8→2, Picture Start, braccio, 2-pop) è calcolato a ogni fotogramma
 dal frame rate della timeline: 48 fotogrammi a 24/23.976, 50 a 25, 60 a 29.97 DF.

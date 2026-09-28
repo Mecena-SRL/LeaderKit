@@ -434,6 +434,25 @@ LK_OVERLAY = (function()
     end)
   end
 
+  -- tessera con angoli arrotondati: fuori dal profilo trasparente, sul bordo un filo di 'lw' px in 'oc'
+  function Canvas:roundRectClip(x, y, w, h, rad, oc, lw)
+    local hx, hy, cx, cy = w / 2, h / 2, x + w / 2, y + h / 2
+    self:add(y, y + h - 1, function(yy, row)
+      local qy = abs(yy + 0.5 - cy) - (hy - rad)
+      for xx = max(0, floor(x)), min(self.W - 1, floor(x + w - 1)) do
+        local qx = abs(xx + 0.5 - cx) - (hx - rad)
+        local d = sqrt(max(qx, 0) ^ 2 + max(qy, 0) ^ 2) + min(max(qx, qy), 0) - rad
+        local i = xx * 4 + 1
+        if oc and lw then
+          local a = min(1, max(0, d + lw + 0.5)) - min(1, max(0, d + 0.5))
+          if a > 0 then blend(row, xx, oc[1], oc[2], oc[3], a) end
+        end
+        local out = min(1, max(0, d + 0.5))
+        if out > 0 then row[i + 3] = floor(row[i + 3] * (1 - out) + 0.5) end
+      end
+    end)
+  end
+
   -- stella di Siemens con antialiasing analitico: verso il centro i settori si fondono in grigio
   function Canvas:siemens(cx, cy, rad, spokes, cw, cb)
     local x0, x1 = max(0, floor(cx - rad - 1)), min(self.W - 1, floor(cx + rad + 1))
@@ -553,7 +572,7 @@ LK_OVERLAY = (function()
     return out
   end
 
-  -- Quadrante: i test sono la ghiera dell'orologio. Tessere rotonde lungo la ghiera (a destra nitidezza
+  -- Quadrante: i test sono la ghiera dell'orologio. Tessere con angoli arrotondati lungo la ghiera (a destra nitidezza
   -- e gamma, a sinistra livelli e colore; niente in alto e in basso, dove stanno logo e dati), grigi e
   -- neri 0-10% come arco a sinistra, colori saturi e desaturati come arco a destra, stelle negli angoli.
   local RADIAL = { { "info", 50 }, { "res", 80 }, { "gamma", 110 }, { "sphere", 140 },
@@ -583,32 +602,58 @@ LK_OVERLAY = (function()
     -- tessere: due colonne che seguono la curva della ghiera (x = bordo esterno del cerchio alla
     -- quota della fila); si rimpiccioliscono finche' stanno nell'area utile senza toccare le stelle
     local Rb = R * 1.27
-    local function fits(t)
-      local p = t * 1.5
+    -- didascalia a lato (verso l'esterno) se c'e' spazio, altrimenti sotto la tessera
+    local function capLen(k) return (k == "gamma") and 9 or #CAPTIONS[k] end
+    local function fits(t, side)
+      local gh = max(7, floor(0.11 * t + 0.5))
+      local p = side and t * 1.22 or t * 1.5
       if 4 * p > (iy1 - iy0) - 2 * m then return end
       local pos = {}
       for i, e in ipairs(RADIAL) do
-        local side = (i <= 4) and 1 or -1
+        local dir = (i <= 4) and 1 or -1
         local k = (i <= 4) and i or (i - 4)
         local dy = (k - 2.5) * p
-        local rr = Rb + 0.15 * t + t / 2                -- centro tessera fuori dalla ghiera
-        local xc = max(sqrt(max(0, rr * rr - dy * dy)), 0.8 * Rb + t / 2)
-        local x = (side > 0) and (cx + xc - t / 2) or (cx - xc - t / 2)
-        local y = cy + dy - t / 2
-        if x < ix0 + m or x + t > ix1 - m then return end
-        for _, st in ipairs(out.items) do
-          if x < st.x + st.w + 4 and st.x < x + t + 4 and y < st.y + st.h + 4 and st.y < y + t * 1.3 then return end
+        -- la tessera (quadrata, angoli arrotondati) resta fuori dalla ghiera con un piccolo varco
+        local gap, xc = max(4, 0.12 * t), 0.8 * Rb + t / 2
+        local function clear(v)
+          local nx, ny = max(0, v - t / 2), max(0, abs(dy) - t / 2)
+          return sqrt(nx * nx + ny * ny) >= Rb + gap
         end
-        pos[i] = { e[1], x, y }
+        local lo, hi = xc, xc + Rb + t
+        if not clear(lo) then
+          for _ = 1, 20 do local mid = (lo + hi) / 2; if clear(mid) then hi = mid else lo = mid end end
+          xc = hi
+        end
+        local x = (dir > 0) and (cx + xc - t / 2) or (cx - xc - t / 2)
+        local y = cy + dy - t / 2
+        local bx0, bx1, by0, by1 = x, x + t, y, y + t
+        if side then
+          local cw = textWidth(string.rep("M", capLen(e[1])), gh) + 0.14 * t
+          if dir > 0 then bx1 = bx1 + cw else bx0 = bx0 - cw end
+        else
+          by1 = by1 + 0.3 * t
+        end
+        if bx0 < ix0 + m or bx1 > ix1 - m then return end
+        for _, st in ipairs(out.items) do
+          if bx0 < st.x + st.w + 4 and st.x < bx1 + 4 and by0 < st.y + st.h + 4 and st.y < by1 + 4 then return end
+        end
+        pos[i] = { e[1], x, y, dir }
       end
-      return pos
+      return pos, gh
     end
-    local t = floor(0.11 * u + 0.5)
-    local pos = fits(t)
-    while not pos and t > 24 do t = t - 2; pos = fits(t) end
+    local pos, gh, side
+    for _, sd in ipairs({ true, false }) do
+      local t = floor(0.16 * u + 0.5)
+      pos, gh = fits(t, sd)
+      while not pos and t > 24 do t = t - 2; pos, gh = fits(t, sd) end
+      if pos and t >= floor(0.075 * u) or (pos and not sd) then side = sd; out.s = t; break end
+      pos = nil
+    end
     if pos then
-      for _, q in ipairs(pos) do put(q[1], q[2], q[3], t, t, { round = true, caption = CAPTIONS[q[1]] }) end
-      out.s = t
+      local t = out.s
+      for _, q in ipairs(pos) do
+        put(q[1], q[2], q[3], t, t, { tile = true, caption = CAPTIONS[q[1]], capSide = side and q[4] or nil, capH = gh })
+      end
     end
     return out
   end
@@ -981,16 +1026,23 @@ LK_OVERLAY = (function()
         if on then
           local s = it.w
           cv:rect(it.x, it.y, it.x + it.w, it.y + it.h, BLACK)
-          if blw > 0 and not it.round then cv:frame(it.x, it.y, it.x + it.w, it.y + it.h, blw, border) end
+          if blw > 0 and not it.round and not it.tile then cv:frame(it.x, it.y, it.x + it.w, it.y + it.h, blw, border) end
           local p = (it.round and 0 or blw) + max(1, floor(0.05 * min(it.w, it.h) + 0.5))
-          if it.round then p = floor(0.15 * s + 0.5) end               -- il contenuto sta nel cerchio
+          if it.round or it.tile then p = 0 end                          -- contenuto a piena tessera
           if MODULES[it.kind] then MODULES[it.kind](cv, it.x, it.y, s, p, ctx)
           else STRIPS[it.kind](cv, it.x, it.y, it.w, it.h, p) end
           if it.round then
             cv:roundClip(it.x, it.y, s, nil)
-            cv:ring(it.x + s / 2, it.y + s / 2, s / 2 - 0.5, 1, border)
+            cv:ring(it.x + s / 2, it.y + s / 2, s / 2 - 0.5, max(1, floor(s / 120)), border)
+          elseif it.tile then
+            cv:roundRectClip(it.x, it.y, s, s, 0.2 * s, border, max(1, floor(s / 120)))
           end
-          if it.caption then
+          if it.capSide then
+            local text = (it.kind == "gamma") and string.format("GAMMA %.1f", ctx.gamma or 2.4) or it.caption
+            local gh, cy0 = it.capH, it.y + (it.h - it.capH) / 2
+            if it.capSide > 0 then cv:text(text, it.x + it.w + 0.14 * it.w, cy0, gh, capc)
+            else cv:text(text, it.x - 0.14 * it.w, cy0, gh, capc, "right") end
+          elseif it.caption then
             local text = (it.kind == "gamma") and string.format("GAMMA %.1f", ctx.gamma or 2.4) or it.caption
             local gh = max(6, floor(min(it.h, it.w) * ((style == 2) and 0.085 or 0.1) + 0.5))
             if it.h < it.w then gh = max(6, floor(it.h * 0.2 + 0.5)) end

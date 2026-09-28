@@ -50,7 +50,7 @@ def pt(v, d=(0.5, 0.5)):
     return d
 
 
-LOADER_KEYS = {"Logo1Ld": "Logo", "Logo2Ld": "Logo2", "TitleLd": "TitleImage", "CalLd": "CalImage",
+LOADER_KEYS = {"Logo1Ld": "Logo", "Logo2Ld": "Logo2", "TitleLd": "TitleImage", "CalLd": "CalImage", "Cal1Ld": "Cal1Image", "Cal2Ld": "Cal2Image",
                "DialBLd": "DialBImage", "DialCLd": "DialCImage"}
 
 

@@ -118,11 +118,12 @@ def head_frame(out_dir, w, h, t, extra, scale):
     setting = os.path.join(ROOT, "dist", "LeaderKit.setting")
     extra = dict(extra)
     style = extra.get("SlateStyle")
-    if t >= 300:          # countdown: taratura di Genera nel Loader CalLd
+    if t >= 300:          # countdown: taratura di Genera nel Loader dello stile
         spec = dict(cal=CAL, fpsLabel="24/SEC", resLabel="HD", gamma=2.4, cdLogo=bool(extra.get("CdLogo")),
                     cdInfo=bool(extra.get("CdInfo")), guides=GUIDES, style=int(extra.get("CdStyle", 0)))
         path = overlay_png(out_dir, "cal%d%d" % (spec["cdLogo"], spec["cdInfo"]), w, h, spec)
-        extra.update(CalImage=path, CalW=w, CalH=h)
+        k = ("Cal", "Cal1", "Cal2")[spec["style"]]
+        extra.update(**{k + "Image": path, k + "W": w, k + "H": h})
     elif style in (1, 2):
         kind = "b" if style == 1 else "c"
         path = overlay_png(out_dir, "dial" + kind, w, h, dict(dial=kind, fps=24))
