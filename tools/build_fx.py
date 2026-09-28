@@ -502,14 +502,15 @@ CALIBRATION = [("CalStars", "Stelle di Siemens negli angoli (fuoco)", 1),
                ("CalBlue", "Verifica del blu (filtro Wratten 47B)", 1),
                ("CalContour", "Sfera divisa: alte luci e ombre (contouring)", 1),
                ("CalPeak", "Riferimenti del bianco (95% nel 100%) e del nero (5% nel 0%)", 1),
-               ("CalEdge", "Bordo del raster, angoli e scale di overscan", 1),
+               ("CalEdge", "Bordo del raster e angoli", 1),
                ("CalCenter", "Mirino centrale", 1), ("CalLabels", "Fotogrammi al secondo e risoluzione", 1)]
 GAMMA_REFS = ["Dallo spazio colore di uscita", "2.2 (sRGB, web)", "2.4 (Rec.709 / BT.1886)", "2.6 (DCI, cinema)"]
 LOGO_POS = ["In alto a destra", "In alto a sinistra", "In basso a destra", "In basso a sinistra", "Al centro"]
 END_DOT_POS = ["In alto a destra (cue mark)", "Al centro", "In alto a sinistra"]
 HIDDEN_NUM = ["LogoW", "LogoH", "Logo2W", "Logo2H", "TitleW", "TitleH"]
 # immagini create da Genera e caricate nei Loader (percorso e dimensioni in pixel, input di servizio)
-GEN_IMAGES = [("CalImage", "CalLd", "CalW", "CalH"), ("DialBImage", "DialBLd", "DialBW", "DialBH"),
+GEN_IMAGES = [("CalImage", "CalLd", "CalW", "CalH"), ("Cal1Image", "Cal1Ld", "Cal1W", "Cal1H"),
+              ("Cal2Image", "Cal2Ld", "Cal2W", "Cal2H"), ("DialBImage", "DialBLd", "DialBW", "DialBH"),
               ("DialCImage", "DialCLd", "DialCW", "DialCH")]
 HIDDEN_GEN = [k for im in GEN_IMAGES for k in im[2:]]
 
@@ -1240,7 +1241,7 @@ def head(std=None):
             + uc_slider("LogoSize2", "Larghezza del secondo logo (%)", 5, 100, 12, integer=False)
             + uc_check("LogoOnTail", "Loghi anche sulla coda", 0)
             + uc_label("SecCd", "Countdown: stile, logo sopra il cerchio, dati sotto")
-            + uc_combo("CdStyle", "Stile del countdown (Genera ridisegna la taratura)", CD_STYLES)
+            + uc_combo("CdStyle", "Stile del countdown", CD_STYLES)
             + uc_check("CdLogo", "Logo sopra il countdown (riquadro nero)", 0)
             + uc_slider("CdLogoSize", "Dimensione del riquadro del logo (%)", 20, 140, 70, integer=False)
             + uc_check("CdInfo", "Dati sotto il countdown (riquadro nero)", 0)
@@ -1303,12 +1304,15 @@ def head(std=None):
     # barre
     top = g.dissolve("MBars", "Bg", bars_stack(g), ex("(%s) and 1 or 0" % BARSVIS))
     # frame lines e safe area: sulla slate subito sopra lo sfondo (sotto i testi); sul countdown sopra
-    # la taratura (PNG di Genera nel Loader CalLd, a tutto quadro) e sotto cerchio, riquadri e cifra
+    # la taratura (PNG di Genera nei Loader CalLd, Cal1Ld, Cal2Ld: uno per stile, a tutto quadro) e sotto cerchio, riquadri e cifra
     guides = guides_layer(g)
     base = g.gate("MGuides", "Bg", [guides], "%s and LK.GuidesSlate > 0.5" % ANY_GUIDE)
-    cal_on = ('LK.CalOn > 0.5 and LK.CalImage.Value ~= "" and LK.CalW > 0 and LK.CalH > 0 '
-              'and math.abs(LK.CalW / LK.CalH - _A) < 0.01')
-    cbase = g.gate("MCal", "Bg", [("CalLd", X("Point(0.5, 0.5)"), X("_W / math.max(1, LK.CalW)"))], cal_on)
+    # una taratura per stile (Genera le disegna tutte): cambiando stile si vede subito quella giusta
+    cbase = "Bg"
+    for i, k in enumerate(("Cal", "Cal1", "Cal2")):
+        cal_on = ('LK.CalOn > 0.5 and _CS == %d and LK.%sImage.Value ~= "" and LK.%sW > 0 and LK.%sH > 0 '
+                  'and math.abs(LK.%sW / LK.%sH - _A) < 0.01' % (i, k, k, k, k, k))
+        cbase = g.gate("M" + k, cbase, [(k + "Ld", X("Point(0.5, 0.5)"), X("_W / math.max(1, LK.%sW)" % k))], cal_on)
     cbase = g.gate("MGuidesCd", cbase, [guides], "%s and LK.GuidesCd > 0.5" % ANY_GUIDE)
     # slate: quattro stili alternati, poi titolo in PNG, loghi e orologio ident
     s_ = slate_panels(g, P, base, static)

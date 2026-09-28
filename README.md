@@ -143,7 +143,7 @@ fino al FFOA, ma lo lascia se lo vuoi.
 
 ## Countdown e taratura
 
-**Tre stili** (Aspetto › Countdown › Stile; Genera ridisegna la taratura):
+**Tre stili** (Aspetto › Countdown › Stile; Genera prepara le tre tarature, poi si passa da uno stile all'altro senza rigenerare):
 
 | Stile | Countdown | Taratura |
 |---|---|---|

@@ -437,6 +437,10 @@ def test_engine_overlay_on_countdown(built, code):
     assert "gfx" not in res and not [t for t in res.get("track", []) if t.startswith("LeaderKit Grafica")]
     path, w, h = loaders(res)["CalLd"]
     assert (w, h) == ("3840", "1920")
+    # una taratura per stile, gia' pronte: cambiando stile non serve rigenerare
+    others = [loaders(res)[k] for k in ("Cal1Ld", "Cal2Ld")]
+    assert all((ow, oh) == ("3840", "1920") and os.path.exists(op) for op, ow, oh in others)
+    assert len({path} | {op for op, _, _ in others}) == 3
     from PIL import Image
     im = Image.open(path)
     im.load()
@@ -778,7 +782,8 @@ def test_guides_default_off_and_where(built):
     assert t["MGuides"]["Mix"] == 0
     t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 300, FL185=1)       # countdown: sopra la taratura
     assert t["MGuidesCd"]["Mix"] == 1 and t["LM1"]["Background"]["link"] == "MGuidesCd"
-    assert t["MGuidesCd"]["Background"]["link"] == "MCal" and t["MCal"]["Background"]["link"] == "Bg"
+    assert t["MGuidesCd"]["Background"]["link"] == "MCal2" and t["MCal2"]["Background"]["link"] == "MCal1"
+    assert t["MCal1"]["Background"]["link"] == "MCal" and t["MCal"]["Background"]["link"] == "Bg"
     t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 300, FL185=1, GuidesCd=0)
     assert t["MGuidesCd"]["Mix"] == 0
 
@@ -1263,3 +1268,14 @@ def test_png_cache_follows_drawing_code():
     digest = hashlib.sha1(build_fx.fx_source("overlay.lua").encode("utf-8")).hexdigest()[:12]
     assert 'LK_DRAW = "%s"' % digest in src
     assert '(LK_DRAW or "") .. specKey(spec)' in src
+
+
+def test_calibration_switches_with_style(built):
+    """Le tre tarature sono gia' nei Loader: lo stile del countdown sceglie quale si vede, senza Genera."""
+    for st in (0, 1, 2):
+        kw = dict(CdStyle=st, CalOn=1)
+        for k in ("Cal", "Cal1", "Cal2"):
+            kw[k + "Image"] = "x.png"
+            kw[k + "W"], kw[k + "H"] = 1920, 1080
+        t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 300, **kw)
+        assert [t[m]["Mix"] for m in ("MCal", "MCal1", "MCal2")] == [int(st == i) for i in range(3)]

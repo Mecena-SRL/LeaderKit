@@ -633,15 +633,25 @@ if countFrom > 0 and get("CalOn", 1) > 0.5 then
     end
     if #list > 0 then spec.inner = LK_OVERLAY.innerRect(w, h, list) end
   end
-  local path = genImage("Taratura", spec, function(p) return LK_OVERLAY.render(p, w, h, spec) end,
-    "CalImage", "CalLd", "CalW", "CalH", "Taratura")
+  -- una taratura per stile, cosi' cambiando stile del countdown non serve rigenerare
+  local path
+  for st, k in ipairs({ "Cal", "Cal1", "Cal2" }) do
+    local sp = {}
+    for kk, vv in pairs(spec) do sp[kk] = vv end
+    sp.style = st - 1
+    local pth = genImage("Taratura", sp, function(p) return LK_OVERLAY.render(p, w, h, sp) end,
+      k .. "Image", k .. "Ld", k .. "W", k .. "H", "Taratura")
+    if sp.style == spec.style then path = pth end
+  end
   if path then
     ok(string.format("Taratura %dx%d sul countdown (nel generatore, sotto frame lines, logo e dati), gamma di riferimento %.1f%s.",
       w, h, spec.gamma, spec.inner and "; moduli dentro le frame lines accese" or ""))
   end
 else
-  set(lk, "CalImage", "")
-  LK_IMAGE.sync(c, lk, "CalImage", "CalLd", "CalW", "CalH", "")
+  for _, k in ipairs({ "Cal", "Cal1", "Cal2" }) do
+    set(lk, k .. "Image", "")
+    LK_IMAGE.sync(c, lk, k .. "Image", k .. "Ld", k .. "W", k .. "H", "")
+  end
 end
 
 -- quadranti degli stili Quadrante e Orologio: entrambi pronti, cosi' cambiando stile non manca nulla
