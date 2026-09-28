@@ -118,8 +118,10 @@ logo, dati e cifra:
 - spunte **Sulla slate** e **Sul countdown e la taratura**. Con la seconda, Genera impagina i
   moduli della taratura **dentro l'area comune delle linee accese** (come nel leader SMPTE
   RP 428-6): le linee non attraversano mai i moduli. Di default nessuna guida è attiva;
-- **colore delle guide** (bianco di default) per linee ed etichette; le etichette
-  hanno un contorno nero, così si leggono anche sopra altre linee.
+- **un colore per ogni guida** (ogni frame line, formato della timeline, safe action e safe
+  title: il selettore sta sotto la sua spunta), per linea, etichetta e triangoli d'angolo;
+  bianco di default. Le etichette hanno un contorno nero; quelle delle safe area stanno in alto a
+  destra, quelle dei formati in alto a sinistra.
 
 ## Logo e dati sul countdown
 
@@ -140,6 +142,14 @@ Spento di default: per gli standard di consegna Genera ricorda che è previsto n
 fino al FFOA, ma lo lascia se lo vuoi.
 
 ## Countdown e taratura
+
+**Tre stili** (Aspetto › Countdown › Stile; Genera prepara le tre tarature, poi si passa da uno stile all'altro senza rigenerare):
+
+| Stile | Countdown | Taratura |
+|---|---|---|
+| **Standard** | come il leader SMPTE / Academy: due cerchi spessi, croce a tutto quadro, cifra Bold | i moduli nelle posizioni del leader SMPTE RP 428-6, al massimo il 15% dell'altezza |
+| **Pannelli** | leader classico: disco grigio dentro il cerchio, cerchi sottili, croce solo attorno al cerchio | sfondo antracite; stelle negli angoli dell'area utile; due schede grigie accanto al cerchio (**Nitidezza e gamma**, **Livelli e colore**) con tessere senza bordo e didascalia sotto ognuna |
+| **Quadrante** | i test diventano la ghiera: grigi e neri 0-10% come arco a sinistra, colori saturi e desaturati come arco a destra, 60 tacche, cifra Light | tessere grandi con angoli arrotondati (il test riempie la tessera) lungo la ghiera, didascalia a lato verso l'esterno; stelle di Siemens a disco negli angoli |
 
 Il countdown (8→2, Picture Start, braccio, 2-pop) è calcolato a ogni fotogramma
 dal frame rate della timeline: 48 fotogrammi a 24/23.976, 50 a 25, 60 a 29.97 DF.
@@ -166,7 +176,7 @@ l'altro. Ogni modulo ha la sua spunta nella scheda Tecnico.
 | **Rampe B/N, R, G, B** | banding e clip di un canale | sfumature continue, senza cambi di tinta |
 | **ColorChecker 24** | resa del colore e scala neutra (valori sRGB X-Rite) | confronto con la tavola vera o con la misura |
 | **Toni della pelle** | incarnati (al posto dei volti del leader SMPTE): i 10 toni della scala Monk | distinti e naturali, senza dominanti |
-| **Bordo, angoli e scale** | quanto tagliano overscan e mascherini | 1 px bianco sul bordo e triangoli negli angoli: se si vedono, si vede tutto il quadro; tacche ogni 1% e numeri fino al 10% a metà dei lati |
+| **Bordo e angoli** | quanto tagliano overscan e mascherini | 1 px bianco sul bordo e triangoli negli angoli: se si vedono, si vede tutto il quadro |
 | **Angoli dei formati** | frame lines accese sul countdown | triangolo nell'angolo di ogni formato: resta visibile anche se il mascherino copre la linea |
 | **Mirino** | centro del quadro | quadrati e asterisco centrati sulla croce |
 

@@ -52,7 +52,13 @@ local ok, err
 if spec.guides then
   spec.inner = LK_OVERLAY.innerRect(W, H, spec.guides)
   spec.frames = {}
-  for _, gd in ipairs(spec.guides) do if gd.ar then spec.frames[#spec.frames + 1] = LK_OVERLAY.innerRect(W, H, { gd }) end end
+  for _, gd in ipairs(spec.guides) do
+    if gd.ar then
+      local r = LK_OVERLAY.innerRect(W, H, { gd })
+      r.color = gd.color
+      spec.frames[#spec.frames + 1] = r
+    end
+  end
 end
 if spec.dial then ok, err = LK_OVERLAY.renderDial(arg[2], spec.dial, W, H, spec)
 else ok, err = LK_OVERLAY.render(arg[2], W, H, spec) end
@@ -75,7 +81,7 @@ def lua_table(v):
 
 
 def overlay_png(out_dir, kind, w, h, spec):
-    path = os.path.join(out_dir, "_%s_%dx%d.png" % (kind, w, h))
+    path = os.path.join(out_dir, "_%s_%dx%d_%s.png" % (kind, w, h, spec.get("style", 0)))
     if not os.path.exists(path):
         script = os.path.join(out_dir, "_overlay.lua")
         with open(script, "w") as fh:
@@ -85,7 +91,8 @@ def overlay_png(out_dir, kind, w, h, spec):
     return path
 
 
-GUIDES = [dict(ar=2.39), dict(safe=0.93)]       # frame lines accese nei provini del countdown
+# frame lines accese nei provini del countdown (colori indipendenti: 1.85 bianca, 2.39 gialla)
+GUIDES = [dict(ar=1.85, color=[1, 1, 1]), dict(ar=2.39, color=[1, 0.82, 0.25]), dict(safe=0.93)]
 LOGO = os.path.join(ROOT, "dist", "_logo_prova.png")
 
 
@@ -111,11 +118,12 @@ def head_frame(out_dir, w, h, t, extra, scale):
     setting = os.path.join(ROOT, "dist", "LeaderKit.setting")
     extra = dict(extra)
     style = extra.get("SlateStyle")
-    if t >= 300:          # countdown: taratura di Genera nel Loader CalLd
+    if t >= 300:          # countdown: taratura di Genera nel Loader dello stile
         spec = dict(cal=CAL, fpsLabel="24/SEC", resLabel="HD", gamma=2.4, cdLogo=bool(extra.get("CdLogo")),
-                    cdInfo=bool(extra.get("CdInfo")), guides=GUIDES)
+                    cdInfo=bool(extra.get("CdInfo")), guides=GUIDES, style=int(extra.get("CdStyle", 0)))
         path = overlay_png(out_dir, "cal%d%d" % (spec["cdLogo"], spec["cdInfo"]), w, h, spec)
-        extra.update(CalImage=path, CalW=w, CalH=h)
+        k = ("Cal", "Cal1", "Cal2")[spec["style"]]
+        extra.update(**{k + "Image": path, k + "W": w, k + "H": h})
     elif style in (1, 2):
         kind = "b" if style == 1 else "c"
         path = overlay_png(out_dir, "dial" + kind, w, h, dict(dial=kind, fps=24))
@@ -139,6 +147,11 @@ def blens(seg):
     return "|".join(out)
 
 
+def cd_extra(style):
+    return dict(FULL, CdInfo=1, CdLogo=1, Logo=LOGO, LogoW=900, LogoH=300, FL185=1, FL239=1, SafeAction=1,
+                CFL239Red=1, CFL239Green=0.82, CFL239Blue=0.25, CdStyle=style)
+
+
 def burn_frame(w, h, extra, scale):
     setting = os.path.join(ROOT, "dist", "LeaderKit Burn-in.setting")
     seg = ("86400|86880|1000|1|24|0|90000|0|A001C003_260926_R2AB~A001  ·  CAM A|SC 12A  SH 3  TK 4 ★~|"
@@ -153,8 +166,10 @@ SCREENS = {
     "slate1": lambda o, w, h, s: head_frame(o, w, h, 40, dict(FULL, SlateStyle=1), s),
     "slate2": lambda o, w, h, s: head_frame(o, w, h, 40, dict(FULL, SlateStyle=2), s),
     "slate3": lambda o, w, h, s: head_frame(o, w, h, 40, dict(FULL, SlateStyle=3), s),
-    "countdown": lambda o, w, h, s: head_frame(o, w, h, 300, dict(FULL, CdInfo=1, CdLogo=1, Logo=LOGO, LogoW=900,
-                                                                   LogoH=300, FL239=1, SafeAction=1), s),
+    "countdown": lambda o, w, h, s: head_frame(o, w, h, 300, cd_extra(0), s),
+    "cd0": lambda o, w, h, s: head_frame(o, w, h, 300, cd_extra(0), s),
+    "cd1": lambda o, w, h, s: head_frame(o, w, h, 300, cd_extra(1), s),
+    "cd2": lambda o, w, h, s: head_frame(o, w, h, 300, cd_extra(2), s),
     "burnin": lambda o, w, h, s: burn_frame(w, h, {}, s),
     "burnin43": lambda o, w, h, s: burn_frame(w, h, dict(BMatte=1), s),
     "burnin239": lambda o, w, h, s: burn_frame(w, h, dict(BMatte=11), s),

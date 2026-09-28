@@ -596,7 +596,7 @@ end
 -- PNG disegnato una volta sola (riusato se nulla cambia) e caricato nel Loader del generatore:
 -- Fusion lo tiene in cache per tutto il clip, niente tracce in piu' ne' immagini fisse accorciate.
 local function genImage(kind, spec, render, key, ldName, wKey, hKey, label)
-  local path = cacheDir .. sep .. string.format("LeaderKit_%s_%dx%d_%s.png", kind, w, h, hash(kind .. w .. "x" .. h .. specKey(spec)))
+  local path = cacheDir .. sep .. string.format("LeaderKit_%s_%dx%d_%s.png", kind, w, h, hash(kind .. w .. "x" .. h .. (LK_DRAW or "") .. specKey(spec)))
   local fh = io.open(path, "rb")
   if fh then fh:close() else
     local okr, err = render(path)
@@ -614,7 +614,7 @@ if countFrom > 0 and get("CalOn", 1) > 0.5 then
   for _, k in ipairs(LK_CALIBRATION or {}) do cal[string.lower(string.sub(k, 4))] = get(k, 1) > 0.5 end
   local spec = { accent = accent, cal = cal, fpsLabel = string.format("%g/SEC", r.fps), resLabel = resClass(),
     gamma = targetGamma(), cdLogo = get("CdLogo", 0) > 0.5 and get("Logo", "") ~= "", cdInfo = get("CdInfo", 0) > 0.5,
-    guide = { get("GuideRed", 1), get("GuideGreen", 1), get("GuideBlue", 1) } }
+    style = math.floor(get("CdStyle", 0) + 0.5) }
   -- con le frame lines sul countdown i moduli stanno dentro l'area comune delle linee accese e gli
   -- angoli di ogni formato hanno il triangolo (come le frecce del leader SMPTE)
   if get("GuidesCd", 1) > 0.5 then
@@ -624,20 +624,34 @@ if countFrom > 0 and get("CalOn", 1) > 0.5 then
       if get(gd[1], 0) > 0.5 then
         local one = gd[2] == "safe" and { safe = gd[3] } or { ar = gd[3] }
         list[#list + 1] = one
-        if gd[2] ~= "safe" then spec.frames[#spec.frames + 1] = LK_OVERLAY.innerRect(w, h, { one }) end
+        if gd[2] ~= "safe" then
+          local rect = LK_OVERLAY.innerRect(w, h, { one })
+          rect.color = { get("C" .. gd[1] .. "Red", 1), get("C" .. gd[1] .. "Green", 1), get("C" .. gd[1] .. "Blue", 1) }
+          spec.frames[#spec.frames + 1] = rect
+        end
       end
     end
     if #list > 0 then spec.inner = LK_OVERLAY.innerRect(w, h, list) end
   end
-  local path = genImage("Taratura", spec, function(p) return LK_OVERLAY.render(p, w, h, spec) end,
-    "CalImage", "CalLd", "CalW", "CalH", "Taratura")
+  -- una taratura per stile, cosi' cambiando stile del countdown non serve rigenerare
+  local path
+  for st, k in ipairs({ "Cal", "Cal1", "Cal2" }) do
+    local sp = {}
+    for kk, vv in pairs(spec) do sp[kk] = vv end
+    sp.style = st - 1
+    local pth = genImage("Taratura", sp, function(p) return LK_OVERLAY.render(p, w, h, sp) end,
+      k .. "Image", k .. "Ld", k .. "W", k .. "H", "Taratura")
+    if sp.style == spec.style then path = pth end
+  end
   if path then
     ok(string.format("Taratura %dx%d sul countdown (nel generatore, sotto frame lines, logo e dati), gamma di riferimento %.1f%s.",
       w, h, spec.gamma, spec.inner and "; moduli dentro le frame lines accese" or ""))
   end
 else
-  set(lk, "CalImage", "")
-  LK_IMAGE.sync(c, lk, "CalImage", "CalLd", "CalW", "CalH", "")
+  for _, k in ipairs({ "Cal", "Cal1", "Cal2" }) do
+    set(lk, k .. "Image", "")
+    LK_IMAGE.sync(c, lk, k .. "Image", k .. "Ld", k .. "W", k .. "H", "")
+  end
 end
 
 -- quadranti degli stili Quadrante e Orologio: entrambi pronti, cosi' cambiando stile non manca nulla
