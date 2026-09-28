@@ -471,7 +471,6 @@ def test_engine_dials_in_loaders(built, code):
     res, _ = run_engine(code, res="1920x1080", fps="25")
     ld = loaders(res)
     for kind, key, r in (("b", "DialBLd", min(0.36 * 1080, 0.22 * 1920)), ("c", "DialCLd", min(0.31 * 1080, 0.20 * 1920))):
-        import math
         side = 2 * math.ceil(r * 1.04 + 2)
         path, w, h = ld[key]
         assert (int(w), int(h)) == (side, side) and os.path.exists(path)
