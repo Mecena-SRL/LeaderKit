@@ -49,13 +49,17 @@ dofile(arg[1])
 local W, H = tonumber(arg[3]), tonumber(arg[4])
 local spec = load("return " .. arg[5])()
 local ok, err
-if spec.guides then spec.inner = LK_OVERLAY.innerRect(W, H, spec.guides) end
+if spec.guides then
+  spec.inner = LK_OVERLAY.innerRect(W, H, spec.guides)
+  spec.frames = {}
+  for _, gd in ipairs(spec.guides) do if gd.ar then spec.frames[#spec.frames + 1] = LK_OVERLAY.innerRect(W, H, { gd }) end end
+end
 if spec.dial then ok, err = LK_OVERLAY.renderDial(arg[2], spec.dial, W, H, spec)
 else ok, err = LK_OVERLAY.render(arg[2], W, H, spec) end
 if not ok then io.stderr:write(tostring(err)); os.exit(1) end
 """
 CAL = dict((k, True) for k in ("stars", "res", "diag", "center", "grey", "color", "checker", "ramps", "blue", "gamma",
-                               "contour", "peak", "edge", "labels"))
+                               "contour", "peak", "edge", "labels", "skin"))
 
 
 def lua_table(v):
@@ -108,7 +112,7 @@ def head_frame(out_dir, w, h, t, extra, scale):
     extra = dict(extra)
     style = extra.get("SlateStyle")
     if t >= 300:          # countdown: taratura di Genera nel Loader CalLd
-        spec = dict(cal=CAL, fpsLabel="24/SEC", resLabel="HD", cdLogo=bool(extra.get("CdLogo")),
+        spec = dict(cal=CAL, fpsLabel="24/SEC", resLabel="HD", gamma=2.4, cdLogo=bool(extra.get("CdLogo")),
                     cdInfo=bool(extra.get("CdInfo")), guides=GUIDES)
         path = overlay_png(out_dir, "cal%d%d" % (spec["cdLogo"], spec["cdInfo"]), w, h, spec)
         extra.update(CalImage=path, CalW=w, CalH=h)

@@ -475,14 +475,17 @@ GUIDE_KEYS = ["FLTL"] + [k for k, _, _ in FRAMELINES] + [k for k, _, _ in SAFE_A
 # strumenti di taratura (SMPTE RP 428-6, EBU Tech 3325, ITU-R BT.814): chiave -> modulo di fx/overlay.lua
 CALIBRATION = [("CalStars", "Stelle di Siemens negli angoli (fuoco)", 1),
                ("CalRes", "Righe 1-4 px e registrazione RGB (nitidezza, scalatura, convergenza)", 1),
-               ("CalDiag", "Zone plate e linee a 45° (aliasing, scalatura)", 1),
-               ("CalGamma", "Verifica del gamma 2.2 / 2.4 / 2.6", 1),
+               ("CalDiag", "Righe di 1 px annidate (mappatura 1:1 dei pixel)", 1),
+               ("CalGamma", "Verifica del gamma (righe di 1 px e grigio del gamma)", 1),
                ("CalGrey", "Scala di grigi e neri 0-10%", 1), ("CalColor", "Colori RGBCMY 100% / 75%", 1),
-               ("CalChecker", "ColorChecker 24 (sRGB)", 1), ("CalRamps", "Rampe B/N, R, G, B", 1),
+               ("CalChecker", "ColorChecker 24 (sRGB)", 1), ("CalSkin", "Toni della pelle (scala Monk)", 1),
+               ("CalRamps", "Rampe B/N, R, G, B", 1),
                ("CalBlue", "Verifica del blu (filtro Wratten 47B)", 1),
-               ("CalContour", "Sfera sfumata (contouring)", 1), ("CalPeak", "Bianco di picco e PLUGE", 1),
+               ("CalContour", "Sfera divisa: alte luci e ombre (contouring)", 1),
+               ("CalPeak", "Riferimenti del bianco (95% nel 100%) e del nero (5% nel 0%)", 1),
                ("CalEdge", "Bordo del raster, angoli e scale di overscan", 1),
-               ("CalCenter", "Mirino centrale", 1), ("CalLabels", "Etichette fps / risoluzione / formato", 1)]
+               ("CalCenter", "Mirino centrale", 1), ("CalLabels", "Fotogrammi al secondo e risoluzione", 1)]
+GAMMA_REFS = ["Dallo spazio colore di uscita", "2.2 (sRGB, web)", "2.4 (Rec.709 / BT.1886)", "2.6 (DCI, cinema)"]
 LOGO_POS = ["In alto a destra", "In alto a sinistra", "In basso a destra", "In basso a sinistra", "Al centro"]
 END_DOT_POS = ["In alto a destra (cue mark)", "Al centro", "In alto a sinistra"]
 HIDDEN_NUM = ["LogoW", "LogoH", "Logo2W", "Logo2H", "TitleW", "TitleH"]
@@ -517,7 +520,7 @@ def head_inputs():
               + [k for k, _, _ in SAFE_AREAS] + [GUIDE_COLOR[0] + ch for ch in ("Red", "Green", "Blue")]
               + ["SecEnd", "EndDot", "EndDotPos", "EndDotSize"])
     out += [(x, "Guide") for x in guides]
-    tech = (["SecTech", "ColorInfo", "AudioFormat", "SecAudio", "PopLevel", "BeepEach", "SecCal", "CalOn"]
+    tech = (["SecTech", "ColorInfo", "AudioFormat", "SecAudio", "PopLevel", "BeepEach", "SecCal", "CalOn", "CalGammaRef"]
             + [f for f, _, _ in CALIBRATION])
     out += [(x, "Tecnico") for x in tech]
     return out
@@ -1106,8 +1109,9 @@ def guides_layer(g):
         stack = ("local F = %s local k, nfull = 0, 0 for j = 1, #F do if F[j][1] > 0.5 then "
                  "local cj = cls(F[j][2]) if j < %d and cj == me then k = k + 1 end "
                  "if cj == 3 then nfull = nfull + 1 end end end " % (flist, i))
-        where = ("local x, y = (lw + pad) / _W, (lw + pad + cap / 2 + k * st) / _H "
-                 "if me == 1 then x = (lw + pad + k * 19 * cap) / _W y = 1 - ((_H - ah) / 2 + lw + pad + cap / 2) / _H "
+        # le etichette partono dopo il triangolo d'angolo della taratura (0.022 del lato corto)
+        where = ("local tri = 0.026 * math.min(_W, _H) local x, y = (lw + pad) / _W, (lw + pad + cap / 2 + k * st) / _H "
+                 "if me == 1 then x = (lw + pad + tri + k * 19 * cap) / _W y = 1 - ((_H - ah) / 2 + lw + pad + cap / 2) / _H "
                  "elseif me == 2 then x = ((_W - aw) / 2 + lw + pad) / _W "
                  "y = (lw + pad + cap / 2 + (nfull + k) * st) / _H end ")
         if ar:
@@ -1224,6 +1228,7 @@ def head(std=None):
             + uc_check("BeepEach", "Bip anche su 8..3 (non standard)", 0)
             + uc_label("SecCal", "Taratura sul countdown (immagine creata da Genera)")
             + uc_check("CalOn", "Strumenti di taratura", 1)
+            + uc_combo("CalGammaRef", "Gamma di riferimento", GAMMA_REFS)
             + "".join(uc_check(f, label, d) for f, label, d in CALIBRATION))
     hidden = "".join(uc_hidden(k) for k in HIDDEN_NUM + HIDDEN_GEN) + "".join(uc_hidden(im[0], "Text") for im in GEN_IMAGES)
     uc = (on_page("Progetto", prog) + on_page("Dati", data) + on_page("Aspetto", look)
@@ -1240,7 +1245,7 @@ def head(std=None):
               ("PopLevel", "0"), ("BeepEach", "0"), ("Logo", '""'), ("LogoPos", "0"), ("LogoSize", "12"),
               ("Logo2", '""'), ("LogoPos2", "1"), ("LogoSize2", "12"),
               ("SlateStyle", "0"), ("TitleImage", '""'), ("TitleImageSize", "100"),
-              ("LogoOnTail", "0"), ("CalOn", "1"), ("CdLogo", "0"), ("CdLogoSize", "70"), ("CdInfo", "0")]
+              ("LogoOnTail", "0"), ("CalOn", "1"), ("CalGammaRef", "0"), ("CdLogo", "0"), ("CdLogoSize", "70"), ("CdInfo", "0")]
     values += [(k, str(d)) for k, _, d, _ in CD_FIELDS]
     values += [(i, str(std.get("slot_defaults", {}).get(c, 0))) for c, i, _ in SLOT_INPUTS]
     values += [(f, '""') for f, _, _ in PRODUCTION_FIELDS + POST_FIELDS if f not in ("Title", "Version")]

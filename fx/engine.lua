@@ -561,13 +561,24 @@ local function hash(str)
   for i = 1, #str do hv = (hv * 33 + string.byte(str, i)) % 2147483647 end
   return string.format("%08x", hv)
 end
--- classe del formato per l'etichetta della taratura (anche verticali e 4:3)
+-- classe della risoluzione per il riquadro "24/SEC · 2K" della taratura (anche verticali e 4:3)
 local function resClass()
   local long, short = math.max(w, h), math.min(w, h)
-  if long >= 7680 then return "8K" elseif long >= 3996 and w >= 3996 then return "4K DCI"
-  elseif long >= 3840 then return "UHD" elseif long >= 1998 and w >= 1998 then return "2K DCI"
-  elseif long >= 1920 or short >= 1080 then return "HD" elseif short >= 720 then return "HD 720" end
+  if long >= 7680 then return "8K" elseif long >= 3996 and w >= 3996 then return "4K"
+  elseif long >= 3840 then return "UHD" elseif long >= 1998 and w >= 1998 then return "2K"
+  elseif long >= 1920 or short >= 1080 then return "HD" elseif short >= 720 then return "720" end
   return "SD"
+end
+-- gamma di riferimento per il riquadro del gamma: scelto nel pannello o dallo spazio colore di uscita
+local function targetGamma()
+  local sel = math.floor(get("CalGammaRef", 0) + 0.5)
+  if sel == 1 then return 2.2 elseif sel == 2 then return 2.4 elseif sel == 3 then return 2.6 end
+  local cs = ""
+  pcall(function() cs = string.lower(tostring(project:GetSetting("colorSpaceOutput") or "")) end)
+  if string.find(cs, "2.6", 1, true) or string.find(cs, "dci", 1, true) or string.find(cs, "p3", 1, true)
+    or string.find(cs, "xyz", 1, true) then return 2.6 end
+  if string.find(cs, "srgb", 1, true) or string.find(cs, "2.2", 1, true) then return 2.2 end
+  return 2.4
 end
 local accent = { get("AccentRed", 0.85), get("AccentGreen", 0.85), get("AccentBlue", 0.85) }
 
@@ -602,20 +613,27 @@ if countFrom > 0 and get("CalOn", 1) > 0.5 then
   local cal = {}
   for _, k in ipairs(LK_CALIBRATION or {}) do cal[string.lower(string.sub(k, 4))] = get(k, 1) > 0.5 end
   local spec = { accent = accent, cal = cal, fpsLabel = string.format("%g/SEC", r.fps), resLabel = resClass(),
-    cdLogo = get("CdLogo", 0) > 0.5 and get("Logo", "") ~= "", cdInfo = get("CdInfo", 0) > 0.5 }
-  -- con le frame lines sul countdown i moduli stanno dentro l'area comune delle linee accese
+    gamma = targetGamma(), cdLogo = get("CdLogo", 0) > 0.5 and get("Logo", "") ~= "", cdInfo = get("CdInfo", 0) > 0.5,
+    guide = { get("GuideRed", 1), get("GuideGreen", 1), get("GuideBlue", 1) } }
+  -- con le frame lines sul countdown i moduli stanno dentro l'area comune delle linee accese e gli
+  -- angoli di ogni formato hanno il triangolo (come le frecce del leader SMPTE)
   if get("GuidesCd", 1) > 0.5 then
     local list = {}
+    spec.frames = {}
     for _, gd in ipairs(LK_GUIDES or {}) do
-      if get(gd[1], 0) > 0.5 then list[#list + 1] = gd[2] == "safe" and { safe = gd[3] } or { ar = gd[3] } end
+      if get(gd[1], 0) > 0.5 then
+        local one = gd[2] == "safe" and { safe = gd[3] } or { ar = gd[3] }
+        list[#list + 1] = one
+        if gd[2] ~= "safe" then spec.frames[#spec.frames + 1] = LK_OVERLAY.innerRect(w, h, { one }) end
+      end
     end
     if #list > 0 then spec.inner = LK_OVERLAY.innerRect(w, h, list) end
   end
   local path = genImage("Taratura", spec, function(p) return LK_OVERLAY.render(p, w, h, spec) end,
     "CalImage", "CalLd", "CalW", "CalH", "Taratura")
   if path then
-    ok(string.format("Taratura %dx%d sul countdown (nel generatore, sotto frame lines, logo e dati)%s.", w, h,
-      spec.inner and "; moduli dentro le frame lines accese" or ""))
+    ok(string.format("Taratura %dx%d sul countdown (nel generatore, sotto frame lines, logo e dati), gamma di riferimento %.1f%s.",
+      w, h, spec.gamma, spec.inner and "; moduli dentro le frame lines accese" or ""))
   end
 else
   set(lk, "CalImage", "")

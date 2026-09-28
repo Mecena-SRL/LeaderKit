@@ -296,6 +296,7 @@ LK_OVERLAY = (function()
     ["x"] = { { 1, 0.5, 3, 3.5 }, { 1, 3.5, 3, 0.5 } },
     ["("] = { { 3, 6, 2, 5, 2, 1, 3, 0 } },
     [")"] = { { 1, 6, 2, 5, 2, 1, 1, 0 } },
+    ["~"] = { { 0.4, 5.6, 1.3, 4.2, 2, 1.8 }, { 3.6, 5.6, 2, 1.8 }, { 2, 1.8, 1.4, 0.7, 2, 0, 2.6, 0.7, 2, 1.8 } },  -- gamma
   }
   M.GLYPHS = GLYPHS
 
@@ -430,12 +431,12 @@ LK_OVERLAY = (function()
   local function ringD(W, H) return min(0.62 * H, 0.40 * W) end
   M.ringD = ringD
 
-  -- Moduli di taratura per zona (dall'esterno verso il cerchio): due file di tre quadrati
-  -- (stelle di Siemens negli angoli esterni, come nel leader SMPTE RP 428-6) e due strisce
-  -- vicino alla linea orizzontale di centro.
+  -- Moduli per zona (dall'esterno verso il cerchio) nelle posizioni del leader SMPTE RP 428-6: stelle
+  -- di Siemens negli angoli esterni, due file di tre quadrati, due strisce vicino alla linea di centro.
+  -- Al posto dei due volti (incarnati): ColorChecker e toni della pelle.
   local ZONES = {
-    left = { A = { "star", "sphere", "peak" }, S = { "rampWR", "rampGB" }, B = { "star", "gamma", "info" } },
-    right = { A = { "star", "blue", "res" }, S = { "grey", "colors" }, B = { "star", "checker", "zone" } },
+    left = { A = { "star", "sphere", "peak" }, S = { "rampWR", "rampGB" }, B = { "star", "checker", "info" } },
+    right = { A = { "star", "blue", "res" }, S = { "grey", "colors" }, B = { "star", "skin", "gamma" } },
   }
 
   -- Impaginazione adattiva: i moduli stanno ai lati del cerchio (colonna centrale libera per
@@ -511,87 +512,97 @@ LK_OVERLAY = (function()
     { 56, 61, 150 }, { 70, 148, 73 }, { 175, 54, 60 }, { 231, 199, 31 }, { 187, 86, 149 }, { 8, 133, 161 },
     { 243, 243, 242 }, { 200, 200, 200 }, { 160, 160, 160 }, { 122, 122, 121 }, { 85, 85, 85 }, { 52, 52, 52 },
   }
-  local GAMMAS = { 2.2, 2.4, 2.6 }
-  M.GAMMAS = GAMMAS
-  -- toppa uniforme che ha la stessa luce media di righe alterne 0 / 100% con il gamma g
+  -- scala Monk dei toni della pelle (Google / E. Monk, CC BY 4.0), dal tono 1 (chiaro) al 10 (scuro)
+  local SKIN = { "f6ede4", "f3e7db", "f7ead0", "eadaba", "d7bd96", "a07e56", "825c43", "604134", "3a312a", "292420" }
+  -- toppa uniforme con la stessa luce media di righe alterne 0 / 100% con il gamma g: 0.5^(1/g)
   function M.gammaPatch(g) return floor(255 * 0.5 ^ (1 / g) + 0.5) end
 
   -- ------------------------------------------------------------ moduli
   local WHITE, BLACK = { 255, 255, 255 }, { 0, 0, 0 }
+  local INK = { 16, 16, 16 }
   local RGBCMY = { { 255, 0, 0 }, { 0, 255, 0 }, { 0, 0, 255 }, { 255, 255, 0 }, { 0, 255, 255 }, { 255, 0, 255 } }
 
+  -- testo allineato a sinistra ridotto fino a stare in w
+  local function fitLeft(cv, s, x, y, gh, w, c)
+    while textWidth(s, gh) > w and gh > 5 do gh = gh * 0.92 end
+    cv:text(s, x, y, gh, c)
+    return gh
+  end
+
   local MODULES = {}
+  -- stelle di Siemens (fuoco): il disco grigio al centro, dove i raggi si fondono, deve essere il piu'
+  -- piccolo possibile, rotondo e uguale nei quattro angoli (planarita' del fuoco); frange rosse o blu
+  -- sui raggi = convergenza RGB
   function MODULES.star(cv, x, y, s, p, ctx)
-    cv:rect(x + p, y + p, x + s - p, y + s - p, { 90, 90, 90 })
+    cv:rect(x + p, y + p, x + s - p, y + s - p, { 110, 110, 110 })
     cv:siemens(x + s / 2, y + s / 2, s / 2 - p - 1, 36, WHITE, BLACK)
   end
+  -- sfera divisa (gradienti per il contouring): meta' alta nelle alte luci (dal 60% al bianco), meta'
+  -- bassa nelle ombre (dal nero al 16%). Le sfumature devono essere continue, senza anelli ne' gradini;
+  -- in basso l'ombra deve sparire nel nero senza un bordo.
   function MODULES.sphere(cv, x, y, s, p, ctx)
-    cv:rect(x + p, y + p, x + s - p, y + s - p, { 64, 64, 64 })
-    cv:sphere(x + s / 2, y + s / 2, s / 2 - p - 1)
+    cv:rect(x + p, y + p, x + s - p, y + s - p, { 110, 110, 110 })
+    local cx, cy, R = x + s / 2, y + s / 2, s / 2 - p - 1
+    local lx, ly, lz = -0.2, 0.45, 0.55
+    local ln = sqrt(lx * lx + ly * ly + lz * lz)
+    lx, ly, lz = lx / ln, ly / ln, lz / ln
+    local x0, x1 = max(0, floor(cx - R - 1)), min(cv.W - 1, floor(cx + R + 1))
+    cv:add(cy - R - 1, cy + R + 1, function(yy, row)
+      local dy = (yy + 0.5 - cy) / R
+      for xx = x0, x1 do
+        local dx = (xx + 0.5 - cx) / R
+        local d2 = dx * dx + dy * dy
+        local edge = (1 - sqrt(d2)) * R + 0.5
+        if edge > 0 then
+          local nz = sqrt(max(0, 1 - d2))
+          local v
+          if dy < 0 then
+            v = 0.60 + 0.40 * max(0, min(1, dx * lx - dy * ly + nz * lz)) ^ 0.9
+          else
+            v = 0.16 * (1 - nz) ^ 1.3
+          end
+          v = floor(255 * v + 0.5)
+          blend(row, xx, v, v, v, min(1, edge))
+        end
+      end
+    end)
   end
-  -- bianco di picco con bianchi vicini al clip (92 / 96 / 98%), nero con PLUGE (+1 / +2 / +4%)
+  -- riferimenti del bianco e del nero (valori di SMPTE RP 133): quadrato al 95% nel bianco al 100% e
+  -- quadrato al 5% nel nero; si devono vedere tutti e due (niente bianchi tagliati ne' neri schiacciati)
   function MODULES.peak(cv, x, y, s, p, ctx)
-    local iw, hh = s - 2 * p, floor((s - 2 * p) / 2)
+    local iw = s - 2 * p
+    local hh = floor(iw / 2)
     cv:rect(x + p, y + p, x + s - p, y + p + hh, WHITE)
     cv:rect(x + p, y + p + hh, x + s - p, y + s - p, BLACK)
-    local bw = iw / 7
-    for i, v in ipairs({ 235, 245, 250 }) do
-      local bx = x + p + bw * (2 * i - 1)
-      cv:rect(bx, y + p + hh * 0.2, bx + bw, y + p + hh * 0.8, { v, v, v })
-    end
-    for i, v in ipairs({ 3, 5, 10 }) do
-      local bx = x + p + bw * (2 * i - 1)
-      cv:rect(bx, y + p + hh * 1.2, bx + bw, y + s - p - hh * 0.2, { v, v, v })
-    end
+    local q = floor(hh * 0.56)
+    local cx = x + s / 2
+    local cw, cb = y + p + hh / 2, y + p + hh + (iw - hh) / 2
+    cv:rect(cx - q / 2, cw - q / 2, cx + q / 2, cw + q / 2, { 242, 242, 242 })
+    cv:rect(cx - q / 2, cb - q / 2, cx + q / 2, cb + q / 2, { 13, 13, 13 })
   end
-  -- gamma: righe alterne di 1 px (0 / 100%) e toppa uniforme per 2.2, 2.4, 2.6: il valore del
-  -- display e' quello in cui la toppa scompare guardando da lontano (al 100%, senza scalare)
-  function MODULES.gamma(cv, x, y, s, p, ctx)
-    local iw = s - 2 * p
-    local lh = floor(0.2 * s)
-    local cw = iw / 3
-    local gh = max(6, floor(0.09 * s))
-    for i, gm in ipairs(GAMMAS) do
-      local cx0 = x + p + (i - 1) * cw
-      fitText(cv, string.format("%.1f", gm), cx0 + cw / 2, y + p + (lh - gh) / 2, gh, cw * 0.66, ctx.accent)
-      local y0, y1 = y + p + lh, y + s - p
-      cv:pattern(cx0 + 1, y0, cx0 + cw - 1, y1, function(_, _, _, yy)
-        local v = (yy % 2 == 0) and 255 or 0
-        return v, v, v
-      end)
-      local v = M.gammaPatch(gm)
-      local ps = min(cw * 0.56, (y1 - y0) * 0.5)
-      local pcx, pcy = cx0 + cw / 2, (y0 + y1) / 2
-      cv:rect(pcx - ps / 2, pcy - ps / 2, pcx + ps / 2, pcy + ps / 2, { v, v, v })
-    end
-  end
-  -- fps, classe e risoluzione (come "24/SEC · 2K" del leader SMPTE) sopra una fascia di linee a 45 gradi
+  -- fotogrammi al secondo e risoluzione della timeline (come "24 / SEC · 2K" del leader SMPTE, che
+  -- esiste per ogni frame rate e in 2K e 4K) e triangolo di righe di 1 px annidate, orizzontali e
+  -- verticali, alla risoluzione nativa: con la mappatura 1:1 dei pixel ogni riga e' netta e uniforme;
+  -- moire', righe doppie o un grigio piatto = il monitor o il proiettore sta scalando l'immagine
   function MODULES.info(cv, x, y, s, p, ctx)
     local iw = s - 2 * p
-    local band = floor(0.3 * s)
+    local band = floor(0.27 * iw)
+    local x0, y0 = x + p, y + p
+    cv:rect(x0, y0, x0 + iw, y0 + band, { 118, 118, 118 })
+    cv:rect(x0, y0 + band, x0 + iw, y0 + iw, { 196, 196, 196 })
     if ctx.cal.labels then
-      local y0 = y + p + floor(0.05 * s)
-      local gh = fitText(cv, ctx.fpsLabel or "", x + s / 2, y0, floor(0.15 * s), iw * 0.9, WHITE)
-      y0 = y0 + gh * 1.45
-      gh = fitText(cv, ctx.resLabel or "", x + s / 2, y0, floor(0.11 * s), iw * 0.9, ctx.accent)
-      y0 = y0 + gh * 1.5
-      fitText(cv, string.format("%dx%d  %.2f:1", ctx.W, ctx.H, ctx.W / ctx.H), x + s / 2, y0, floor(0.065 * s),
-        iw * 0.92, ctx.accent)
+      fitText(cv, ctx.fpsLabel or "", x0 + iw / 2, y0 + band * 0.22, floor(band * 0.56), iw * 0.88, INK)
+      local g2 = fitLeft(cv, ctx.resLabel or "", x0 + 0.08 * iw, y0 + band + 0.09 * iw, floor(0.2 * iw), iw * 0.6, INK)
+      fitLeft(cv, string.format("%dx%d", ctx.W, ctx.H), x0 + 0.08 * iw, y0 + band + 0.09 * iw + g2 * 1.4,
+        floor(0.07 * iw), iw * 0.5, { 60, 60, 60 })
     end
     if ctx.cal.diag then
-      local y0 = y + s - p - band
-      local half = x + p + floor(iw / 2)
-      cv:pattern(x + p, y0, half, y + s - p, function(dx, dy)
-        local v = ((dx + dy) % 4 < 2) and 255 or 0
-        return v, v, v
-      end)
-      cv:pattern(half, y0, x + s - p, y + s - p, function(dx, dy)
-        local v = ((dx - dy) % 4 < 2) and 255 or 0
-        return v, v, v
-      end)
+      local t = floor((iw - band) * 0.8)
+      cv:nested(x0 + iw - t, y0 + iw - t, t, "br", WHITE, BLACK)
     end
   end
-  -- nitidezza e scalatura: righe di 1, 2, 3, 4 px verticali e orizzontali; registrazione RGB (1 px)
+  -- nitidezza e scalatura: righe di 1, 2, 3, 4 px verticali e orizzontali; sotto righe di 1 px rosse,
+  -- verdi e blu (registrazione dei pannelli, sottocampionamento del colore): ognuna netta e pura
   function MODULES.res(cv, x, y, s, p, ctx)
     local iw = s - 2 * p
     local gh = max(6, floor(0.08 * s))
@@ -618,7 +629,7 @@ LK_OVERLAY = (function()
     end)
   end
   -- verifica del blu (filtro Wratten 47B o canale blu del monitor): magenta, ciano, blu e bianco
-  -- hanno tutti il blu al 100% e devono sembrare uguali
+  -- hanno tutti il blu al 100%: con il filtro i quadrati interni devono sparire
   function MODULES.blue(cv, x, y, s, p, ctx)
     local iw = s - 2 * p
     local hh = floor(iw / 2)
@@ -630,18 +641,7 @@ LK_OVERLAY = (function()
     cv:rect(cx - q / 2, ym - q / 2, cx + q / 2, ym, { 0, 255, 255 })
     cv:rect(cx - q / 2, ym, cx + q / 2, ym + q / 2, WHITE)
   end
-  -- zone plate circolare: la frequenza arriva al limite di Nyquist sul bordo del riquadro;
-  -- anelli in piu' (moire') vicino al centro indicano che l'immagine e' stata scalata
-  function MODULES.zone(cv, x, y, s, p, ctx)
-    local iw = s - 2 * p
-    local R = iw / 2
-    local k = math.pi / (2 * R)
-    cv:pattern(x + p, y + p, x + s - p, y + s - p, function(dx, dy)
-      local ux, uy = dx + 0.5 - R, dy + 0.5 - R
-      local v = floor(127.5 + 127.5 * math.cos(k * (ux * ux + uy * uy)) + 0.5)
-      return v, v, v
-    end)
-  end
+  -- ColorChecker 24: resa del colore, incarnati (le prime due toppe) e scala neutra
   function MODULES.checker(cv, x, y, s, p, ctx)
     local iw = s - 2 * p
     local pitch = iw / 6
@@ -653,9 +653,49 @@ LK_OVERLAY = (function()
       cv:rect(px, py, px + ps, py + ps, c)
     end
   end
+  -- toni della pelle (al posto dei volti del leader SMPTE): i 10 toni della scala Monk, dal piu'
+  -- chiaro al piu' scuro; devono restare distinti e naturali, senza dominanti
+  function MODULES.skin(cv, x, y, s, p, ctx)
+    local iw = s - 2 * p
+    local pitch = iw / 5
+    local ps = max(2, floor(pitch * 0.88))
+    local gy = y + p + (iw - 2 * pitch) / 2
+    for i, hex in ipairs(SKIN) do
+      local col, row = (i - 1) % 5, floor((i - 1) / 5)
+      local c = { tonumber(hex:sub(1, 2), 16), tonumber(hex:sub(3, 4), 16), tonumber(hex:sub(5, 6), 16) }
+      local px, py = x + p + col * pitch + (pitch - ps) / 2, gy + row * pitch + (pitch - ps) / 2
+      cv:rect(px, py, px + ps, py + ps, c)
+    end
+  end
+  -- verifica del gamma (come "2,6 γ" del leader SMPTE, qui con il gamma dello spazio colore del
+  -- progetto): triangolo di righe alterne di 1 px nero / bianco (luce media 50%) su un grigio pari a
+  -- 0.5^(1/γ). Al 100% e da lontano le righe devono sparire nel grigio; in alto i grigi dei gamma
+  -- vicini: se le righe somigliano a quello a sinistra il gamma del display e' piu' basso, a destra piu' alto
+  function MODULES.gamma(cv, x, y, s, p, ctx)
+    local iw = s - 2 * p
+    local x0, y0 = x + p, y + p
+    local band = floor(0.24 * iw)
+    local g = ctx.gamma or 2.4
+    local vl, vh, vg = M.gammaPatch(g - 0.2), M.gammaPatch(g + 0.2), M.gammaPatch(g)
+    cv:rect(x0, y0, x0 + floor(iw / 2), y0 + band, { vl, vl, vl })
+    cv:rect(x0 + floor(iw / 2), y0, x0 + iw, y0 + band, { vh, vh, vh })
+    local gh = max(6, floor(band * 0.4))
+    fitText(cv, string.format("%.1f", g - 0.2), x0 + iw / 4, y0 + (band - gh) / 2, gh, iw * 0.36, INK)
+    fitText(cv, string.format("%.1f", g + 0.2), x0 + 3 * iw / 4, y0 + (band - gh) / 2, gh, iw * 0.36, INK)
+    cv:rect(x0, y0 + band, x0 + iw, y0 + iw, { vg, vg, vg })
+    local t = iw - band
+    cv:nested(x0, y0 + iw - t, t, "bl", WHITE, BLACK)
+    local lab = string.format("%.1f", g)
+    local g2 = floor(0.17 * iw)
+    while textWidth(lab, g2) > iw * 0.4 and g2 > 6 do g2 = g2 * 0.92 end
+    local lx = x0 + iw * 0.95 - textWidth(lab, g2) / 2
+    cv:text(lab, lx, y0 + band + 0.07 * iw, g2, INK, "center")
+    cv:text("~", lx, y0 + band + 0.07 * iw + g2 * 1.35, g2, INK, "center")
+  end
 
   -- strisce (rampe continue, scale di grigi, colori a due livelli)
   local STRIPS = {}
+  -- rampe continue per canale: sfumature senza gradini ne' cambi di tinta (banding, canale che clippa)
   function STRIPS.rampWR(cv, x, y, w, h, p)
     local hh = floor((h - 2 * p) / 2)
     cv:ramp(x + p, y + p, x + w - p, y + p + hh, BLACK, WHITE)
@@ -666,7 +706,8 @@ LK_OVERLAY = (function()
     cv:ramp(x + p, y + p, x + w - p, y + p + hh, BLACK, { 0, 255, 0 })
     cv:ramp(x + p, y + p + hh, x + w - p, y + h - p, BLACK, { 0, 0, 255 })
   end
-  -- in alto 11 gradini 0-100%, in basso i neri 0-10% a passi dell'1% (il primo visibile dice il livello del nero)
+  -- in alto 11 gradini 0-100% (neutri e ben distinti), in basso i neri 0-10% a passi dell'1%:
+  -- il primo gradino visibile dice dove il nero del display "mangia" il dettaglio
   function STRIPS.grey(cv, x, y, w, h, p)
     local hh = floor((h - 2 * p) / 2)
     local iw = w - 2 * p
@@ -678,17 +719,20 @@ LK_OVERLAY = (function()
       cv:rect(x0, y + p + hh, x1, y + h - p, { v, v, v })
     end
   end
+  -- colori saturi (in alto) e desaturati (in basso, 70% di saturazione): i saturi mostrano il bordo
+  -- della gamma, i desaturati tinta e matrice del colore dentro la gamma
   function STRIPS.colors(cv, x, y, w, h, p)
     local hh = floor((h - 2 * p) / 2)
     local iw = w - 2 * p
     for i, c in ipairs(RGBCMY) do
       local x0, x1 = x + p + iw * (i - 1) / 6, x + p + iw * i / 6
       cv:rect(x0, y + p, x1, y + p + hh, c)
-      cv:rect(x0, y + p + hh, x1, y + h - p, { floor(c[1] * 0.75 + 0.5), floor(c[2] * 0.75 + 0.5), floor(c[3] * 0.75 + 0.5) })
+      cv:rect(x0, y + p + hh, x1, y + h - p, { floor(c[1] + (255 - c[1]) * 0.3 + 0.5),
+        floor(c[2] + (255 - c[2]) * 0.3 + 0.5), floor(c[3] + (255 - c[3]) * 0.3 + 0.5) })
     end
   end
   local ENABLED = { star = "stars", sphere = "contour", peak = "peak", gamma = "gamma", res = "res", blue = "blue",
-    zone = "diag", checker = "checker", rampWR = "ramps", rampGB = "ramps", grey = "grey", colors = "color" }
+    checker = "checker", skin = "skin", rampWR = "ramps", rampGB = "ramps", grey = "grey", colors = "color" }
 
   -- bordo del raster (1 px esatto), angoli e scale dei bordi (overscan / mascherini: tacche ogni 1%,
   -- numeri ogni 2%) a meta' dei lati; in alto e in basso solo se logo e dati non occupano il centro
@@ -705,7 +749,9 @@ LK_OVERLAY = (function()
       for _, side in ipairs({ 1, -1 }) do
         local xk = (side > 0) and floor(W * k / 100 + 0.5) or (W - floor(W * k / 100 + 0.5))
         cv:rect(xk - lw / 2, H / 2 - t / 2, xk + lw / 2, H / 2 + t / 2, accent)
-        if k % 2 == 0 then cv:text(tostring(k), xk, H / 2 + tl / 2 + 2, gh, accent, "center") end
+        -- numeri ogni 2%; se non ci stanno solo 2, 6, 10 (come nel leader SMPTE)
+        local lab = (k % 2 == 0) and (W * 0.02 >= textWidth("10%", gh) * 1.15 or k % 4 == 2)
+        if lab then cv:text(k == 10 and "10%" or tostring(k), xk, H / 2 + tl / 2 + 2, gh, accent, "center") end
       end
     end
     local vt, vs = max(6, floor(0.03 * W * min(1, H / W * 1.78) + 0.5)), 0
@@ -716,7 +762,7 @@ LK_OVERLAY = (function()
         if (side > 0 and not spec.cdLogo) or (side < 0 and not spec.cdInfo) then
           local yk = (side > 0) and floor(H * k / 100 + 0.5) or (H - floor(H * k / 100 + 0.5))
           cv:rect(W / 2 - t / 2, yk - lw / 2, W / 2 + t / 2, yk + lw / 2, accent)
-          if k % 2 == 0 then cv:text(tostring(k), W / 2 + vt / 2 + 3, yk - gh / 2, gh, accent) end
+          if k % 2 == 0 then cv:text(k == 10 and "10%" or tostring(k), W / 2 + vt / 2 + 3, yk - gh / 2, gh, accent) end
         end
       end
     end
@@ -739,8 +785,9 @@ LK_OVERLAY = (function()
   end
 
   -- ------------------------------------------------------------ taratura sul countdown
-  -- spec: { accent = {r,g,b} 0..1, cal = { stars, res, diag, center, grey, color, checker, ramps, blue,
-  --         gamma, contour, peak, edge, labels }, fpsLabel, resLabel, inner = { x0, y0, x1, y1 },
+  -- spec: { accent = {r,g,b} 0..1, cal = { stars, res, diag, center, grey, color, checker, skin, ramps,
+  --         blue, gamma, contour, peak, edge, labels }, fpsLabel, resLabel, gamma (di riferimento),
+  --         inner = { x0, y0, x1, y1 }, frames = { rettangoli dei formati accesi }, guide = {r,g,b},
   --         cdLogo, cdInfo }
   function M.compose(W, H, spec)
     local cv = canvas(W, H)
@@ -750,7 +797,8 @@ LK_OVERLAY = (function()
     local cal = spec.cal or {}
     if cal.edge then edges(cv, W, H, spec, accent, lw) end
     local L = M.layout(W, H, spec)
-    local ctx = { cal = cal, accent = accent, fpsLabel = spec.fpsLabel, resLabel = spec.resLabel, W = W, H = H }
+    local ctx = { cal = cal, accent = accent, fpsLabel = spec.fpsLabel, resLabel = spec.resLabel, W = W, H = H,
+      gamma = spec.gamma }
     for _, it in ipairs(L.items) do
       local on = (it.kind == "info") and (cal.labels or cal.diag) or cal[ENABLED[it.kind]]
       if on then
@@ -767,6 +815,21 @@ LK_OVERLAY = (function()
       cv:frame(floor(W / 2 - a), floor(H / 2 - a), floor(W / 2 + a), floor(H / 2 + a), lw, accent)
       local b = floor(a / 2.5)
       cv:frame(floor(W / 2 - b), floor(H / 2 - b), floor(W / 2 + b), floor(H / 2 + b), lw, accent)
+      for _, d in ipairs({ { 1, 1 }, { 1, -1 } }) do                      -- asterisco (le croci sono del generatore)
+        cv:segment(W / 2 - d[1] * b * 0.7, H / 2 - d[2] * b * 0.7, W / 2 + d[1] * b * 0.7, H / 2 + d[2] * b * 0.7,
+          max(0.6, lw * 0.5), accent)
+      end
+    end
+    -- angoli dei formati delle frame lines accese (come le frecce del leader SMPTE): il triangolo punta
+    -- all'angolo del formato e resta visibile anche se il mascherino copre la linea
+    local gcol = c8(spec.guide or { 1, 1, 1 })
+    local T = max(5, floor(0.022 * min(W, H) + 0.5))
+    for _, r in ipairs(spec.frames or {}) do
+      local x0, y0, x1, y1 = floor(r[1] + 0.5), floor(r[2] + 0.5), floor(r[3] + 0.5), floor(r[4] + 0.5)
+      if x0 > 0 or y0 > 0 or x1 < W or y1 < H then
+        cv:corner(x0, y0, 1, 1, T, gcol); cv:corner(x1, y0, -1, 1, T, gcol)
+        cv:corner(x0, y1, 1, -1, T, gcol); cv:corner(x1, y1, -1, -1, T, gcol)
+      end
     end
     return cv, L
   end

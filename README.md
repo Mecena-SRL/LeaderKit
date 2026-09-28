@@ -144,28 +144,34 @@ fino al FFOA, ma lo lascia se lo vuoi.
 Il countdown (8→2, Picture Start, braccio, 2-pop) è calcolato a ogni fotogramma
 dal frame rate della timeline: 48 fotogrammi a 24/23.976, 50 a 25, 60 a 29.97 DF.
 
-Gli strumenti di taratura seguono il leader digitale **SMPTE RP 428-6** (con PLUGE di
-ITU-R BT.814 / EBU Tech 3325). Sono un PNG a tutto quadro nel generatore, sotto frame lines,
-cerchio, logo e dati. I moduli stanno **ai lati del cerchio**, due file di tre quadrati e due
-strisce vicino alla linea di centro; su formati stretti (4:3 molto stretto, verticali) vanno uno
-sopra l'altro. Ogni modulo ha la sua spunta (scheda Tecnico):
+Gli strumenti di taratura seguono il leader digitale **SMPTE RP 428-6** (D-Cinema Digital Leader):
+stessi moduli nelle stesse posizioni, generati alla risoluzione, al frame rate e al gamma del progetto.
+Il leader SMPTE, come questo, serve per fuoco, formato e un controllo di fiducia, non sostituisce una
+taratura strumentale. È un PNG a tutto quadro nel generatore, sotto frame lines, cerchio, logo e dati. I
+moduli stanno **ai lati del cerchio**: due file di tre quadrati con le stelle negli angoli esterni e due
+strisce vicino alla linea di centro. Sui formati stretti (4:3 molto stretto, verticali) vanno uno sopra
+l'altro. Ogni modulo ha la sua spunta nella scheda Tecnico.
 
-| Modulo | A cosa serve |
-|---|---|
-| **Stelle di Siemens** negli angoli | fuoco del proiettore e nitidezza: il centro grigio più piccolo possibile, uguale nei 4 angoli |
-| **Righe 1-4 px** e **registrazione RGB** | nitidezza e scalatura (al 100% le righe da 1 px sono nette); frange colorate sulle righe R/G/B = pannelli disallineati |
-| **Zone plate** e **linee a 45°** | aliasing e scalatura: anelli di moiré in più o scalini sulle diagonali = immagine ricampionata |
-| **Gamma 2.2 / 2.4 / 2.6** | righe alterne 0/100% accanto a toppe grigie (186, 191, 195): guardando da lontano scompare la toppa del gamma del display |
-| **Scala di grigi e neri 0-10%** | 11 gradini 0-100% e 11 gradini di nero a passi dell'1%: il primo visibile dice il livello del nero |
-| **Bianco di picco e PLUGE** | bianchi al 92/96/98% (clip) e neri a +1/+2/+4% |
-| **Colori RGBCMY 100% / 75%** | primari e secondari a due livelli |
-| **ColorChecker 24** | i 24 colori di riferimento (sRGB) per la resa del colore e degli incarnati |
-| **Rampe B/N, R, G, B** | banding e contouring nelle sfumature |
-| **Verifica del blu (47B)** | magenta, ciano, blu e bianco annidati: con il filtro 47B o il canale blu devono sembrare uguali |
-| **Sfera sfumata** | contouring nelle ombre |
-| **Bordo del raster, angoli e scale** | 1 px bianco sul bordo e triangoli negli angoli (si vede tutto il quadro?); tacche ogni 1% e numeri 2-10% a metà dei lati per leggere quanto tagliano overscan e mascherini |
-| **Mirino, fps, formato** | centro del quadro; `24/SEC`, classe (HD, UHD, 2K DCI…), risoluzione e rapporto |
+| Modulo | A cosa serve | Come si legge |
+|---|---|---|
+| **Stelle di Siemens** (4 angoli) | fuoco e uniformità del fuoco | il disco grigio al centro, dove i raggi si fondono, deve essere piccolo, rotondo e uguale nei 4 angoli; frange rosse o blu = convergenza RGB |
+| **Sfera divisa** | contouring nelle alte luci (metà alta, 60–100%) e nelle ombre (metà bassa, 0–16%) | sfumature continue, senza anelli né gradini; in basso l'ombra sparisce nel nero senza bordo |
+| **Bianco e nero** | clip dei bianchi, neri schiacciati (valori di SMPTE RP 133) | il quadrato al 95% nel bianco e quello al 5% nel nero devono vedersi entrambi |
+| **24/SEC · risoluzione** | frame rate e classe della timeline (SD, 720, HD, 2K, UHD, 4K, 8K) con i pixel esatti; triangolo di righe di 1 px annidate, orizzontali e verticali | alla mappatura 1:1 dei pixel ogni riga è netta e uniforme; moiré, righe doppie o grigio piatto = il monitor o il proiettore scala l'immagine |
+| **Gamma** (γ del progetto) | gamma del display: righe di 1 px nero/bianco (luce media 50%) su un grigio 0.5^(1/γ) | al 100% e da lontano le righe spariscono nel grigio; se somigliano alla toppa in alto a sinistra (γ − 0.2) il gamma del display è più basso, a destra (γ + 0.2) più alto. Il γ viene dallo spazio colore di uscita (Rec.709 2.4, sRGB 2.2, DCI/P3 2.6) o si sceglie in Tecnico › Gamma di riferimento |
+| **Righe 1-4 px e RGB** | nitidezza, scalatura, registrazione dei pannelli, sottocampionamento del colore | le righe da 1 px nette; le righe rosse, verdi e blu da 1 px pure, senza frange |
+| **Verifica del blu** | matrice del colore (canale blu) | con il filtro Wratten 47B o il solo canale blu, magenta, ciano, blu e bianco sembrano uguali: i quadrati interni spariscono |
+| **Grigi e neri 0-10%** | scala dei grigi e livello del nero | 11 gradini neutri e distinti; nei neri a passi dell'1% il primo visibile dice dove il display perde il dettaglio |
+| **Colori saturi / desaturati** | primari e secondari al bordo della gamma (sopra) e dentro la gamma (sotto, 70%) | tinte pulite, nessuna fusione tra saturi e desaturati |
+| **Rampe B/N, R, G, B** | banding e clip di un canale | sfumature continue, senza cambi di tinta |
+| **ColorChecker 24** | resa del colore e scala neutra (valori sRGB X-Rite) | confronto con la tavola vera o con la misura |
+| **Toni della pelle** | incarnati (al posto dei volti del leader SMPTE): i 10 toni della scala Monk | distinti e naturali, senza dominanti |
+| **Bordo, angoli e scale** | quanto tagliano overscan e mascherini | 1 px bianco sul bordo e triangoli negli angoli: se si vedono, si vede tutto il quadro; tacche ogni 1% e numeri fino al 10% a metà dei lati |
+| **Angoli dei formati** | frame lines accese sul countdown | triangolo nell'angolo di ogni formato: resta visibile anche se il mascherino copre la linea |
+| **Mirino** | centro del quadro | quadrati e asterisco centrati sulla croce |
 
+I test su livelli e gamma valgono se il leader arriva all'uscita senza trasformazioni di colore (timeline
+Rec.709 o generatori nello spazio di uscita).
 La scala in alto (e in basso) al centro si disegna solo se lì non ci sono il logo (o i dati).
 
 ## Standard inclusi

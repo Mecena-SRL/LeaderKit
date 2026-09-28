@@ -765,9 +765,9 @@ def test_guides_1_85_on_16_9_example(built):
     t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 40, FL239=1, FL185=1)
     assert t["GFL239T"]["StyledText"] == "2.39:1  ·  1920 × 804"
     assert t["GFL185T"]["StyledText"] == "1.85:1  ·  1920 × 1038"
-    cap, pad = 0.014 * 1080, 0.008 * 1080
-    assert t["GFL185T"]["HorizontalLeftCenterRight"] == -1 and abs(t["GFL185T"]["Center"][0] - (2 + pad) / 1920) < 1e-9
-    assert abs(t["GFL239T"]["Center"][0] - (2 + pad + 19 * cap) / 1920) < 1e-9      # affiancata alla 1.85
+    cap, pad, tri = 0.014 * 1080, 0.008 * 1080, 0.026 * 1080          # dopo il triangolo d'angolo
+    assert t["GFL185T"]["HorizontalLeftCenterRight"] == -1 and abs(t["GFL185T"]["Center"][0] - (2 + pad + tri) / 1920) < 1e-9
+    assert abs(t["GFL239T"]["Center"][0] - (2 + pad + tri + 19 * cap) / 1920) < 1e-9      # affiancata alla 1.85
     assert abs(t["GFL239T"]["Center"][1] - (1 - (138 + 2 + 0.008 * 1080 + 0.007 * 1080) / 1080)) < 1e-9
 
 
@@ -1116,3 +1116,78 @@ def test_engine_fusion_output_cache(built, code):
     assert "Cache dell'uscita Fusion accesa" in log
     res, log = run_engine(code, fps="24", nocache=1)
     assert "Render Cache Fusion Output" in log
+
+
+LAYOUT_LUA = r"""
+dofile(arg[1])
+local W, H = tonumber(arg[3]), tonumber(arg[4])
+local cal = {}
+for _, k in ipairs({ "stars", "res", "diag", "center", "grey", "color", "checker", "skin", "ramps", "blue", "gamma",
+  "contour", "peak", "edge", "labels" }) do cal[k] = true end
+local spec = { cal = cal, fpsLabel = "24/SEC", resLabel = "HD", gamma = tonumber(arg[5]) }
+assert(LK_OVERLAY.render(arg[2], W, H, spec))
+for _, it in ipairs(LK_OVERLAY.layout(W, H, spec).items) do print(it.kind, it.x, it.y, it.w, it.h) end
+"""
+
+
+def calibration(tmp_path, w, h, gamma=2.4):
+    from PIL import Image
+    script = tmp_path / "cal.lua"
+    script.write_text(LAYOUT_LUA)
+    png = tmp_path / "cal.png"
+    out = subprocess.run([LUA, str(script), os.path.join(ROOT, "fx", "overlay.lua"), str(png), str(w), str(h), str(gamma)],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert out.returncode == 0, out.stderr.decode()
+    items = {}
+    for line in out.stdout.decode().split("\n"):
+        if line.strip():
+            k, x, y, iw, ih = line.split()
+            items.setdefault(k, []).append((int(x), int(y), int(iw), int(ih)))
+    im = Image.open(png)
+    im.load()
+    return items, im.load()
+
+
+def test_calibration_modules_like_rp428_6(tmp_path):
+    """Moduli nelle posizioni del leader SMPTE: 4 stelle, sfera divisa, bianco/nero, 24/SEC + risoluzione,
+    gamma, blu, righe, ColorChecker e toni della pelle al posto dei volti."""
+    items, px = calibration(tmp_path, 1920, 1080)
+    assert len(items["star"]) == 4
+    for k in ("sphere", "peak", "info", "gamma", "res", "blue", "checker", "skin", "rampWR", "rampGB", "grey", "colors"):
+        assert len(items[k]) == 1, k
+    # riquadro 24/SEC · HD: triangolo di righe di 1 px alterne all'angolo in basso a destra
+    x, y, s, _ = items["info"][0]
+    p = 2 + max(1, round(0.05 * s))
+    cx, cy = x + s - p - 1, y + s - p - 1
+    row = [px[cx - i, cy][0] for i in range(6)]
+    col = [px[cx, cy - i][0] for i in range(6)]
+    assert row == [255, 0, 255, 0, 255, 0] and col == row          # orizzontali e verticali, 1 px
+    # gamma 2.4: grigio 0.5^(1/2.4) = 191 accanto alle righe, in alto 2.2 (186) e 2.6 (195)
+    x, y, s, _ = items["gamma"][0]
+    iw = s - 2 * p
+    assert px[x + p + iw - 3, y + p + int(0.24 * iw) + int(0.6 * iw)][:3] == (191, 191, 191)
+    assert px[x + p + 3, y + p + 3][:3] == (186, 186, 186) and px[x + p + iw - 3, y + p + 3][:3] == (195, 195, 195)
+    # sfera divisa: alte luci sopra l'equatore, ombre sotto
+    x, y, s, _ = items["sphere"][0]
+    top, bottom = px[x + s // 2, y + s // 2 - s // 6][0], px[x + s // 2, y + s // 2 + s // 6][0]
+    assert top > 200 and bottom < 20
+    # bianco e nero: 95% nel 100%, 5% nel 0%
+    x, y, s, _ = items["peak"][0]
+    assert px[x + s // 2, y + p + (s - 2 * p) // 4][:3] == (242, 242, 242)
+    assert px[x + p + 2, y + p + 2][:3] == (255, 255, 255)
+    assert px[x + s // 2, y + s - p - (s - 2 * p) // 4][:3] == (13, 13, 13)
+
+
+def test_calibration_gamma_reference(tmp_path):
+    items, px = calibration(tmp_path, 1920, 1080, gamma=2.6)
+    x, y, s, _ = items["gamma"][0]
+    p = 2 + max(1, round(0.05 * s))
+    iw = s - 2 * p
+    assert px[x + p + iw - 3, y + p + int(0.24 * iw) + int(0.6 * iw)][:3] == (195, 195, 195)
+
+
+def test_engine_gamma_from_color_space(built, code):
+    res, log = run_engine(code, fps="24")                           # uscita Rec.709 Gamma 2.4 (harness)
+    assert "gamma di riferimento 2.4" in log
+    res, log = run_engine(code, fps="24", in_CalGammaRef=3)          # scelto nel pannello: 2.6 (DCI)
+    assert "gamma di riferimento 2.6" in log
