@@ -382,3 +382,5 @@ lungo quanto il programma).
   identificazione dei canali 5.1/7.1 e rumore rosa per canale, panoramiche per il judder.
 - Installer Windows e Linux testati; `.drfx` firmato.
 - Export dei marker in CSV/EDL.
+
+Backlog e priorità della settimana in corso: [`docs/dev-queue.md`](docs/dev-queue.md).
