@@ -1254,3 +1254,12 @@ def test_calibration_layout_styles(tmp_path, style, w, h):
     for i, p in enumerate(mods):
         for q in mods[i + 1:]:
             assert p[1] + p[3] <= q[1] or q[1] + q[3] <= p[1] or p[2] + p[4] <= q[2] or q[2] + q[4] <= p[2], (p, q)
+
+
+def test_png_cache_follows_drawing_code():
+    """I PNG in cache portano l'impronta di overlay.lua: una versione nuova non riusa i disegni vecchi."""
+    import hashlib
+    src = build_fx.engine("generate", STD)
+    digest = hashlib.sha1(build_fx.fx_source("overlay.lua").encode("utf-8")).hexdigest()[:12]
+    assert 'LK_DRAW = "%s"' % digest in src
+    assert '(LK_DRAW or "") .. specKey(spec)' in src

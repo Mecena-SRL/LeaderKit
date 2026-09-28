@@ -596,7 +596,7 @@ end
 -- PNG disegnato una volta sola (riusato se nulla cambia) e caricato nel Loader del generatore:
 -- Fusion lo tiene in cache per tutto il clip, niente tracce in piu' ne' immagini fisse accorciate.
 local function genImage(kind, spec, render, key, ldName, wKey, hKey, label)
-  local path = cacheDir .. sep .. string.format("LeaderKit_%s_%dx%d_%s.png", kind, w, h, hash(kind .. w .. "x" .. h .. specKey(spec)))
+  local path = cacheDir .. sep .. string.format("LeaderKit_%s_%dx%d_%s.png", kind, w, h, hash(kind .. w .. "x" .. h .. (LK_DRAW or "") .. specKey(spec)))
   local fh = io.open(path, "rb")
   if fh then fh:close() else
     local okr, err = render(path)

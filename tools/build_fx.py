@@ -19,6 +19,7 @@ i testi sono raccolti in pochi Text+ a piu' righe e le forme dello stesso
 colore usano un solo Background con le maschere in catena.
 """
 
+import hashlib
 import os
 import re
 import sys
@@ -414,7 +415,9 @@ def engine(mode, std=None):
                  + "LK_CALIBRATION = %s\n" % lua_literal([k for k, _, _ in CALIBRATION])
                  + "LK_GUIDES = %s\n" % lua_literal([[k, "ar", ar] for k, _, ar in FRAMELINES]
                                                     + [[k, "safe", pct] for k, pct, _ in SAFE_AREAS])
-                 + "LK_DIALS = %s\n" % lua_literal({"b": list(DIAL_B), "c": list(DIAL_C)}))
+                 + "LK_DIALS = %s\n" % lua_literal({"b": list(DIAL_B), "c": list(DIAL_C)})
+                 # impronta del disegno: se overlay.lua cambia, Genera ridisegna i PNG invece di riusarli
+                 + "LK_DRAW = %s\n" % lua_literal(hashlib.sha1(fx_source("overlay.lua").encode("utf-8")).hexdigest()[:12]))
         libs = fx_source("overlay.lua") + "\n" + fx_source("image.lua") + "\n"
         body += "\n" + fx_source("engine.lua")
     return (head + libs
