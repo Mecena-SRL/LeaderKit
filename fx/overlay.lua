@@ -396,6 +396,44 @@ LK_OVERLAY = (function()
     end)
   end
 
+  -- corona circolare da r0 a r1 tra gli angoli a0 e a1 (gradi, in senso orario dalle ore 12); fn(frazione
+  -- dell'angolo) -> colore. Bordi del raggio con antialiasing.
+  function Canvas:annulus(cx, cy, r0, r1, a0, a1, fn)
+    local x0, x1 = max(0, floor(cx - r1 - 1)), min(self.W - 1, floor(cx + r1 + 1))
+    self:add(cy - r1 - 1, cy + r1 + 1, function(y, row)
+      local dy = y + 0.5 - cy
+      for x = x0, x1 do
+        local dx = x + 0.5 - cx
+        local d = sqrt(dx * dx + dy * dy)
+        local a = min(r1 + 0.5 - d, d - r0 + 0.5, 1)
+        if a > 0 then
+          local ang = (math.deg(atan2(dx, -dy)) + 360) % 360
+          if ang >= a0 and ang <= a1 then
+            local c = fn((ang - a0) / (a1 - a0))
+            if c then blend(row, x, c[1], c[2], c[3], a) end
+          end
+        end
+      end
+    end)
+  end
+
+  -- tessera rotonda: colora con 'bg' il riquadro fuori dal cerchio inscritto (con antialiasing)
+  function Canvas:roundClip(x, y, s, bg)
+    local cx, cy, r = x + s / 2, y + s / 2, s / 2
+    self:add(y, y + s - 1, function(yy, row)
+      local dy = yy + 0.5 - cy
+      for xx = max(0, floor(x)), min(self.W - 1, floor(x + s - 1)) do
+        local dx = xx + 0.5 - cx
+        local a = min(1, sqrt(dx * dx + dy * dy) - r + 0.5)
+        if a > 0 then
+          local i = xx * 4 + 1
+          if bg then blend(row, xx, bg[1], bg[2], bg[3], a)
+          else row[i + 3] = floor(row[i + 3] * (1 - a) + 0.5) end
+        end
+      end
+    end)
+  end
+
   -- stella di Siemens con antialiasing analitico: verso il centro i settori si fondono in grigio
   function Canvas:siemens(cx, cy, rad, spokes, cw, cb)
     local x0, x1 = max(0, floor(cx - rad - 1)), min(self.W - 1, floor(cx + rad + 1))
@@ -428,7 +466,7 @@ LK_OVERLAY = (function()
 
   -- ------------------------------------------------------------ geometria del countdown
   -- Diametro del cerchio in pixel: lo stesso calcolato dal generatore (min(0.62 H, 0.40 W)).
-  -- stili del countdown: 0 Standard (leader SMPTE), 1 Ordinato (moduli raggruppati), 2 Moderno
+  -- stili del countdown: 0 Standard (leader SMPTE), 1 Pannelli, 2 Quadrante
   local RING_H, RING_W = { 0.62, 0.50, 0.56 }, { 0.40, 0.34, 0.36 }
   local function ringD(W, H, style)
     local k = (style or 0) + 1
@@ -444,9 +482,9 @@ LK_OVERLAY = (function()
     right = { A = { "star", "blue", "res" }, S = { "grey", "colors" }, B = { "star", "skin", "gamma" } },
   }
 
-  -- Stili Ordinato e Moderno: stelle di Siemens negli angoli dell'area utile (il fuoco si legge sui
+  -- Stile Pannelli: stelle di Siemens negli angoli dell'area utile (il fuoco si legge sui
   -- bordi) e due gruppi compatti accanto al cerchio, ognuno con due file di due moduli e due strisce,
-  -- con la didascalia sotto ogni modulo (e, nell'Ordinato, il titolo del gruppo). I moduli hanno una
+  -- con la didascalia sotto ogni modulo (e il titolo del gruppo). I moduli hanno una
   -- grandezza fissa in proporzione all'altezza (mai sotto i 40 px: le righe di 1 px restano leggibili).
   local CLUSTERS = {
     left = { title = "NITIDEZZA E GAMMA", Q = { "info", "res", "gamma", "sphere" }, S = { "rampWR", "rampGB" } },
@@ -493,6 +531,9 @@ LK_OVERLAY = (function()
         local gx = (name == "left") and (x1 - gw) or x0
         local gh = floor(rows * s)
         local y = floor((iy0 + iy1) / 2 - gh / 2)
+        -- scheda grigia dietro il gruppo
+        local pad = floor(0.12 * s)
+        put("card", gx - pad, y - pad, gw + 2 * pad, gh + pad)
         if titled then put("title", gx, y, gw, floor(0.18 * s), { text = C.title }); y = y + floor(0.28 * s) end
         for r = 0, 1 do
           for c = 0, 1 do
@@ -508,6 +549,66 @@ LK_OVERLAY = (function()
         end
         out.s = s
       end
+    end
+    return out
+  end
+
+  -- Quadrante: i test sono la ghiera dell'orologio. Tessere rotonde lungo la ghiera (a destra nitidezza
+  -- e gamma, a sinistra livelli e colore; niente in alto e in basso, dove stanno logo e dati), grigi e
+  -- neri 0-10% come arco a sinistra, colori saturi e desaturati come arco a destra, stelle negli angoli.
+  local RADIAL = { { "info", 50 }, { "res", 80 }, { "gamma", 110 }, { "sphere", 140 },
+    { "peak", 310 }, { "blue", 280 }, { "checker", 250 }, { "skin", 220 } }
+  function M.radial(W, H, spec, out, ix0, iy0, ix1, iy1, m)
+    local u = min(W, H)
+    local R = out.D / 2
+    local cx, cy = (ix0 + ix1) / 2, (iy0 + iy1) / 2
+    local function put(kind, x, y, ww, hh, extra)
+      local it = { kind = kind, x = floor(x + 0.5), y = floor(y + 0.5), w = floor(ww + 0.5), h = floor(hh + 0.5) }
+      for k, v in pairs(extra or {}) do it[k] = v end
+      out.items[#out.items + 1] = it
+      return it
+    end
+    local ss = max(36, floor(0.075 * H + 0.5))
+    ss = min(ss, floor((ix1 - ix0) * 0.12), floor((iy1 - iy0) * 0.25))
+    if ss >= 24 then
+      put("star", ix0 + m, iy0 + m, ss, ss, { round = true }); put("star", ix1 - m - ss, iy0 + m, ss, ss, { round = true })
+      put("star", ix0 + m, iy1 - m - ss, ss, ss, { round = true })
+      put("star", ix1 - m - ss, iy1 - m - ss, ss, ss, { round = true })
+    end
+    -- archi della ghiera
+    out.arcs = { { kind = "grey", r0 = R * 1.13, r1 = R * 1.21, a0 = 206, a1 = 334 },
+      { kind = "black", r0 = R * 1.225, r1 = R * 1.27, a0 = 206, a1 = 334 },
+      { kind = "color", r0 = R * 1.13, r1 = R * 1.21, a0 = 26, a1 = 154 },
+      { kind = "desat", r0 = R * 1.225, r1 = R * 1.27, a0 = 26, a1 = 154 } }
+    -- tessere: due colonne che seguono la curva della ghiera (x = bordo esterno del cerchio alla
+    -- quota della fila); si rimpiccioliscono finche' stanno nell'area utile senza toccare le stelle
+    local Rb = R * 1.27
+    local function fits(t)
+      local p = t * 1.5
+      if 4 * p > (iy1 - iy0) - 2 * m then return end
+      local pos = {}
+      for i, e in ipairs(RADIAL) do
+        local side = (i <= 4) and 1 or -1
+        local k = (i <= 4) and i or (i - 4)
+        local dy = (k - 2.5) * p
+        local rr = Rb + 0.15 * t + t / 2                -- centro tessera fuori dalla ghiera
+        local xc = max(sqrt(max(0, rr * rr - dy * dy)), 0.8 * Rb + t / 2)
+        local x = (side > 0) and (cx + xc - t / 2) or (cx - xc - t / 2)
+        local y = cy + dy - t / 2
+        if x < ix0 + m or x + t > ix1 - m then return end
+        for _, st in ipairs(out.items) do
+          if x < st.x + st.w + 4 and st.x < x + t + 4 and y < st.y + st.h + 4 and st.y < y + t * 1.3 then return end
+        end
+        pos[i] = { e[1], x, y }
+      end
+      return pos
+    end
+    local t = floor(0.11 * u + 0.5)
+    local pos = fits(t)
+    while not pos and t > 24 do t = t - 2; pos = fits(t) end
+    if pos then
+      for _, q in ipairs(pos) do put(q[1], q[2], q[3], t, t, { round = true, caption = CAPTIONS[q[1]] }) end
+      out.s = t
     end
     return out
   end
@@ -532,7 +633,8 @@ LK_OVERLAY = (function()
     end
     local midgap = max(8, floor(0.075 * H + 0.5))
     local out = { D = D, items = {}, midgap = midgap, cols = 0, s = 0, style = style }
-    if style ~= 0 then return M.clusters(W, H, spec, out, ix0, iy0, ix1, iy1, m) end
+    if style == 1 then return M.clusters(W, H, spec, out, ix0, iy0, ix1, iy1, m) end
+    if style == 2 then return M.radial(W, H, spec, out, ix0, iy0, ix1, iy1, m) end
     local function zone(name, x0, x1)
       local y0, y1 = iy0 + m, iy1 - m
       local w, h = x1 - x0, y1 - y0
@@ -810,43 +912,13 @@ LK_OVERLAY = (function()
   local ENABLED = { star = "stars", sphere = "contour", peak = "peak", gamma = "gamma", res = "res", blue = "blue",
     checker = "checker", skin = "skin", rampWR = "ramps", rampGB = "ramps", grey = "grey", colors = "color" }
 
-  -- bordo del raster (1 px esatto), angoli e scale dei bordi (overscan / mascherini: tacche ogni 1%,
-  -- numeri ogni 2%) a meta' dei lati; in alto e in basso solo se logo e dati non occupano il centro
-  local function edges(cv, W, H, spec, accent, lw, LAY)
+  -- bordo del raster (1 px esatto) e triangoli negli angoli: se si vedono, il display mostra tutto il quadro
+  local function edges(cv, W, H)
     local u = min(W, H)
     cv:frame(0, 0, W, H, 1, WHITE)
     local L = max(6, floor(0.03 * u + 0.5))
     cv:corner(0, 0, 1, 1, L, WHITE); cv:corner(W, 0, -1, 1, L, WHITE)
     cv:corner(0, H, 1, -1, L, WHITE); cv:corner(W, H, -1, -1, L, WHITE)
-    local gh = max(6, floor(min(0.014 * H, 0.0105 * W) + 0.5))       -- numeri distanti 2% della larghezza
-    local tl, ts = max(6, floor(0.03 * H + 0.5)), max(3, floor(0.016 * H + 0.5))
-    -- scale a meta' dei lati solo se non toccano i moduli
-    local clear = true
-    for _, it in ipairs((LAY and LAY.items) or {}) do
-      if it.x < W * 0.105 + 4 and it.x + it.w > 0 and it.y < H / 2 + tl and it.y + it.h > H / 2 - tl then clear = false end
-    end
-    for k = 1, clear and 10 or 0 do
-      local t = (k % 2 == 0) and tl or ts
-      for _, side in ipairs({ 1, -1 }) do
-        local xk = (side > 0) and floor(W * k / 100 + 0.5) or (W - floor(W * k / 100 + 0.5))
-        cv:rect(xk - lw / 2, H / 2 - t / 2, xk + lw / 2, H / 2 + t / 2, accent)
-        -- numeri ogni 2%; se non ci stanno solo 2, 6, 10 (come nel leader SMPTE)
-        local lab = (k % 2 == 0) and (W * 0.02 >= textWidth("10%", gh) * 1.15 or k % 4 == 2)
-        if lab then cv:text(k == 10 and "10%" or tostring(k), xk, H / 2 + tl / 2 + 2, gh, accent, "center") end
-      end
-    end
-    local vt, vs = max(6, floor(0.03 * W * min(1, H / W * 1.78) + 0.5)), 0
-    vs = max(3, floor(vt * 0.53 + 0.5))
-    for k = 1, 10 do
-      local t = (k % 2 == 0) and vt or vs
-      for _, side in ipairs({ 1, -1 }) do
-        if (side > 0 and not spec.cdLogo) or (side < 0 and not spec.cdInfo) then
-          local yk = (side > 0) and floor(H * k / 100 + 0.5) or (H - floor(H * k / 100 + 0.5))
-          cv:rect(W / 2 - t / 2, yk - lw / 2, W / 2 + t / 2, yk + lw / 2, accent)
-          if k % 2 == 0 then cv:text(k == 10 and "10%" or tostring(k), W / 2 + vt / 2 + 3, yk - gh / 2, gh, accent) end
-        end
-      end
-    end
   end
 
   -- area comune delle frame lines attive, a pixel interi e pari come nel generatore.
@@ -878,14 +950,29 @@ LK_OVERLAY = (function()
     local cal = spec.cal or {}
     local style = spec.style or 0
     local L = M.layout(W, H, spec)
-    if cal.edge then edges(cv, W, H, spec, accent, lw, L) end
-    local blw = (style == 2) and 1 or lw
+    -- Pannelli: fondo antracite e disco grigio nell'orologio (come i leader classici)
+    if style == 1 then
+      cv:rect(0, 0, W, H, { 20, 20, 20 })
+      local R = L.D / 2 * 0.985
+      cv:add(H / 2 - R - 1, H / 2 + R + 1, function(y, row)
+        local dy = y + 0.5 - H / 2
+        for x = max(0, floor(W / 2 - R - 1)), min(W - 1, floor(W / 2 + R + 1)) do
+          local dx = x + 0.5 - W / 2
+          local a = min(1, R + 0.5 - sqrt(dx * dx + dy * dy))
+          if a > 0 then blend(row, x, 52, 52, 52, a) end
+        end
+      end)
+    end
+    if cal.edge then edges(cv, W, H) end
+    local blw = (style == 2) and 1 or ((style == 1) and 0 or lw)
     if style == 2 then border = { floor(accent[1] * 0.45 + 0.5), floor(accent[2] * 0.45 + 0.5), floor(accent[3] * 0.45 + 0.5) } end
     local ctx = { cal = cal, accent = accent, fpsLabel = spec.fpsLabel, resLabel = spec.resLabel, W = W, H = H,
       gamma = spec.gamma }
     local capc = (style == 2) and { floor(accent[1] * 0.6), floor(accent[2] * 0.6), floor(accent[3] * 0.6) } or accent
     for _, it in ipairs(L.items) do
-      if it.kind == "title" then
+      if it.kind == "card" then
+        cv:rect(it.x, it.y, it.x + it.w, it.y + it.h, { 40, 40, 40 })
+      elseif it.kind == "title" then
         local gh = max(6, it.h)
         while textWidth(it.text, gh) > it.w and gh > 6 do gh = gh * 0.92 end
         cv:text(it.text, it.x, it.y, gh, accent)
@@ -894,22 +981,47 @@ LK_OVERLAY = (function()
         if on then
           local s = it.w
           cv:rect(it.x, it.y, it.x + it.w, it.y + it.h, BLACK)
-          cv:frame(it.x, it.y, it.x + it.w, it.y + it.h, blw, border)
-          local p = blw + max(1, floor(0.05 * min(it.w, it.h) + 0.5))
+          if blw > 0 and not it.round then cv:frame(it.x, it.y, it.x + it.w, it.y + it.h, blw, border) end
+          local p = (it.round and 0 or blw) + max(1, floor(0.05 * min(it.w, it.h) + 0.5))
+          if it.round then p = floor(0.15 * s + 0.5) end               -- il contenuto sta nel cerchio
           if MODULES[it.kind] then MODULES[it.kind](cv, it.x, it.y, s, p, ctx)
           else STRIPS[it.kind](cv, it.x, it.y, it.w, it.h, p) end
+          if it.round then
+            cv:roundClip(it.x, it.y, s, nil)
+            cv:ring(it.x + s / 2, it.y + s / 2, s / 2 - 0.5, 1, border)
+          end
           if it.caption then
             local text = (it.kind == "gamma") and string.format("GAMMA %.1f", ctx.gamma or 2.4) or it.caption
             local gh = max(6, floor(min(it.h, it.w) * ((style == 2) and 0.085 or 0.1) + 0.5))
             if it.h < it.w then gh = max(6, floor(it.h * 0.2 + 0.5)) end
             while textWidth(text, gh) > it.w and gh > 5 do gh = gh * 0.92 end
             -- se non sta nel modulo nemmeno a 5 px non si scrive (niente didascalie accavallate)
-            if textWidth(text, gh) <= it.w + 1 then cv:text(text, it.x, it.y + it.h + max(2, floor(gh * 0.6)), gh, capc) end
+            if textWidth(text, gh) <= it.w + 1 then
+              if it.round then cv:text(text, it.x + it.w / 2, it.y + it.h + max(2, floor(gh * 0.6)), gh, capc, "center")
+              else cv:text(text, it.x, it.y + it.h + max(2, floor(gh * 0.6)), gh, capc) end
+            end
           end
         end
       end
     end
-    -- Moderno: 60 tacche attorno al cerchio del countdown (5 lunghe ogni 5 secondi di quadrante)
+    -- Quadrante: archi della ghiera (grigi e neri a sinistra, colori a destra), poi 60 tacche
+    for _, a in ipairs(L.arcs or {}) do
+      local on = (a.kind == "grey" or a.kind == "black") and cal.grey or cal.color
+      if on then
+        local n = (a.kind == "grey" or a.kind == "black") and 11 or 6
+        local gap = 0.12
+        cv:annulus(W / 2, H / 2, a.r0, a.r1, a.a0, a.a1, function(f)
+          local k = floor(f * n)
+          if k >= n or f * n - k < gap / 2 or f * n - k > 1 - gap / 2 then return nil end
+          if a.kind == "grey" then local v = floor(k * 25.5 + 0.5) return { v, v, v } end
+          if a.kind == "black" then local v = floor(k * 2.55 + 0.5) return { max(v, 1) == 1 and 0 or v, v, v } end
+          local c = RGBCMY[k + 1]
+          if a.kind == "color" then return c end
+          return { floor(c[1] + (255 - c[1]) * 0.3 + 0.5), floor(c[2] + (255 - c[2]) * 0.3 + 0.5),
+            floor(c[3] + (255 - c[3]) * 0.3 + 0.5) }
+        end)
+      end
+    end
     if style == 2 then
       local R = L.D / 2
       local tc = { floor(accent[1] * 0.55), floor(accent[2] * 0.55), floor(accent[3] * 0.55) }

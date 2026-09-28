@@ -49,7 +49,7 @@ _TOKENS = [
     ("_N", "local _N = math.min(1, _A / 1.6)", ("_A",)),                # su 4:3 / verticale tutto si riduce
     ("_PX", "local _PX = 1 / _H", ("_H",)),                              # un pixel in frazioni dell'altezza
     # diametro del cerchio del countdown (frazione della larghezza): min(0.62 H, 0.40 W), come la taratura
-    # stile del countdown: 0 Standard, 1 Ordinato, 2 Moderno
+    # stile del countdown: 0 Standard, 1 Pannelli, 2 Quadrante
     ("_CS", "local _CS = math.floor(LK.CdStyle + 0.5)", ()),
     ("_RD", "local _RD = math.min(({ 0.62, 0.50, 0.56 })[_CS + 1] / _A, ({ 0.40, 0.34, 0.36 })[_CS + 1])", ("_A", "_CS")),
 ]
@@ -638,8 +638,8 @@ def bars_stack(g):
 def leader_stack(g, prefix, base, digit_expr, sweep_vis=None, cd=None, extras=()):
     """Cerchi e croce (un solo Background), braccio rotante e cifra centrale sopra 'base'.
     extras: (nome, livelli, condizione) messi sotto la cifra, ognuno con il suo gate."""
-    # Standard: due cerchi spessi e croce a tutto quadro (leader SMPTE / Academy); Ordinato: cerchi piu'
-    # sottili e croce solo attorno al cerchio; Moderno: un cerchio sottile e una piccola croce al centro
+    # Standard: due cerchi spessi e croce a tutto quadro (leader SMPTE / Academy); Pannelli: cerchi piu'
+    # sottili e croce solo attorno al cerchio; Quadrante: un cerchio sottile e una piccola croce al centro
     g.mask(prefix + "RingO", "EllipseMask", X("_RD"), X("_RD"),
            border=X("%s * ({ 1.6, 1.1, 0.55 })[_CS + 1]" % LINE_W))
     g.mask(prefix + "RingI", "EllipseMask", X("_RD * ({ 0.86, 0.9, 0.9 })[_CS + 1]"),
@@ -652,7 +652,7 @@ def leader_stack(g, prefix, base, digit_expr, sweep_vis=None, cd=None, extras=()
     g.background(prefix + "Rings", color="Accent", mask=prefix + "LineV")
     top = g.merge(prefix + "M1", base, prefix + "Rings")
     if sweep_vis:
-        # braccio: dal centro al cerchio (Standard, Ordinato), solo un tratto sul bordo (Moderno)
+        # braccio: dal centro al cerchio (Standard, Pannelli), solo un tratto sul bordo (Quadrante)
         g.mask(prefix + "Arm", "RectangleMask", X("%s * ({ 1.6, 1.1, 0.8 })[_CS + 1]" % LINE_W),
                X("_RD / 2 * _A * ({ 1, 1, 0.3 })[_CS + 1]"),
                center=X("Point(0.5, 0.5 + _RD / 2 * _A * ({ 0.5, 0.5, 0.85 })[_CS + 1])"))
@@ -662,7 +662,7 @@ def leader_stack(g, prefix, base, digit_expr, sweep_vis=None, cd=None, extras=()
     for name, layers, cond in extras:
         top = g.gate(name, top, layers, cond)
     g.text(prefix + "Digit", "{ 0.5, 0.5 }", X("_RD * 0.30 / 0.36"), X(digit_expr), tint("Text"))
-    # Moderno: cifra Light, piu' grande e piu' fine
+    # Quadrante: cifra Light, piu' grande e piu' fine
     g.text(prefix + "DigitL", "{ 0.5, 0.5 }", X("_RD * 0.36 / 0.36"), X(digit_expr), tint("Text"), style="Light")
     digit = g.dissolve(prefix + "DigitS", prefix + "Digit", prefix + "DigitL", X("_CS == 2 and 1 or 0"))
     return g.merge(prefix + "M5", top, digit)
@@ -1035,7 +1035,7 @@ def title_image_layer():
 
 
 # ------------------------------------------------------------------ logo e dati sul countdown
-CD_STYLES = ["Standard (leader SMPTE)", "Ordinato (moduli raggruppati)", "Moderno"]
+CD_STYLES = ["Standard (leader SMPTE)", "Pannelli (schede grigie)", "Quadrante (moderno)"]
 # spunta, etichetta, default, (etichetta sullo schermo, valore) per i ruoli della seconda riga
 CD_FIELDS = [("CdTitle", "Titolo", 1, None), ("CdVersion", "Versione", 0, None),
              ("CdDirector", "Regia", 1, ("DIRECTOR", "LK.Director.Value")),

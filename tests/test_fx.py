@@ -6,6 +6,7 @@ fotogramma con lua5.4 e un comp simulato (tests/lua_harness.lua); il motore
 Gli interruttori sono Dissolve: Mix 1 = ramo visibile (e calcolato), 0 = ramo spento.
 """
 
+import math
 import os
 import re
 import shutil
@@ -1240,14 +1241,17 @@ for _, it in ipairs(LK_OVERLAY.layout(W, H, spec).items) do print(it.kind, it.x,
 def test_calibration_layout_styles(tmp_path, style, w, h):
     """Moduli contenuti, dentro il quadro, fuori dal cerchio, senza sovrapposizioni; stelle negli angoli."""
     items, _ = cal_items(tmp_path, w, h, style)
-    mods = [i for i in items if i[0] != "title"]
+    mods = [i for i in items if i[0] not in ("title", "card")]
     assert sum(1 for i in mods if i[0] == "star") == 4
     r = {0: 0.62, 1: 0.50, 2: 0.56}[style] * h
     r = min(r, {0: 0.40, 1: 0.34, 2: 0.36}[style] * w) / 2
     for k, x, y, a, b in mods:
         assert 0 <= x and x + a <= w and 0 <= y and y + b <= h, k
         assert max(a, b) <= 0.3 * h * (2 if b < a else 1) + 1, k
-        assert x + a < w / 2 - r or x > w / 2 + r, k                 # fuori dalla colonna del cerchio
+        if style == 2 and k != "star":                               # tessere attorno alla ghiera
+            assert math.hypot(x + a / 2 - w / 2, y + b / 2 - h / 2) - max(a, b) / 2 > r, k
+        else:
+            assert x + a < w / 2 - r or x > w / 2 + r, k             # fuori dalla colonna del cerchio
     for i, p in enumerate(mods):
         for q in mods[i + 1:]:
             assert p[1] + p[3] <= q[1] or q[1] + q[3] <= p[1] or p[2] + p[4] <= q[2] or q[2] + q[4] <= p[2], (p, q)
