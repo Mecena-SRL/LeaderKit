@@ -364,6 +364,24 @@ LK_OVERLAY = (function()
     end)
   end
 
+  -- L annidate di 1 px (quadrati concentrici attorno a un angolo) dentro il triangolo che ha
+  -- l'angolo retto in quell'angolo: ogni L ha un tratto orizzontale e uno verticale di 1 px, alterni
+  -- bianco / nero (media 50%). corner: "br" (in basso a destra) o "bl" (in basso a sinistra).
+  function Canvas:nested(x0, y0, size, corner, cw, cb)
+    x0, y0, size = floor(x0 + 0.5), floor(y0 + 0.5), floor(size + 0.5)
+    local right = corner == "br"
+    self:add(y0, y0 + size - 1, function(y, row)
+      local dy = y0 + size - 1 - y                       -- distanza dal bordo basso
+      for k = 0, size - 1 - dy do                        -- dentro il triangolo: dx + dy <= size - 1
+        local x = right and (x0 + size - 1 - k) or (x0 + k)
+        if x >= 0 and x < self.W then
+          local c = (max(k, dy) % 2 == 0) and cw or cb
+          blend(row, x, c[1], c[2], c[3], 1)
+        end
+      end
+    end)
+  end
+
   -- triangolo pieno con l'angolo retto in (xc, yc) e cateti lunghi L verso (sx, sy) = +-1
   function Canvas:corner(xc, yc, sx, sy, L, c)
     local y0, y1 = (sy > 0) and yc or (yc - L), (sy > 0) and (yc + L) or yc
