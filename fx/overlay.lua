@@ -849,48 +849,6 @@ LK_OVERLAY = (function()
     end
   end
 
-  -- Scale dei formati (le "stanghette" del leader SMPTE): per ogni frame line accesa, fuori dalla linea
-  -- verso il formato piu' esterno (o il bordo del quadro), una tacca ogni 1% dell'altezza (letterbox) o
-  -- della larghezza (pillarbox), lunghe via via di piu', numeri 2, 6, 10. Dicono di quanto il mascherino
-  -- o l'inquadratura del proiettore va oltre quel formato. A 1/4 e 3/4 del lato, lontano da etichette, logo e dati.
-  function M.frameScales(cv, W, H, frames, lw)
-    local u = min(W, H)
-    local gh = max(6, floor(0.012 * u + 0.5))
-    for _, r in ipairs(frames) do
-      local col = c8(r.color or { 1, 1, 1 })
-      local x0, y0, x1, y1 = r[1], r[2], r[3], r[4]
-      if y0 > 0.5 then                                              -- letterbox: tacche orizzontali
-        local outer = 0
-        for _, o in ipairs(frames) do if o[2] < y0 - 0.5 and o[2] > outer then outer = o[2] end end
-        local step = H / 100
-        local n = min(10, floor((y0 - outer) / step))
-        for _, xs in ipairs({ floor(W / 4 + 0.5), floor(3 * W / 4 + 0.5) }) do
-          for k = 1, n do
-            local half = u * (0.004 + 0.0022 * k)
-            for _, yy in ipairs({ y0 - k * step, y1 + k * step }) do
-              cv:rect(xs - half, yy - lw / 2, xs + half, yy + lw / 2, col)
-              if k == 2 or k == 6 or k == 10 then cv:text(tostring(k), xs + half + 3, yy - gh / 2, gh, col) end
-            end
-          end
-        end
-      elseif x0 > 0.5 then                                          -- pillarbox: tacche verticali
-        local outer = 0
-        for _, o in ipairs(frames) do if o[1] < x0 - 0.5 and o[1] > outer then outer = o[1] end end
-        local step = W / 100
-        local n = min(10, floor((x0 - outer) / step))
-        for _, ys in ipairs({ floor(H / 4 + 0.5), floor(3 * H / 4 + 0.5) }) do
-          for k = 1, n do
-            local half = u * (0.004 + 0.0022 * k)
-            for _, xx in ipairs({ x0 - k * step, x1 + k * step }) do
-              cv:rect(xx - lw / 2, ys - half, xx + lw / 2, ys + half, col)
-              if k == 2 or k == 6 or k == 10 then cv:text(tostring(k), xx, ys + half + 2, gh, col, "center") end
-            end
-          end
-        end
-      end
-    end
-  end
-
   -- area comune delle frame lines attive, a pixel interi e pari come nel generatore.
   -- list: { { ar = 2.39 }, { safe = 0.9 }, ... }
   function M.innerRect(W, H, list)
@@ -985,7 +943,6 @@ LK_OVERLAY = (function()
         cv:corner(x0, y1, 1, -1, T, gcol); cv:corner(x1, y1, -1, -1, T, gcol)
       end
     end
-    M.frameScales(cv, W, H, frames, lw)
     return cv, L
   end
 

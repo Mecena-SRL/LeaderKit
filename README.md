@@ -119,13 +119,9 @@ logo, dati e cifra:
   moduli della taratura **dentro l'area comune delle linee accese** (come nel leader SMPTE
   RP 428-6): le linee non attraversano mai i moduli. Di default nessuna guida è attiva;
 - **un colore per ogni guida** (ogni frame line, formato della timeline, safe action e safe
-  title: il selettore sta sotto la sua spunta), per linea, etichetta, triangoli d'angolo e scala;
+  title: il selettore sta sotto la sua spunta), per linea, etichetta e triangoli d'angolo;
   bianco di default. Le etichette hanno un contorno nero; quelle delle safe area stanno in alto a
-  destra, quelle dei formati in alto a sinistra;
-- sul countdown ogni formato ha la sua **scala** (le "stanghette" del leader SMPTE): fuori dalla
-  linea, verso il formato più esterno o il bordo, una tacca ogni 1% dell'altezza (letterbox) o della
-  larghezza (pillarbox), più lunga a ogni passo, numeri 2, 6, 10; a 1/4 e 3/4 del lato. Dice di quanto
-  il mascherino o l'inquadratura del proiettore va oltre quel formato.
+  destra, quelle dei formati in alto a sinistra.
 
 ## Logo e dati sul countdown
 

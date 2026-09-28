@@ -1251,11 +1251,3 @@ def test_calibration_layout_styles(tmp_path, style, w, h):
     for i, p in enumerate(mods):
         for q in mods[i + 1:]:
             assert p[1] + p[3] <= q[1] or q[1] + q[3] <= p[1] or p[2] + p[4] <= q[2] or q[2] + q[4] <= p[2], (p, q)
-
-
-def test_frame_scales_in_line_colour(tmp_path):
-    """Scala del formato 2.39 (colore della sua frame line) fuori dalla linea, a 1/4 della larghezza."""
-    items, px = cal_items(tmp_path, 1920, 1080, 0, "1")
-    y0 = (1080 - 804) // 2
-    tick = [px[480, y][:3] for y in range(y0 - 12, y0 - 8)]
-    assert (255, 128, 0) in tick                                   # 1% dell'altezza sopra la linea, arancione
