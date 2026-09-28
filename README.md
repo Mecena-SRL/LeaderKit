@@ -118,8 +118,14 @@ logo, dati e cifra:
 - spunte **Sulla slate** e **Sul countdown e la taratura**. Con la seconda, Genera impagina i
   moduli della taratura **dentro l'area comune delle linee accese** (come nel leader SMPTE
   RP 428-6): le linee non attraversano mai i moduli. Di default nessuna guida è attiva;
-- **colore delle guide** (bianco di default) per linee ed etichette; le etichette
-  hanno un contorno nero, così si leggono anche sopra altre linee.
+- **un colore per ogni guida** (ogni frame line, formato della timeline, safe action e safe
+  title: il selettore sta sotto la sua spunta), per linea, etichetta, triangoli d'angolo e scala;
+  bianco di default. Le etichette hanno un contorno nero; quelle delle safe area stanno in alto a
+  destra, quelle dei formati in alto a sinistra;
+- sul countdown ogni formato ha la sua **scala** (le "stanghette" del leader SMPTE): fuori dalla
+  linea, verso il formato più esterno o il bordo, una tacca ogni 1% dell'altezza (letterbox) o della
+  larghezza (pillarbox), più lunga a ogni passo, numeri 2, 6, 10; a 1/4 e 3/4 del lato. Dice di quanto
+  il mascherino o l'inquadratura del proiettore va oltre quel formato.
 
 ## Logo e dati sul countdown
 
@@ -140,6 +146,14 @@ Spento di default: per gli standard di consegna Genera ricorda che è previsto n
 fino al FFOA, ma lo lascia se lo vuoi.
 
 ## Countdown e taratura
+
+**Tre stili** (Aspetto › Countdown › Stile; Genera ridisegna la taratura):
+
+| Stile | Countdown | Taratura |
+|---|---|---|
+| **Standard** | come il leader SMPTE / Academy: due cerchi spessi, croce a tutto quadro, cifra Bold | i moduli nelle posizioni del leader SMPTE RP 428-6, al massimo il 15% dell'altezza |
+| **Ordinato** | cerchio più piccolo, cerchi sottili, croce solo attorno al cerchio | stelle negli angoli dell'area utile; due gruppi accanto al cerchio (**Nitidezza e gamma**, **Livelli e colore**) con il titolo e la didascalia sotto ogni modulo |
+| **Moderno** | un cerchio sottile con 60 tacche attorno, cifra Light, un tratto sul bordo che gira, piccola croce al centro | gli stessi gruppi più piccoli, bordi di 1 px, didascalie discrete |
 
 Il countdown (8→2, Picture Start, braccio, 2-pop) è calcolato a ogni fotogramma
 dal frame rate della timeline: 48 fotogrammi a 24/23.976, 50 a 25, 60 a 29.97 DF.

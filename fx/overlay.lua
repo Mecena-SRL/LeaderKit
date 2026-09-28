@@ -428,7 +428,12 @@ LK_OVERLAY = (function()
 
   -- ------------------------------------------------------------ geometria del countdown
   -- Diametro del cerchio in pixel: lo stesso calcolato dal generatore (min(0.62 H, 0.40 W)).
-  local function ringD(W, H) return min(0.62 * H, 0.40 * W) end
+  -- stili del countdown: 0 Standard (leader SMPTE), 1 Ordinato (moduli raggruppati), 2 Moderno
+  local RING_H, RING_W = { 0.62, 0.50, 0.56 }, { 0.40, 0.34, 0.36 }
+  local function ringD(W, H, style)
+    local k = (style or 0) + 1
+    return min((RING_H[k] or 0.62) * H, (RING_W[k] or 0.40) * W)
+  end
   M.ringD = ringD
 
   -- Moduli per zona (dall'esterno verso il cerchio) nelle posizioni del leader SMPTE RP 428-6: stelle
@@ -439,6 +444,74 @@ LK_OVERLAY = (function()
     right = { A = { "star", "blue", "res" }, S = { "grey", "colors" }, B = { "star", "skin", "gamma" } },
   }
 
+  -- Stili Ordinato e Moderno: stelle di Siemens negli angoli dell'area utile (il fuoco si legge sui
+  -- bordi) e due gruppi compatti accanto al cerchio, ognuno con due file di due moduli e due strisce,
+  -- con la didascalia sotto ogni modulo (e, nell'Ordinato, il titolo del gruppo). I moduli hanno una
+  -- grandezza fissa in proporzione all'altezza (mai sotto i 40 px: le righe di 1 px restano leggibili).
+  local CLUSTERS = {
+    left = { title = "NITIDEZZA E GAMMA", Q = { "info", "res", "gamma", "sphere" }, S = { "rampWR", "rampGB" } },
+    right = { title = "LIVELLI E COLORE", Q = { "peak", "blue", "checker", "skin" }, S = { "grey", "colors" } },
+  }
+  local CAPTIONS = { star = "FUOCO", sphere = "CONTOURING", peak = "BIANCO / NERO", info = "PIXEL 1:1",
+    res = "NITIDEZZA / RGB", gamma = "GAMMA", blue = "BLU 47B", checker = "COLORCHECKER", skin = "INCARNATI",
+    rampWR = "RAMPE", rampGB = "RAMPE", grey = "GRIGI / NERI 0-10%", colors = "SATURI / DESATURATI" }
+  M.CAPTIONS = CAPTIONS
+
+  function M.clusters(W, H, spec, out, ix0, iy0, ix1, iy1, m)
+    local style = out.style
+    local D, u = out.D, min(W, H)
+    local gc = max(3, floor(0.035 * u + 0.5))
+    local titled = style == 1
+    -- stelle negli angoli dell'area utile
+    local ss = max(40, floor((style == 1 and 0.10 or 0.075) * H + 0.5))
+    ss = min(ss, floor((ix1 - ix0) * 0.12), floor((iy1 - iy0) * 0.25))
+    local function put(kind, x, y, ww, hh, extra)
+      local it = { kind = kind, x = floor(x + 0.5), y = floor(y + 0.5), w = floor(ww + 0.5), h = floor(hh + 0.5) }
+      for k, v in pairs(extra or {}) do it[k] = v end
+      out.items[#out.items + 1] = it
+      return it
+    end
+    if ss >= 24 then
+      put("star", ix0 + m, iy0 + m, ss, ss); put("star", ix1 - m - ss, iy0 + m, ss, ss)
+      put("star", ix0 + m, iy1 - m - ss, ss, ss); put("star", ix1 - m - ss, iy1 - m - ss, ss, ss)
+    end
+    local cap = (style == 1) and 0.2 or 0.17            -- altezza della didascalia (frazione del modulo)
+    local g = 0.1
+    for _, name in ipairs({ "left", "right" }) do
+      local C = CLUSTERS[name]
+      local x0 = (name == "left") and (ix0 + m) or floor(W / 2 + D / 2 + gc)
+      local x1 = (name == "left") and floor(W / 2 - D / 2 - gc) or (ix1 - m)
+      local colw = x1 - x0
+      -- altezza del gruppo in moduli: titolo + 2 file (modulo + didascalia) + 2 strisce (0.42 + didascalia)
+      local rows = (titled and 0.28 or 0) + 2 * (1 + cap + g) + 2 * (0.42 + cap + g)
+      local avail = (iy1 - iy0) - 2 * m - 2 * ss
+      local s = min((style == 1 and 0.115 or 0.085) * H, colw / (2 + g), avail / rows)
+      s = floor(max(min(40, colw / (2 + g)), s))
+      if s >= 24 and colw > 0 then
+        local gw = floor(2 * s + g * s)
+        -- accanto al cerchio (gruppo stretto attorno al countdown), centrato in altezza
+        local gx = (name == "left") and (x1 - gw) or x0
+        local gh = floor(rows * s)
+        local y = floor((iy0 + iy1) / 2 - gh / 2)
+        if titled then put("title", gx, y, gw, floor(0.18 * s), { text = C.title }); y = y + floor(0.28 * s) end
+        for r = 0, 1 do
+          for c = 0, 1 do
+            local kind = C.Q[r * 2 + c + 1]
+            put(kind, gx + c * (s + floor(g * s)), y, s, s, { caption = CAPTIONS[kind] })
+          end
+          y = y + floor(s * (1 + cap + g))
+        end
+        for i = 1, 2 do
+          local kind = C.S[i]
+          put(kind, gx, y, gw, floor(0.42 * s), { caption = (kind ~= "rampWR") and CAPTIONS[kind] or nil })
+          y = y + floor(s * (0.42 + cap + g))
+        end
+        out.s = s
+      end
+    end
+    return out
+  end
+
   -- Impaginazione adattiva: i moduli stanno ai lati del cerchio (colonna centrale libera per
   -- cerchio, logo e dati), dentro l'area comune delle frame lines attive (spec.inner) e con un
   -- varco a meta' altezza per la linea di centro e le scale dei bordi. Tre moduli per fila se la
@@ -446,7 +519,8 @@ LK_OVERLAY = (function()
   function M.layout(W, H, spec)
     spec = spec or {}
     local u = min(W, H)
-    local D = ringD(W, H)
+    local style = spec.style or 0
+    local D = ringD(W, H, style)
     local m = max(3, floor(0.035 * u + 0.5))
     local gc = max(3, floor(0.03 * u + 0.5))
     local ix0, iy0, ix1, iy1 = 0, 0, W, H
@@ -457,21 +531,23 @@ LK_OVERLAY = (function()
       ix1, iy1 = min(W, inner[3] - pad), min(H, inner[4] - pad)
     end
     local midgap = max(8, floor(0.075 * H + 0.5))
-    local out = { D = D, items = {}, midgap = midgap, cols = 0, s = 0 }
+    local out = { D = D, items = {}, midgap = midgap, cols = 0, s = 0, style = style }
+    if style ~= 0 then return M.clusters(W, H, spec, out, ix0, iy0, ix1, iy1, m) end
     local function zone(name, x0, x1)
       local y0, y1 = iy0 + m, iy1 - m
       local w, h = x1 - x0, y1 - y0
       if w < 0.08 * u or h < 0.25 * u then return end
       local g, sr = 0.12, 0.5
-      local s3 = min(w / (3 + 2 * g), (h - midgap) / (2 + 2 * sr + 2 * g), 0.26 * H)
-      local s1 = min(w, (h - midgap) / (6 + 2 * sr + 6 * g), 0.26 * H)
+      -- moduli contenuti (al massimo il 15% dell'altezza): si raggruppano invece di riempire la zona
+      local s3 = min(w / (3 + 2 * g), (h - midgap) / (2 + 2 * sr + 2 * g), 0.15 * H)
+      local s1 = min(w, (h - midgap) / (6 + 2 * sr + 6 * g), 0.15 * H)
       local cols = (s1 > 1.35 * s3) and 1 or 3
       local s = floor(cols == 3 and s3 or s1)
       if s < 24 then return end
       local gs = max(2, floor(g * s + 0.5))
       -- strisce piu' alte se c'e' spazio (fino a 0.8 del modulo)
       local rows = (cols == 3) and 2 or 6
-      local sh = floor(min(0.8 * s, (h - midgap - rows * s - (rows + 2) * gs) / 2) + 0.5)
+      local sh = floor(min(0.62 * s, (h - midgap - rows * s - (rows + 2) * gs) / 2) + 0.5)
       sh = max(sh, floor(sr * s + 0.5))
       local Z = ZONES[name]
       local ym = floor((y0 + y1) / 2 + 0.5)
@@ -736,7 +812,7 @@ LK_OVERLAY = (function()
 
   -- bordo del raster (1 px esatto), angoli e scale dei bordi (overscan / mascherini: tacche ogni 1%,
   -- numeri ogni 2%) a meta' dei lati; in alto e in basso solo se logo e dati non occupano il centro
-  local function edges(cv, W, H, spec, accent, lw)
+  local function edges(cv, W, H, spec, accent, lw, LAY)
     local u = min(W, H)
     cv:frame(0, 0, W, H, 1, WHITE)
     local L = max(6, floor(0.03 * u + 0.5))
@@ -744,7 +820,12 @@ LK_OVERLAY = (function()
     cv:corner(0, H, 1, -1, L, WHITE); cv:corner(W, H, -1, -1, L, WHITE)
     local gh = max(6, floor(min(0.014 * H, 0.0105 * W) + 0.5))       -- numeri distanti 2% della larghezza
     local tl, ts = max(6, floor(0.03 * H + 0.5)), max(3, floor(0.016 * H + 0.5))
-    for k = 1, 10 do
+    -- scale a meta' dei lati solo se non toccano i moduli
+    local clear = true
+    for _, it in ipairs((LAY and LAY.items) or {}) do
+      if it.x < W * 0.105 + 4 and it.x + it.w > 0 and it.y < H / 2 + tl and it.y + it.h > H / 2 - tl then clear = false end
+    end
+    for k = 1, clear and 10 or 0 do
       local t = (k % 2 == 0) and tl or ts
       for _, side in ipairs({ 1, -1 }) do
         local xk = (side > 0) and floor(W * k / 100 + 0.5) or (W - floor(W * k / 100 + 0.5))
@@ -763,6 +844,48 @@ LK_OVERLAY = (function()
           local yk = (side > 0) and floor(H * k / 100 + 0.5) or (H - floor(H * k / 100 + 0.5))
           cv:rect(W / 2 - t / 2, yk - lw / 2, W / 2 + t / 2, yk + lw / 2, accent)
           if k % 2 == 0 then cv:text(k == 10 and "10%" or tostring(k), W / 2 + vt / 2 + 3, yk - gh / 2, gh, accent) end
+        end
+      end
+    end
+  end
+
+  -- Scale dei formati (le "stanghette" del leader SMPTE): per ogni frame line accesa, fuori dalla linea
+  -- verso il formato piu' esterno (o il bordo del quadro), una tacca ogni 1% dell'altezza (letterbox) o
+  -- della larghezza (pillarbox), lunghe via via di piu', numeri 2, 6, 10. Dicono di quanto il mascherino
+  -- o l'inquadratura del proiettore va oltre quel formato. A 1/4 e 3/4 del lato, lontano da etichette, logo e dati.
+  function M.frameScales(cv, W, H, frames, lw)
+    local u = min(W, H)
+    local gh = max(6, floor(0.012 * u + 0.5))
+    for _, r in ipairs(frames) do
+      local col = c8(r.color or { 1, 1, 1 })
+      local x0, y0, x1, y1 = r[1], r[2], r[3], r[4]
+      if y0 > 0.5 then                                              -- letterbox: tacche orizzontali
+        local outer = 0
+        for _, o in ipairs(frames) do if o[2] < y0 - 0.5 and o[2] > outer then outer = o[2] end end
+        local step = H / 100
+        local n = min(10, floor((y0 - outer) / step))
+        for _, xs in ipairs({ floor(W / 4 + 0.5), floor(3 * W / 4 + 0.5) }) do
+          for k = 1, n do
+            local half = u * (0.004 + 0.0022 * k)
+            for _, yy in ipairs({ y0 - k * step, y1 + k * step }) do
+              cv:rect(xs - half, yy - lw / 2, xs + half, yy + lw / 2, col)
+              if k == 2 or k == 6 or k == 10 then cv:text(tostring(k), xs + half + 3, yy - gh / 2, gh, col) end
+            end
+          end
+        end
+      elseif x0 > 0.5 then                                          -- pillarbox: tacche verticali
+        local outer = 0
+        for _, o in ipairs(frames) do if o[1] < x0 - 0.5 and o[1] > outer then outer = o[1] end end
+        local step = W / 100
+        local n = min(10, floor((x0 - outer) / step))
+        for _, ys in ipairs({ floor(H / 4 + 0.5), floor(3 * H / 4 + 0.5) }) do
+          for k = 1, n do
+            local half = u * (0.004 + 0.0022 * k)
+            for _, xx in ipairs({ x0 - k * step, x1 + k * step }) do
+              cv:rect(xx - lw / 2, ys - half, xx + lw / 2, ys + half, col)
+              if k == 2 or k == 6 or k == 10 then cv:text(tostring(k), xx, ys + half + 2, gh, col, "center") end
+            end
+          end
         end
       end
     end
@@ -795,22 +918,52 @@ LK_OVERLAY = (function()
     local border = { floor(accent[1] * 0.85 + 0.5), floor(accent[2] * 0.85 + 0.5), floor(accent[3] * 0.85 + 0.5) }
     local lw = max(1, floor(H / 1080 * 2 + 0.5))
     local cal = spec.cal or {}
-    if cal.edge then edges(cv, W, H, spec, accent, lw) end
+    local style = spec.style or 0
     local L = M.layout(W, H, spec)
+    if cal.edge then edges(cv, W, H, spec, accent, lw, L) end
+    local blw = (style == 2) and 1 or lw
+    if style == 2 then border = { floor(accent[1] * 0.45 + 0.5), floor(accent[2] * 0.45 + 0.5), floor(accent[3] * 0.45 + 0.5) } end
     local ctx = { cal = cal, accent = accent, fpsLabel = spec.fpsLabel, resLabel = spec.resLabel, W = W, H = H,
       gamma = spec.gamma }
+    local capc = (style == 2) and { floor(accent[1] * 0.6), floor(accent[2] * 0.6), floor(accent[3] * 0.6) } or accent
     for _, it in ipairs(L.items) do
-      local on = (it.kind == "info") and (cal.labels or cal.diag) or cal[ENABLED[it.kind]]
-      if on then
-        local s = it.w
-        cv:rect(it.x, it.y, it.x + it.w, it.y + it.h, BLACK)
-        cv:frame(it.x, it.y, it.x + it.w, it.y + it.h, lw, border)
-        local p = lw + max(1, floor(0.05 * min(it.w, it.h) + 0.5))
-        if MODULES[it.kind] then MODULES[it.kind](cv, it.x, it.y, s, p, ctx)
-        else STRIPS[it.kind](cv, it.x, it.y, it.w, it.h, p) end
+      if it.kind == "title" then
+        local gh = max(6, it.h)
+        while textWidth(it.text, gh) > it.w and gh > 6 do gh = gh * 0.92 end
+        cv:text(it.text, it.x, it.y, gh, accent)
+      else
+        local on = (it.kind == "info") and (cal.labels or cal.diag) or cal[ENABLED[it.kind]]
+        if on then
+          local s = it.w
+          cv:rect(it.x, it.y, it.x + it.w, it.y + it.h, BLACK)
+          cv:frame(it.x, it.y, it.x + it.w, it.y + it.h, blw, border)
+          local p = blw + max(1, floor(0.05 * min(it.w, it.h) + 0.5))
+          if MODULES[it.kind] then MODULES[it.kind](cv, it.x, it.y, s, p, ctx)
+          else STRIPS[it.kind](cv, it.x, it.y, it.w, it.h, p) end
+          if it.caption then
+            local text = (it.kind == "gamma") and string.format("GAMMA %.1f", ctx.gamma or 2.4) or it.caption
+            local gh = max(6, floor(min(it.h, it.w) * ((style == 2) and 0.085 or 0.1) + 0.5))
+            if it.h < it.w then gh = max(6, floor(it.h * 0.2 + 0.5)) end
+            while textWidth(text, gh) > it.w and gh > 5 do gh = gh * 0.92 end
+            -- se non sta nel modulo nemmeno a 5 px non si scrive (niente didascalie accavallate)
+            if textWidth(text, gh) <= it.w + 1 then cv:text(text, it.x, it.y + it.h + max(2, floor(gh * 0.6)), gh, capc) end
+          end
+        end
       end
     end
-    if cal.center then
+    -- Moderno: 60 tacche attorno al cerchio del countdown (5 lunghe ogni 5 secondi di quadrante)
+    if style == 2 then
+      local R = L.D / 2
+      local tc = { floor(accent[1] * 0.55), floor(accent[2] * 0.55), floor(accent[3] * 0.55) }
+      for k = 0, 59 do
+        local a = 2 * math.pi * k / 60
+        local long = k % 5 == 0
+        local r0, r1 = R * 1.035, R * (long and 1.1 or 1.065)
+        local sx, sy = math.sin(a), -math.cos(a)
+        cv:segment(W / 2 + sx * r0, H / 2 + sy * r0, W / 2 + sx * r1, H / 2 + sy * r1, max(0.6, lw * (long and 0.6 or 0.35)), tc)
+      end
+    end
+    if cal.center and style ~= 2 then
       local a = floor(0.012 * min(W, 1.78 * H))
       cv:frame(floor(W / 2 - a), floor(H / 2 - a), floor(W / 2 + a), floor(H / 2 + a), lw, accent)
       local b = floor(a / 2.5)
@@ -822,15 +975,17 @@ LK_OVERLAY = (function()
     end
     -- angoli dei formati delle frame lines accese (come le frecce del leader SMPTE): il triangolo punta
     -- all'angolo del formato e resta visibile anche se il mascherino copre la linea
-    local gcol = c8(spec.guide or { 1, 1, 1 })
     local T = max(5, floor(0.022 * min(W, H) + 0.5))
-    for _, r in ipairs(spec.frames or {}) do
+    local frames = spec.frames or {}
+    for _, r in ipairs(frames) do
+      local gcol = c8(r.color or spec.guide or { 1, 1, 1 })
       local x0, y0, x1, y1 = floor(r[1] + 0.5), floor(r[2] + 0.5), floor(r[3] + 0.5), floor(r[4] + 0.5)
       if x0 > 0 or y0 > 0 or x1 < W or y1 < H then
         cv:corner(x0, y0, 1, 1, T, gcol); cv:corner(x1, y0, -1, 1, T, gcol)
         cv:corner(x0, y1, 1, -1, T, gcol); cv:corner(x1, y1, -1, -1, T, gcol)
       end
     end
+    M.frameScales(cv, W, H, frames, lw)
     return cv, L
   end
 

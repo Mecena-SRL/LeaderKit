@@ -413,7 +413,7 @@ def test_generator_is_light(built, style):
 def test_setting_size_and_prefs(built):
     """Meno testo nel comp (piu' leggero da salvare) e comp:GetPrefs mai ripetuto nella stessa espressione."""
     text = open(HEAD(built)).read()
-    assert len(text) < 640000, len(text)          # 0.13: taratura e slate adattive (era 520000)
+    assert len(text) < 700000, len(text)          # 0.14: stili del countdown e colore per guida (era 640000)
     assert build_fx.engine("remove").count("\n") < 400             # Rimuovi non incorpora tutto il motore
     for expr in re.findall(r'Expression = "((?:[^"\\]|\\.)*)"', text):
         for key in ("Rate", "Width", "Height"):
@@ -748,11 +748,11 @@ def test_guides_frame_lines(built, w, h):
         else:
             aw, ah = w, h
         assert abs(m["Width"] * w - (aw - lw)) < 1e-6 and abs(m["Height"] * h - (ah - lw)) < 1e-6
-        assert m["Level"] == 1 and abs(m["BorderWidth"] * w - lw) < 1e-6
+        assert t["G%sG" % key]["Mix"] == 1 and abs(m["BorderWidth"] * w - lw) < 1e-6
         assert lab.endswith("%d × %d" % (aw, ah)) and lab.startswith("%.2f:1" % ar if ar != 4 / 3 else "1.33:1")
     assert t["GFLTLT"]["StyledText"] == "TIMELINE %.2f:1  ·  %d × %d" % (w / h, w, h)
     assert t["GSafeTitleT"]["StyledText"] == "SAFE TITLE 90%"
-    assert t["GFL166M"]["Level"] == 0 and t["GFL166T"]["StyledText"] == ""      # formati spenti: niente
+    assert t["GFL166G"]["Mix"] == 0 and t["GFL166T"]["StyledText"] == ""      # formati spenti: niente
     # etichette dentro il quadro
     for key in ("FLTL", "FL185", "FL239", "FL133"):
         x, y = t["G%sT" % key]["Center"]
@@ -946,15 +946,18 @@ def test_assistant_editor_field(built):
 
 
 def test_guides_color_and_outline(built):
-    t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 40, FL239=1, GuideRed=1, GuideGreen=0.5, GuideBlue=0)
-    lab, lines = t["GFL239T"], t["GLines"]
+    """Ogni frame line ha il suo colore (linea ed etichetta); bianco di default."""
+    t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 40, FL239=1, FL185=1, CFL239Red=1, CFL239Green=0.5, CFL239Blue=0)
+    lab, line = t["GFL239T"], t["GFL239B"]
     assert (lab["Red1"], lab["Green1"], lab["Blue1"]) == (1, 0.5, 0)
-    assert (lines["TopLeftRed"], lines["TopLeftGreen"], lines["TopLeftBlue"]) == (1, 0.5, 0)
+    assert (line["TopLeftRed"], line["TopLeftGreen"], line["TopLeftBlue"]) == (1, 0.5, 0)
+    assert (t["GFL185B"]["TopLeftGreen"], t["GFL185T"]["Green1"]) == (1, 1)                    # l'altra resta bianca
     assert lab["Enabled2"] == 1 and lab["Red2"] == 0 and lab["Thickness2"] > 0          # contorno nero
     t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 40, FL239=1)
     assert (t["GFL239T"]["Red1"], t["GFL239T"]["Green1"], t["GFL239T"]["Blue1"]) == (1, 1, 1)   # bianco di default
     text = open(HEAD(built)).read()
-    assert "ControlGroup = %d" % build_fx.GUIDE_GROUP in text
+    for i in range(len(build_fx.GUIDE_COLORS)):
+        assert "ControlGroup = %d" % (build_fx.GUIDE_GROUP + i) in text
 
 
 @pytest.mark.parametrize("w,h", [(1920, 1080), (3840, 1920), (1440, 1080), (4096, 1716), (854, 480), (1080, 1920)])
@@ -1191,3 +1194,68 @@ def test_engine_gamma_from_color_space(built, code):
     assert "gamma di riferimento 2.4" in log
     res, log = run_engine(code, fps="24", in_CalGammaRef=3)          # scelto nel pannello: 2.6 (DCI)
     assert "gamma di riferimento 2.6" in log
+
+
+# ------------------------------------------------------------------ 0.14
+@pytest.mark.parametrize("style,rd", [(0, 0.62), (1, 0.50), (2, 0.56)])
+def test_countdown_styles_geometry(built, style, rd):
+    """Tre stili: cerchio (frazione di H), croce, cifra Bold o Light."""
+    t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 300, CdStyle=style)
+    assert abs(t["LRingO"]["Width"] * 1920 - rd * 1080) < 1e-6
+    assert t["LDigitS"]["Mix"] == (1 if style == 2 else 0)
+    assert t["LRingI"]["Level"] == (0 if style == 2 else 1)
+    cross = t["LLineH"]["Width"]
+    assert (cross == 1) if style == 0 else (cross < 0.5)
+
+
+def cal_items(tmp_path, w, h, style, frames=""):
+    script = tmp_path / "c.lua"
+    script.write_text(r"""
+dofile(arg[1])
+local W, H, st = tonumber(arg[3]), tonumber(arg[4]), tonumber(arg[5])
+local cal = {}
+for _, k in ipairs({ "stars", "res", "diag", "center", "grey", "color", "checker", "skin", "ramps", "blue", "gamma",
+  "contour", "peak", "edge", "labels" }) do cal[k] = true end
+local spec = { cal = cal, fpsLabel = "24/SEC", resLabel = "HD", gamma = 2.4, style = st }
+if arg[6] == "1" then
+  local r = LK_OVERLAY.innerRect(W, H, { { ar = 2.39 } }); r.color = { 1, 0.5, 0 }
+  spec.frames = { r }; spec.inner = LK_OVERLAY.innerRect(W, H, { { ar = 2.39 } })
+end
+assert(LK_OVERLAY.render(arg[2], W, H, spec))
+for _, it in ipairs(LK_OVERLAY.layout(W, H, spec).items) do print(it.kind, it.x, it.y, it.w, it.h) end
+""")
+    png = tmp_path / "c.png"
+    out = subprocess.run([LUA, str(script), os.path.join(ROOT, "fx", "overlay.lua"), str(png), str(w), str(h),
+                          str(style), frames], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert out.returncode == 0, out.stderr.decode()
+    items = [line.split() for line in out.stdout.decode().splitlines() if line.strip()]
+    from PIL import Image
+    im = Image.open(png)
+    im.load()
+    return [(k, int(x), int(y), int(a), int(b)) for k, x, y, a, b in items], im.load()
+
+
+@pytest.mark.parametrize("style", [0, 1, 2])
+@pytest.mark.parametrize("w,h", [(1920, 1080), (1440, 1080), (1920, 804), (854, 480)])
+def test_calibration_layout_styles(tmp_path, style, w, h):
+    """Moduli contenuti, dentro il quadro, fuori dal cerchio, senza sovrapposizioni; stelle negli angoli."""
+    items, _ = cal_items(tmp_path, w, h, style)
+    mods = [i for i in items if i[0] != "title"]
+    assert sum(1 for i in mods if i[0] == "star") == 4
+    r = {0: 0.62, 1: 0.50, 2: 0.56}[style] * h
+    r = min(r, {0: 0.40, 1: 0.34, 2: 0.36}[style] * w) / 2
+    for k, x, y, a, b in mods:
+        assert 0 <= x and x + a <= w and 0 <= y and y + b <= h, k
+        assert max(a, b) <= 0.3 * h * (2 if b < a else 1) + 1, k
+        assert x + a < w / 2 - r or x > w / 2 + r, k                 # fuori dalla colonna del cerchio
+    for i, p in enumerate(mods):
+        for q in mods[i + 1:]:
+            assert p[1] + p[3] <= q[1] or q[1] + q[3] <= p[1] or p[2] + p[4] <= q[2] or q[2] + q[4] <= p[2], (p, q)
+
+
+def test_frame_scales_in_line_colour(tmp_path):
+    """Scala del formato 2.39 (colore della sua frame line) fuori dalla linea, a 1/4 della larghezza."""
+    items, px = cal_items(tmp_path, 1920, 1080, 0, "1")
+    y0 = (1080 - 804) // 2
+    tick = [px[480, y][:3] for y in range(y0 - 12, y0 - 8)]
+    assert (255, 128, 0) in tick                                   # 1% dell'altezza sopra la linea, arancione

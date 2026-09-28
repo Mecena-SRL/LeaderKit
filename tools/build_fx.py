@@ -49,7 +49,9 @@ _TOKENS = [
     ("_N", "local _N = math.min(1, _A / 1.6)", ("_A",)),                # su 4:3 / verticale tutto si riduce
     ("_PX", "local _PX = 1 / _H", ("_H",)),                              # un pixel in frazioni dell'altezza
     # diametro del cerchio del countdown (frazione della larghezza): min(0.62 H, 0.40 W), come la taratura
-    ("_RD", "local _RD = math.min(0.62 / _A, 0.40)", ("_A",)),
+    # stile del countdown: 0 Standard, 1 Ordinato, 2 Moderno
+    ("_CS", "local _CS = math.floor(LK.CdStyle + 0.5)", ()),
+    ("_RD", "local _RD = math.min(({ 0.62, 0.50, 0.56 })[_CS + 1] / _A, ({ 0.40, 0.34, 0.36 })[_CS + 1])", ("_A", "_CS")),
 ]
 
 
@@ -265,8 +267,22 @@ COLOR_DEFAULTS = [("Text", "Testo", (1.0, 1.0, 1.0)), ("Bg", "Sfondo", (0.0, 0.0
                   ("Accent", "Grafica del leader", (0.85, 0.85, 0.85)),
                   ("Hi", "Evidenza (titoli di sezione)", (0.96, 0.74, 0.30))]
 COLOR_GROUP_BASE = 11
-GUIDE_COLOR = ("Guide", "Colore delle guide", (1.0, 1.0, 1.0))
+# un colore per ogni guida (frame line, formato della timeline, safe area): prefisso "C" + chiave
+GUIDE_COLORS = ([("CFLTL", "Colore: formato della timeline", (1.0, 1.0, 1.0))]
+                + [("C" + k, "Colore " + lab + ":1", (1.0, 1.0, 1.0)) for k, lab, _ in
+                   [("FL133", "1.33", 0), ("FL166", "1.66", 0), ("FL178", "1.78", 0), ("FL185", "1.85", 0),
+                    ("FL200", "2.00", 0), ("FL220", "2.20", 0), ("FL239", "2.39", 0)]]
+                + [("CSafeAction", "Colore safe action", (0.85, 0.85, 0.85)),
+                   ("CSafeTitle", "Colore safe title", (0.85, 0.85, 0.85))])
 GUIDE_GROUP = COLOR_GROUP_BASE + len(COLOR_DEFAULTS)
+
+
+def guide_color(key):
+    """(prefisso, etichetta, default, gruppo) del colore di una guida."""
+    for i, (p, lab, d) in enumerate(GUIDE_COLORS):
+        if p == "C" + key:
+            return p, lab, d, GUIDE_GROUP + i
+    raise KeyError(key)
 
 
 def color_controls():
@@ -274,7 +290,7 @@ def color_controls():
 
 
 def control_group(src):
-    for i, (p, _, _) in enumerate(COLOR_DEFAULTS + [GUIDE_COLOR]):
+    for i, (p, _, _) in enumerate(COLOR_DEFAULTS + GUIDE_COLORS):
         if src.startswith(p) and src[len(p):] in ("Red", "Green", "Blue"):
             return COLOR_GROUP_BASE + i
     return None
@@ -513,11 +529,11 @@ def head_inputs():
     out += [(x, "Dati") for x in data]
     look = (["SecStyle", "SlateStyle", "TitleImage", "TitlePick", "TitleImageSize",
              "SecLogo", "Logo", "LogoPick", "LogoPos", "LogoSize", "Logo2", "Logo2Pick", "LogoPos2", "LogoSize2",
-             "LogoOnTail", "SecCd", "CdLogo", "CdLogoSize", "CdInfo"] + [k for k, _, _, _ in CD_FIELDS]
+             "LogoOnTail", "SecCd", "CdStyle", "CdLogo", "CdLogoSize", "CdInfo"] + [k for k, _, _, _ in CD_FIELDS]
             + ["SecLook"] + color_inputs())
     out += [(x, "Aspetto") for x in look]
-    guides = (["SecGuides", "GuidesSlate", "GuidesCd", "FLTL"] + [f for f, _, _ in FRAMELINES]
-              + [k for k, _, _ in SAFE_AREAS] + [GUIDE_COLOR[0] + ch for ch in ("Red", "Green", "Blue")]
+    guides = (["SecGuides", "GuidesSlate", "GuidesCd"]
+              + [x for k in GUIDE_KEYS for x in [k] + ["C%s%s" % (k, ch) for ch in ("Red", "Green", "Blue")]]
               + ["SecEnd", "EndDot", "EndDotPos", "EndDotSize"])
     out += [(x, "Guide") for x in guides]
     tech = (["SecTech", "ColorInfo", "AudioFormat", "SecAudio", "PopLevel", "BeepEach", "SecCal", "CalOn", "CalGammaRef"]
@@ -622,23 +638,34 @@ def bars_stack(g):
 def leader_stack(g, prefix, base, digit_expr, sweep_vis=None, cd=None, extras=()):
     """Cerchi e croce (un solo Background), braccio rotante e cifra centrale sopra 'base'.
     extras: (nome, livelli, condizione) messi sotto la cifra, ognuno con il suo gate."""
-    g.mask(prefix + "RingO", "EllipseMask", X("_RD"), X("_RD"), border=repr(LINE_W * 1.6))
-    g.mask(prefix + "RingI", "EllipseMask", X("_RD * 0.86"), X("_RD * 0.86"), border=repr(LINE_W),
-           chain=prefix + "RingO")
-    g.mask(prefix + "LineH", "RectangleMask", "1", X("%s * _A" % LINE_W), chain=prefix + "RingI")
-    g.mask(prefix + "LineV", "RectangleMask", repr(LINE_W), "1", chain=prefix + "LineH")
+    # Standard: due cerchi spessi e croce a tutto quadro (leader SMPTE / Academy); Ordinato: cerchi piu'
+    # sottili e croce solo attorno al cerchio; Moderno: un cerchio sottile e una piccola croce al centro
+    g.mask(prefix + "RingO", "EllipseMask", X("_RD"), X("_RD"),
+           border=X("%s * ({ 1.6, 1.1, 0.55 })[_CS + 1]" % LINE_W))
+    g.mask(prefix + "RingI", "EllipseMask", X("_RD * ({ 0.86, 0.9, 0.9 })[_CS + 1]"),
+           X("_RD * ({ 0.86, 0.9, 0.9 })[_CS + 1]"), border=X("%s * ({ 1, 0.6, 0.4 })[_CS + 1]" % LINE_W),
+           chain=prefix + "RingO", level=X("_CS == 2 and 0 or 1"))
+    g.mask(prefix + "LineH", "RectangleMask", X("({ 1, _RD * 1.12, _RD * 0.08 })[_CS + 1]"),
+           X("%s * _A * ({ 1, 0.7, 0.5 })[_CS + 1]" % LINE_W), chain=prefix + "RingI")
+    g.mask(prefix + "LineV", "RectangleMask", X("%s * ({ 1, 0.7, 0.5 })[_CS + 1]" % LINE_W),
+           X("({ 1, _RD * _A * 1.12, _RD * _A * 0.08 })[_CS + 1]"), chain=prefix + "LineH")
     g.background(prefix + "Rings", color="Accent", mask=prefix + "LineV")
     top = g.merge(prefix + "M1", base, prefix + "Rings")
     if sweep_vis:
-        g.mask(prefix + "Arm", "RectangleMask", repr(LINE_W * 1.6), X("_RD / 2 * _A"),
-               center=X("Point(0.5, 0.5 + _RD / 4 * _A)"))
+        # braccio: dal centro al cerchio (Standard, Ordinato), solo un tratto sul bordo (Moderno)
+        g.mask(prefix + "Arm", "RectangleMask", X("%s * ({ 1.6, 1.1, 0.8 })[_CS + 1]" % LINE_W),
+               X("_RD / 2 * _A * ({ 1, 1, 0.3 })[_CS + 1]"),
+               center=X("Point(0.5, 0.5 + _RD / 2 * _A * ({ 0.5, 0.5, 0.85 })[_CS + 1])"))
         g.background(prefix + "ArmBg", color="Accent", mask=prefix + "Arm")
         g.transform(prefix + "Sweep", prefix + "ArmBg", ex("-360 * math.fmod((%s) * _FPS - _REM, _FPS) / _FPS" % cd))
         top = g.gate(prefix + "ArmG", top, [prefix + "Sweep"], sweep_vis)
     for name, layers, cond in extras:
         top = g.gate(name, top, layers, cond)
     g.text(prefix + "Digit", "{ 0.5, 0.5 }", X("_RD * 0.30 / 0.36"), X(digit_expr), tint("Text"))
-    return g.merge(prefix + "M5", top, prefix + "Digit")
+    # Moderno: cifra Light, piu' grande e piu' fine
+    g.text(prefix + "DigitL", "{ 0.5, 0.5 }", X("_RD * 0.36 / 0.36"), X(digit_expr), tint("Text"), style="Light")
+    digit = g.dissolve(prefix + "DigitS", prefix + "Digit", prefix + "DigitL", X("_CS == 2 and 1 or 0"))
+    return g.merge(prefix + "M5", top, digit)
 
 
 def clock_layers(g):
@@ -1008,6 +1035,7 @@ def title_image_layer():
 
 
 # ------------------------------------------------------------------ logo e dati sul countdown
+CD_STYLES = ["Standard (leader SMPTE)", "Ordinato (moduli raggruppati)", "Moderno"]
 # spunta, etichetta, default, (etichetta sullo schermo, valore) per i ruoli della seconda riga
 CD_FIELDS = [("CdTitle", "Titolo", 1, None), ("CdVersion", "Versione", 0, None),
              ("CdDirector", "Regia", 1, ("DIRECTOR", "LK.Director.Value")),
@@ -1024,7 +1052,8 @@ BOX_LW = "local blw = math.max(1, math.floor(_H / 1080 * 2 + 0.5)) "
 # riquadro del logo (pixel): alto 0.72 dello spazio sopra il cerchio x la dimensione scelta (al massimo il 14%
 # del lato corto), largo quanto serve al logo (da quadrato a 2.6 volte l'altezza, mai piu' del cerchio)
 CD_LOGO = (CD_SPACE + BOX_LW + "local iw, ih = math.max(1, LK.LogoW), math.max(1, LK.LogoH) "
-           "local bh = math.min(0.72 * SP * _H, 0.2 * math.min(_W, _H)) * math.min(1.4, math.max(0.2, LK.CdLogoSize / 100)) "
+           "local bh = math.min(0.72 * SP * _H, ({ 0.2, 0.12, 0.105 })[_CS + 1] * math.min(_W, _H)) "
+           "* math.min(1.4, math.max(0.2, LK.CdLogoSize / 100)) "
            "bh = math.max(8, math.floor(bh / 2 + 0.5) * 2) "
            "local pad = math.floor(0.13 * bh + 0.5) local lh = bh - 2 * pad local lw = lh * iw / ih "
            "local mw = math.min(2.6 * bh, _RD * _W) - 2 * pad if lw > mw then lw = mw lh = lw * ih / iw end "
@@ -1046,7 +1075,7 @@ def cd_data_pre():
             "local function lay(k) local s, n, ml = a, (a ~= '' and 1 or 0), string.len(a) "
             "for i = 1, #R, k do local l = R[i] if k == 2 and R[i + 1] then l = l .. '      ' .. R[i + 1] end "
             "s = s .. (s ~= '' and '\\n' or '') .. l n = n + 1 ml = math.max(ml, string.len(l)) end "
-            "local c = math.min(0.018 * _N * _H, (MH - 2 * pad) / (0.88 + %s * math.max(0, n - 1)), "
+            "local c = math.min(({ 0.018, 0.0135, 0.012 })[_CS + 1] * _N * _H, (MH - 2 * pad) / (0.88 + %s * math.max(0, n - 1)), "
             "(MW - 2 * pad) / (0.70 * math.max(1, ml))) return s, n, ml, c end "
             "local s1, n1, m1, c1 = lay(2) local s2, n2, m2, c2 = lay(1) "
             "local S, N, ML, CP = s1, n1, m1, c1 if c2 > c1 * 1.12 then S, N, ML, CP = s2, n2, m2, c2 end "
@@ -1092,15 +1121,18 @@ def guides_layer(g):
     flist = "{ %s }" % ", ".join("{ LK.%s, %s }" % (k, repr(ar) if ar else "0") for k, _, ar in fmts)
     lw = "local lw = math.max(1, math.floor(_H / 1080 * 2 + 0.5)) "
     pos = ("local cap = %s * _H local pad = 0.008 * _H local st = %s * cap " % (GUIDE_CAP, PITCH))
-    chain, labels = None, []
+    # ogni linea ha il suo colore: un Background per linea, calcolato solo se la linea e' accesa
+    labels = []
+    lines = g.background("GNone", rgb=["0", "0", "0"], alpha="0")
     for i, (key, lab, ar) in enumerate(fmts, 1):
         geo = ("local ar = %s local aw, ah = _W, _H "
                "if ar > _A + 0.005 then ah = 2 * math.floor(_W / ar / 2 + 0.5) "
                "elseif ar < _A - 0.005 then aw = 2 * math.floor(_H * ar / 2 + 0.5) end "
                % (repr(ar) if ar else "_A")) + lw + "local on = LK.%s > 0.5 " % key
-        chain = g.mask("G%sM" % key, "RectangleMask", X("on and (aw - lw) / _W or 0", geo),
-                       X("on and (ah - lw) / _H or 0", geo), border=X("lw / _W", geo), chain=chain,
-                       level=X("on and 1 or 0", geo))
+        g.mask("G%sM" % key, "RectangleMask", X("(aw - lw) / _W", geo), X("(ah - lw) / _H", geo),
+               border=X("lw / _W", geo))
+        lines = g.gate("G%sG" % key, lines, [g.background("G%sB" % key, color="C" + key, mask="G%sM" % key)],
+                       "LK.%s > 0.5" % key)
         # etichette dentro le linee: letterbox sotto la linea alta (affiancate se piu' d'una), pillarbox in
         # basso accanto alla linea sinistra, formato pieno in basso a sinistra (impilate)
         cls = ("local function cls(a) if a == 0 then return 3 end "
@@ -1119,19 +1151,20 @@ def guides_layer(g):
         else:
             label = 'on and string.format("TIMELINE %.2f:1  ·  %d × %d", _A, aw, ah) or ""'
         labels.append(g.text("G%sT" % key, X("Point(x, y)", geo + cls + stack + pos + where), X("2 * %s / _A" % GUIDE_CAP),
-                             ex("Text(%s)" % label, geo), tint("Guide"), align="l", outline=("1", "0.1")))
+                             ex("Text(%s)" % label, geo), tint("C" + key), align="l", outline=("1", "0.1")))
     for key, pct, lab in SAFE_AREAS:
         geo = ("local aw, ah = 2 * math.floor(_W * %s / 2 + 0.5), 2 * math.floor(_H * %s / 2 + 0.5) " % (pct, pct)
                + lw + "local on = LK.%s > 0.5 " % key)
-        chain = g.mask("G%sM" % key, "RectangleMask", X("on and (aw - lw) / _W or 0", geo),
-                       X("on and (ah - lw) / _H or 0", geo), border=X("lw / _W", geo), chain=chain,
-                       level=X("on and 1 or 0", geo))
+        g.mask("G%sM" % key, "RectangleMask", X("(aw - lw) / _W", geo), X("(ah - lw) / _H", geo),
+               border=X("lw / _W", geo))
+        lines = g.gate("G%sG" % key, lines, [g.background("G%sB" % key, color="C" + key, mask="G%sM" % key)],
+                       "LK.%s > 0.5" % key)
         pre = geo + pos
-        labels.append(g.text("G%sT" % key, X("Point(((_W - aw) / 2 + lw + pad) / _W, 1 - ((_H - ah) / 2 + lw + pad + cap / 2) / _H)", pre),
+        # in alto a destra: a sinistra ci sono le etichette dei formati
+        labels.append(g.text("G%sT" % key, X("Point(1 - ((_W - aw) / 2 + lw + pad) / _W, 1 - ((_H - ah) / 2 + lw + pad + cap / 2) / _H)", pre),
                              X("2 * %s / _A" % GUIDE_CAP), ex('Text(on and "%s" or "")' % lab, pre),
-                             tint("Guide", 0.85), align="l", outline=("1", "0.1")))
-    g.background("GLines", color="Guide", mask=chain)
-    return g.merge("GLay", "GLines", g.chain("GLab", labels))
+                             tint("C" + key), align="r", outline=("1", "0.1")))
+    return g.merge("GLay", lines, g.chain("GLab", labels))
 
 
 # ------------------------------------------------------------------ generatore di testa
@@ -1203,7 +1236,8 @@ def head(std=None):
             + uc_combo("LogoPos2", "Posizione del secondo logo", LOGO_POS)
             + uc_slider("LogoSize2", "Larghezza del secondo logo (%)", 5, 100, 12, integer=False)
             + uc_check("LogoOnTail", "Loghi anche sulla coda", 0)
-            + uc_label("SecCd", "Countdown: logo sopra il cerchio, dati sotto")
+            + uc_label("SecCd", "Countdown: stile, logo sopra il cerchio, dati sotto")
+            + uc_combo("CdStyle", "Stile del countdown (Genera ridisegna la taratura)", CD_STYLES)
             + uc_check("CdLogo", "Logo sopra il countdown (riquadro nero)", 0)
             + uc_slider("CdLogoSize", "Dimensione del riquadro del logo (%)", 20, 140, 70, integer=False)
             + uc_check("CdInfo", "Dati sotto il countdown (riquadro nero)", 0)
@@ -1212,10 +1246,10 @@ def head(std=None):
     guide = (uc_label("SecGuides", "Frame lines e safe area (a pixel interi)")
              + uc_check("GuidesSlate", "Sulla slate (sotto i testi)", 1)
              + uc_check("GuidesCd", "Sul countdown e la taratura (Genera impagina la taratura dentro)", 1)
-             + uc_check("FLTL", "Formato della timeline", 0)
-             + "".join(uc_check(f, "Frame line " + lab + ":1", 0) for f, lab, _ in FRAMELINES)
-             + uc_check("SafeAction", "Safe action 93% (EBU R95)", 0) + uc_check("SafeTitle", "Safe title 90%", 0)
-             + uc_color(GUIDE_COLOR[0], GUIDE_COLOR[1], GUIDE_GROUP, GUIDE_COLOR[2])
+             + "".join(uc_check(k, lab, 0) + uc_color(*[guide_color(k)[i] for i in (0, 1, 3, 2)])
+                       for k, lab in [("FLTL", "Formato della timeline")]
+                       + [(f, "Frame line " + lab + ":1") for f, lab, _ in FRAMELINES]
+                       + [("SafeAction", "Safe action 93% (EBU R95)"), ("SafeTitle", "Safe title 90%")])
              + uc_label("SecEnd", "Ultimo fotogramma del leader (il programma parte al successivo)")
              + uc_check("EndDot", "Pallino sull'ultimo fotogramma", 0)
              + uc_combo("EndDotPos", "Posizione del pallino", END_DOT_POS)
@@ -1245,7 +1279,7 @@ def head(std=None):
               ("PopLevel", "0"), ("BeepEach", "0"), ("Logo", '""'), ("LogoPos", "0"), ("LogoSize", "12"),
               ("Logo2", '""'), ("LogoPos2", "1"), ("LogoSize2", "12"),
               ("SlateStyle", "0"), ("TitleImage", '""'), ("TitleImageSize", "100"),
-              ("LogoOnTail", "0"), ("CalOn", "1"), ("CalGammaRef", "0"), ("CdLogo", "0"), ("CdLogoSize", "70"), ("CdInfo", "0")]
+              ("LogoOnTail", "0"), ("CdStyle", "0"), ("CalOn", "1"), ("CalGammaRef", "0"), ("CdLogo", "0"), ("CdLogoSize", "70"), ("CdInfo", "0")]
     values += [(k, str(d)) for k, _, d, _ in CD_FIELDS]
     values += [(i, str(std.get("slot_defaults", {}).get(c, 0))) for c, i, _ in SLOT_INPUTS]
     values += [(f, '""') for f, _, _ in PRODUCTION_FIELDS + POST_FIELDS if f not in ("Title", "Version")]
@@ -1253,7 +1287,7 @@ def head(std=None):
     values += [(f, "0") for f, _, _ in FRAMELINES]
     values += [(f, str(d)) for f, _, d in CALIBRATION]
     values += [(k, "0") for k in HIDDEN_NUM + HIDDEN_GEN] + [(im[0], '""') for im in GEN_IMAGES]
-    values += color_values() + [(GUIDE_COLOR[0] + ch, repr(v)) for ch, v in zip(("Red", "Green", "Blue"), GUIDE_COLOR[2])]
+    values += color_values() + [(p + ch, repr(v)) for p, _, d in GUIDE_COLORS for ch, v in zip(("Red", "Green", "Blue"), d)]
 
     g = G()
     g.controls(values, uc)
@@ -1327,11 +1361,11 @@ def tail(std=None):
             + uc_combo("LogoPos2", "Posizione del secondo logo", LOGO_POS)
             + uc_slider("LogoSize2", "Larghezza del secondo logo (%)", 5, 100, 12, integer=False))
     uc = (on_page("Coda", coda + color_controls()) + on_page("Logo", logo)
-          + "".join(uc_hidden(k) for k in HIDDEN_NUM[:4]))
+          + "".join(uc_hidden(k) for k in HIDDEN_NUM[:4]) + uc_hidden("CdStyle"))
     g.controls([("TailPop", "1"), ("TailFlash", "0"), ("CardFrom", "4"), ("CardTo", "7"),
                 ("CardText", '"END OF PROGRAM"'), ("Info", '""'), ("Logo", '""'), ("LogoPos", "0"),
                 ("LogoSize", "12"), ("Logo2", '""'), ("LogoPos2", "1"), ("LogoSize2", "12")]
-               + [(k, "0") for k in HIDDEN_NUM[:4]] + color_values(), uc)
+               + [(k, "0") for k in HIDDEN_NUM[:4]] + [("CdStyle", "0")] + color_values(), uc)
     g.loader("Logo1Ld")
     g.loader("Logo2Ld")
     g.background("Bg", color="Bg")

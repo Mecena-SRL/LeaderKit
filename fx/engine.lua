@@ -614,7 +614,7 @@ if countFrom > 0 and get("CalOn", 1) > 0.5 then
   for _, k in ipairs(LK_CALIBRATION or {}) do cal[string.lower(string.sub(k, 4))] = get(k, 1) > 0.5 end
   local spec = { accent = accent, cal = cal, fpsLabel = string.format("%g/SEC", r.fps), resLabel = resClass(),
     gamma = targetGamma(), cdLogo = get("CdLogo", 0) > 0.5 and get("Logo", "") ~= "", cdInfo = get("CdInfo", 0) > 0.5,
-    guide = { get("GuideRed", 1), get("GuideGreen", 1), get("GuideBlue", 1) } }
+    style = math.floor(get("CdStyle", 0) + 0.5) }
   -- con le frame lines sul countdown i moduli stanno dentro l'area comune delle linee accese e gli
   -- angoli di ogni formato hanno il triangolo (come le frecce del leader SMPTE)
   if get("GuidesCd", 1) > 0.5 then
@@ -624,7 +624,11 @@ if countFrom > 0 and get("CalOn", 1) > 0.5 then
       if get(gd[1], 0) > 0.5 then
         local one = gd[2] == "safe" and { safe = gd[3] } or { ar = gd[3] }
         list[#list + 1] = one
-        if gd[2] ~= "safe" then spec.frames[#spec.frames + 1] = LK_OVERLAY.innerRect(w, h, { one }) end
+        if gd[2] ~= "safe" then
+          local rect = LK_OVERLAY.innerRect(w, h, { one })
+          rect.color = { get("C" .. gd[1] .. "Red", 1), get("C" .. gd[1] .. "Green", 1), get("C" .. gd[1] .. "Blue", 1) }
+          spec.frames[#spec.frames + 1] = rect
+        end
       end
     end
     if #list > 0 then spec.inner = LK_OVERLAY.innerRect(w, h, list) end
