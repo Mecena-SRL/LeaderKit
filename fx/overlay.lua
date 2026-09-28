@@ -587,6 +587,89 @@ LK_OVERLAY = (function()
       out.items[#out.items + 1] = it
       return it
     end
+    -- archi della ghiera
+    out.arcs = { { kind = "grey", r0 = R * 1.13, r1 = R * 1.21, a0 = 206, a1 = 334 },
+      { kind = "black", r0 = R * 1.225, r1 = R * 1.27, a0 = 206, a1 = 334 },
+      { kind = "color", r0 = R * 1.13, r1 = R * 1.21, a0 = 26, a1 = 154 },
+      { kind = "desat", r0 = R * 1.225, r1 = R * 1.27, a0 = 26, a1 = 154 } }
+    local Rb = R * 1.27
+    -- Griglia: stelle di Siemens grandi nei quattro angoli (il fuoco si valuta sui bordi del monitor); in
+    -- alto, accanto alle stelle, bianco/nero e blu 47B a sinistra, contouring e nitidezza a destra; sulla
+    -- linea di centro colorchecker e incarnati, i piu' grandi; in basso pixel 1:1 e gamma. Tutto fuori dalla
+    -- ghiera e dalla colonna del cerchio (logo e dati); una sola scala 't' decide le proporzioni e si
+    -- riduce finche' la composizione sta nell'area utile.
+    local x0, y0, x1, y1 = ix0 + m, iy0 + m, ix1 - m, iy1 - m
+    local function grid(t)
+      local g = max(4, floor(0.16 * t + 0.5))
+      local gh = max(6, floor(0.09 * t + 0.5))
+      local cap = gh + max(2, floor(gh * 0.6))                    -- didascalia sotto la tessera
+      local tc, tb = floor(1.35 * t + 0.5), floor(1.15 * t + 0.5)
+      local colL, colR = cx - R - g, cx + R + g
+      local rc = Rb + g
+      -- bordo interno utile per una fila che occupa [ya, yb]: colonna del cerchio e ghiera
+      local function inner(ya, yb)
+        local ny = (ya > cy) and (ya - cy) or ((yb < cy) and (cy - yb) or 0)
+        local e = (ny < rc) and sqrt(rc * rc - ny * ny) or 0
+        return max(R + g, e)
+      end
+      local list = {}
+      for _, dir in ipairs({ -1, 1 }) do
+        local function X(off, s) return (dir < 0) and (x0 + off) or (x1 - off - s) end
+        local outerW = (dir < 0) and (cx - x0) or (x1 - cx)
+        -- fila alta: stella nell'angolo, poi due tessere distribuite nello spazio che resta
+        local topK = (dir < 0) and { "peak", "blue" } or { "sphere", "res" }
+        local span = outerW - inner(y0, y0 + t + cap)
+        local free = span - 2 * t - t - g
+        if free < 2 * g then return end
+        local e = free / 3
+        list[#list + 1] = { "star", X(0, t), y0, t }
+        list[#list + 1] = { topK[1], X(t + g + e, t), y0, t, true }
+        list[#list + 1] = { topK[2], X(t + g + 2 * e + t, t), y0, t, true }
+        -- centro: colorchecker / incarnati, centrati nello spazio accanto alla ghiera
+        local my = cy - (tc + cap) / 2
+        span = outerW - inner(my, my + tc + cap)
+        if span < tc + 2 * g then return end
+        list[#list + 1] = { (dir < 0) and "checker" or "skin", X((span - tc) / 2, tc), my, tc, true }
+        -- fila bassa: stella nell'angolo, pixel 1:1 / gamma al centro dello spazio che resta
+        local by = y1 - cap - tb
+        span = outerW - inner(by, y1)
+        free = span - t - g - tb
+        if free < 2 * g then return end
+        list[#list + 1] = { "star", X(0, t), y1 - t, t }
+        list[#list + 1] = { (dir < 0) and "info" or "gamma", X(t + g + free / 2, tb), by, tb, true }
+      end
+      -- ingombro di ogni elemento con la sua didascalia (centrata sotto, puo' essere piu' larga della
+      -- tessera): dentro l'area utile, fuori da ghiera e colonna del cerchio, senza sovrapposizioni
+      local box = {}
+      for i, a in ipairs(list) do
+        local cw = a[5] and textWidth((a[1] == "gamma") and "GAMMA 2.4" or CAPTIONS[a[1]], gh) or 0
+        local bx0 = min(a[2], a[2] + (a[4] - cw) / 2)
+        local b = { bx0, a[3], bx0 + max(a[4], cw), a[3] + a[4] + (a[5] and cap or 0) }
+        if b[1] < x0 - 0.5 or b[3] > x1 + 0.5 or b[2] < y0 - 0.5 or b[4] > y1 + 0.5 then return end
+        if b[1] < colR and b[3] > colL then return end
+        local nx = max(0, b[1] - cx, cx - b[3])
+        local ny = max(0, b[2] - cy, cy - b[4])
+        if nx * nx + ny * ny < rc * rc then return end
+        for j = 1, i - 1 do
+          local o = box[j]
+          if b[1] < o[3] + g / 2 and o[1] < b[3] + g / 2 and b[2] < o[4] + g / 2 and o[2] < b[4] + g / 2 then return end
+        end
+        box[i] = b
+      end
+      return list, gh
+    end
+    local t = floor(0.2 * u + 0.5)
+    local list, gh = grid(t)
+    while not list and t > 28 do t = floor(t * 0.97); list, gh = grid(t) end
+    if list then
+      for _, q in ipairs(list) do
+        if q[1] == "star" then put("star", q[2], q[3], q[4], q[4], { round = true })
+        else put(q[1], q[2], q[3], q[4], q[4], { tile = true, caption = CAPTIONS[q[1]], capBelow = true, capH = gh }) end
+      end
+      out.s = t
+      return out
+    end
+    -- area troppo stretta per la griglia: stelle piccole negli angoli e tessere lungo la ghiera
     local ss = max(36, floor(0.075 * H + 0.5))
     ss = min(ss, floor((ix1 - ix0) * 0.12), floor((iy1 - iy0) * 0.25))
     if ss >= 24 then
@@ -594,14 +677,8 @@ LK_OVERLAY = (function()
       put("star", ix0 + m, iy1 - m - ss, ss, ss, { round = true })
       put("star", ix1 - m - ss, iy1 - m - ss, ss, ss, { round = true })
     end
-    -- archi della ghiera
-    out.arcs = { { kind = "grey", r0 = R * 1.13, r1 = R * 1.21, a0 = 206, a1 = 334 },
-      { kind = "black", r0 = R * 1.225, r1 = R * 1.27, a0 = 206, a1 = 334 },
-      { kind = "color", r0 = R * 1.13, r1 = R * 1.21, a0 = 26, a1 = 154 },
-      { kind = "desat", r0 = R * 1.225, r1 = R * 1.27, a0 = 26, a1 = 154 } }
     -- tessere: due colonne che seguono la curva della ghiera (x = bordo esterno del cerchio alla
     -- quota della fila); si rimpiccioliscono finche' stanno nell'area utile senza toccare le stelle
-    local Rb = R * 1.27
     -- didascalia a lato (verso l'esterno) se c'e' spazio, altrimenti sotto la tessera
     local function capLen(k) return (k == "gamma") and 9 or #CAPTIONS[k] end
     local function fits(t, side)
@@ -1037,7 +1114,11 @@ LK_OVERLAY = (function()
           elseif it.tile then
             cv:roundRectClip(it.x, it.y, s, s, 0.2 * s, border, max(1, floor(s / 120)))
           end
-          if it.capSide then
+          if it.capBelow then
+            local text = (it.kind == "gamma") and string.format("GAMMA %.1f", ctx.gamma or 2.4) or it.caption
+            -- la griglia ha gia' fatto spazio alla didascalia intera
+            cv:text(text, it.x + it.w / 2, it.y + it.h + max(2, floor(it.capH * 0.6)), it.capH, capc, "center")
+          elseif it.capSide then
             local text = (it.kind == "gamma") and string.format("GAMMA %.1f", ctx.gamma or 2.4) or it.caption
             local gh, cy0 = it.capH, it.y + (it.h - it.capH) / 2
             if it.capSide > 0 then cv:text(text, it.x + it.w + 0.14 * it.w, cy0, gh, capc)
