@@ -86,9 +86,9 @@ def test_head_cinema(built, fps, nominal, w, h):
         else:
             assert digit == ""
         assert not on(r, "MWarn.Mix") and not on(r, "MEndDot.Mix") and not on(r, "MGuides.Mix")
-    # in Resolve l'altezza dei RectangleMask e' relativa all'altezza dell'immagine:
-    # il braccio lungo quanto il raggio (0.18 della larghezza) vale 0.18 * W / H
-    assert abs(float(rows[0]["LArm.Height"]) - 0.18 * w / h) < 1e-3
+    # in Resolve l'altezza dei RectangleMask e' relativa all'altezza dell'immagine: il braccio e' lungo
+    # quanto il raggio del cerchio, min(0.31 H, 0.20 W)
+    assert abs(float(rows[0]["LArm.Height"]) - min(0.31, 0.20 * w / h)) < 1e-3
 
 
 def test_head_dpp(built):
@@ -413,36 +413,68 @@ def test_generator_is_light(built, style):
 def test_setting_size_and_prefs(built):
     """Meno testo nel comp (piu' leggero da salvare) e comp:GetPrefs mai ripetuto nella stessa espressione."""
     text = open(HEAD(built)).read()
-    assert len(text) < 520000, len(text)
+    assert len(text) < 640000, len(text)          # 0.13: taratura e slate adattive (era 520000)
     assert build_fx.engine("remove").count("\n") < 400             # Rimuovi non incorpora tutto il motore
     for expr in re.findall(r'Expression = "((?:[^"\\]|\\.)*)"', text):
         for key in ("Rate", "Width", "Height"):
             assert expr.count('Comp.FrameFormat.%s' % key) <= 1, expr[:120]
 
 
+def loaders(res, item="LeaderKit Head"):
+    """{Loader: [file, larghezza, altezza]} dal riepilogo dell'harness."""
+    out = {}
+    for v in res.get("loader", []):
+        p = v.split("|")
+        if p[0] == item:
+            out[p[1]] = p[2:5]
+    return out
+
+
 def test_engine_overlay_on_countdown(built, code):
+    """La taratura e' un PNG a tutto quadro nel Loader CalLd del generatore (niente traccia Grafica)."""
     res, _ = run_engine(code, res="3840x1920", fps="24")
-    gfx = [v.split("|") for v in res["gfx"]]
-    assert len(gfx) == 1
-    start, dur, path = gfx[0]
-    # countdown 8 -> 2 (pop compreso): dal Picture Start (01:00:00:00) per 6" + 1 fotogramma
-    assert start == "01:00:00:00" and int(dur) == 6 * 24 + 1
+    assert "gfx" not in res and not [t for t in res.get("track", []) if t.startswith("LeaderKit Grafica")]
+    path, w, h = loaders(res)["CalLd"]
+    assert (w, h) == ("3840", "1920")
     from PIL import Image
     im = Image.open(path)
     im.load()
     assert im.size == (3840, 1920) and im.mode == "RGBA"
     px = im.load()
-    assert px[1920, 960 - 200][3] == 0                      # centro trasparente (il countdown resta visibile)
-    # niente frame lines nel PNG: sono nel generatore, sotto i testi
+    assert px[1920, 960 - 200][3] == 0                      # cerchio trasparente (il countdown resta visibile)
     y0 = round((1920 - 3840 / 2.39) / 2)
-    assert px[1920, y0 + 1][3] == 0
+    assert px[1920 - 300, y0 + 1][3] == 0                   # niente frame lines nel PNG: sono nel generatore
+    assert px[0, 500][3] == 255 and px[1, 500][3] == 0      # bordo del raster: 1 px esatto
+    assert px[200, 200][3] == 255                            # moduli ai lati del cerchio
 
 
-def test_engine_still_tiling(built, code):
-    """Se Resolve accorcia le immagini fisse, la taratura viene ripetuta fino a coprire lo spazio."""
-    res, _ = run_engine(code, res="960x540", stilldur="48")
-    gfx = res["gfx"]
-    assert sum(int(v.split("|")[1]) for v in gfx) == 6 * 24 + 1 and len(gfx) == 4
+def test_engine_calibration_inside_frame_lines(built, code):
+    """Con le frame lines 2.39 sul countdown i moduli della taratura stanno dentro le linee."""
+    from PIL import Image
+    res, _ = run_engine(code, res="1920x1080", in_FL239=1, in_GuidesCd=1)
+    im = Image.open(loaders(res)["CalLd"][0])
+    im.load()
+    px = im.load()
+    y0 = (1080 - 804) // 2
+    col = [px[300, y][3] for y in range(1080)]
+    assert not any(col[5:y0]) and not any(col[1080 - y0:1075])       # fuori dalle linee: vuoto
+    assert any(col[y0:1080 - y0])
+    res, _ = run_engine(code, res="1920x1080")
+    im = Image.open(loaders(res)["CalLd"][0])
+    im.load()
+    assert any(im.load()[300, y][3] for y in range(5, y0))            # senza linee: tutta l'altezza
+
+
+def test_engine_dials_in_loaders(built, code):
+    """Genera prepara i quadranti di Quadrante e Orologio nei Loader: cambiando stile non manca la corona."""
+    res, _ = run_engine(code, res="1920x1080", fps="25")
+    ld = loaders(res)
+    for kind, key, r in (("b", "DialBLd", min(0.36 * 1080, 0.22 * 1920)), ("c", "DialCLd", min(0.31 * 1080, 0.20 * 1920))):
+        import math
+        side = 2 * math.ceil(r * 1.04 + 2)
+        path, w, h = ld[key]
+        assert (int(w), int(h)) == (side, side) and os.path.exists(path)
+    assert "Quadrante25" in ld["DialBLd"][0] and "Orologio25" in ld["DialCLd"][0]
 
 
 def test_inspector_pages(built):
@@ -635,12 +667,20 @@ def test_engine_style_dial_and_title_png(built, code, tmp_path):
     title = tmp_path / "titolo.png"
     Image.new("RGBA", (800, 200), (255, 255, 255, 255)).save(title)
     res, log = run_engine(code, res="1920x1080", style="1", titleimg=str(title))
-    tracks = [v.split("|") for v in res["track"]]
-    dial = [t for t in tracks if t[0] == "LeaderKit Grafica" and "Quadrante24" in t[6]]
-    assert dial and dial[0][1] == "00:59:50:00" and int(dial[0][2]) == 8 * 24      # sopra la slate
-    assert not [t for t in tracks if t[0] == "LeaderKit Logo Titolo"]
-    tl = [v.split("|") for v in res["loader"] if v.startswith("LeaderKit Head|TitleLd")]
-    assert tl and tl[0][2:5] == [str(title), "800", "200"]
+    tracks = [v.split("|") for v in res.get("track", [])]
+    assert not [t for t in tracks if t[0] in ("LeaderKit Grafica", "LeaderKit Logo Titolo")]
+    ld = loaders(res)
+    assert "Quadrante24" in ld["DialBLd"][0]
+    assert ld["TitleLd"] == [str(title), "800", "200"]
+
+
+def test_dial_fallback_ring_and_png(built):
+    """Senza PNG del quadrante (Genera non premuto) resta la corona disegnata dal generatore."""
+    t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 40, SlateStyle=1)
+    assert t["BDial"]["Mix"] == 0 and t["BRingG"]["Mix"] == 1
+    t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 40, SlateStyle=1, DialBImage="/x/q.png", DialBW=814, DialBH=814)
+    assert t["BDial"]["Mix"] == 1 and t["BRingG"]["Mix"] == 0
+    assert abs(t["BDialM1"]["Size"] - 1) < 1e-9 and abs(t["BDialM1"]["Center"][0] - 0.27) < 1e-9
 
 
 def test_title_png_geometry(built):
@@ -683,8 +723,9 @@ def test_burnin_matte_precise_and_data_inside(built):
     # 1.33 su 2:1: pillarbox, dati centrati nelle bande laterali
     t = dump_tools(setting, 24, 3840, 1920, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=names.index("1.33:1 (4:3)"))
     pb = t["MatLM"]["Width"]
-    assert abs(t["T1"]["Center"][0] - pb / 2) < 1e-9 and t["T1"]["HorizontalLeftCenterRight"] == 0
-    assert abs(t["T4"]["Center"][0] - (1 - pb / 2)) < 1e-9
+    # nelle bande laterali: ancorati al bordo esterno (0.13: righe impilate)
+    assert abs(t["T1"]["Center"][0] - 0.05 * pb) < 1e-9 and t["T1"]["HorizontalLeftCenterRight"] == -1
+    assert abs(t["T4"]["Center"][0] - (1 - 0.05 * pb)) < 1e-9
     # la risoluzione scritta da Genera prevale su quella della composizione
     t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=names.index("2.39:1 (Scope)"), TlW=4096, TlH=2160)
     assert abs(t["MatTM"]["Height"] * 2160 - (2160 - 2 * round(4096 / 2.39 / 2)) / 2) < 1e-6
@@ -724,9 +765,9 @@ def test_guides_1_85_on_16_9_example(built):
     t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 40, FL239=1, FL185=1)
     assert t["GFL239T"]["StyledText"] == "2.39:1  ·  1920 × 804"
     assert t["GFL185T"]["StyledText"] == "1.85:1  ·  1920 × 1038"
-    cap, pad = 0.014 * 1080, 0.008 * 1080
-    assert t["GFL185T"]["HorizontalLeftCenterRight"] == -1 and abs(t["GFL185T"]["Center"][0] - (2 + pad) / 1920) < 1e-9
-    assert abs(t["GFL239T"]["Center"][0] - (2 + pad + 19 * cap) / 1920) < 1e-9      # affiancata alla 1.85
+    cap, pad, tri = 0.014 * 1080, 0.008 * 1080, 0.026 * 1080          # dopo il triangolo d'angolo
+    assert t["GFL185T"]["HorizontalLeftCenterRight"] == -1 and abs(t["GFL185T"]["Center"][0] - (2 + pad + tri) / 1920) < 1e-9
+    assert abs(t["GFL239T"]["Center"][0] - (2 + pad + tri + 19 * cap) / 1920) < 1e-9      # affiancata alla 1.85
     assert abs(t["GFL239T"]["Center"][1] - (1 - (138 + 2 + 0.008 * 1080 + 0.007 * 1080) / 1080)) < 1e-9
 
 
@@ -735,10 +776,11 @@ def test_guides_default_off_and_where(built):
     assert not any(on(r, "MGuides.Mix") for r in rows)                 # default: nessuna guida (niente "mascherino")
     t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 40, FL185=1, GuidesSlate=0)
     assert t["MGuides"]["Mix"] == 0
-    t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 300, FL185=1)       # countdown
-    assert t["MGuides"]["Mix"] == 1 and t["LM1"]["Background"]["link"] == "MGuides"
+    t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 300, FL185=1)       # countdown: sopra la taratura
+    assert t["MGuidesCd"]["Mix"] == 1 and t["LM1"]["Background"]["link"] == "MGuidesCd"
+    assert t["MGuidesCd"]["Background"]["link"] == "MCal" and t["MCal"]["Background"]["link"] == "Bg"
     t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 300, FL185=1, GuidesCd=0)
-    assert t["MGuides"]["Mix"] == 0
+    assert t["MGuidesCd"]["Mix"] == 0
 
 
 @pytest.mark.parametrize("fps,nominal", [(24, 24), (25, 25), (29.97, 30), (50, 50)])
@@ -883,15 +925,15 @@ def field_reads(d):
 def test_panels_are_light(built):
     """Pannelli: letture dei campi per fotogramma (erano 713 nella 0.11) e maschere senza espressioni."""
     d = dump_full(HEAD(built), 24, 3840, 2160, 432, 40, SlateStyle=0, **FULL)
-    assert field_reads(d) <= 300, field_reads(d)
+    assert field_reads(d) <= 340, field_reads(d)          # 0.13: stato su due righe se non ci sta
     for i in range(3):
         m = d["tools"]["SPan%dM" % i]["inputs"]
         assert isinstance(m["Height"], float) and abs(m["Height"] - (build_fx.PANEL_TOP - build_fx.PANEL_BOTTOM)) < 1e-9
     text = open(HEAD(built)).read()
     assert "COLS()" not in text                                             # niente piu' calcolo di tutte le colonne
-    # ogni tabella legge solo la sua colonna, e con 8 campi si riduce per stare nelle 6 righe
+    # ogni tabella legge solo la sua colonna; 8 righe stanno nel pannello a grandezza piena
     lab = d["tools"]["SLab0"]["inputs"]
-    assert lab["StyledText"].count("\n") == 7 and lab["Size"] < d["tools"]["SLab2"]["inputs"]["Size"]
+    assert lab["StyledText"].count("\n") == 7 and lab["Size"] == d["tools"]["SLab2"]["inputs"]["Size"]
 
 
 def test_assistant_editor_field(built):
@@ -915,27 +957,35 @@ def test_guides_color_and_outline(built):
     assert "ControlGroup = %d" % build_fx.GUIDE_GROUP in text
 
 
-@pytest.mark.parametrize("w,h", [(1920, 1080), (3840, 1920), (1440, 1080), (4096, 1716)])
+@pytest.mark.parametrize("w,h", [(1920, 1080), (3840, 1920), (1440, 1080), (4096, 1716), (854, 480), (1080, 1920)])
 def test_countdown_logo_and_info(built, w, h):
-    """Logo sopra il cerchio e dati sotto, dentro lo spazio libero e lontani dalle griglie della taratura."""
+    """Logo sopra il cerchio e dati sotto, in riquadri neri bordati nella colonna del cerchio."""
     kw = dict(CdLogo=1, CdInfo=1, Title="Il film", Director="Regista", Editor="Ivan", AsstEditor="Anna",
               Production="Mecena", Logo="/x/l.png", LogoW=600, LogoH=200)
     t = dump_tools(HEAD(built), 24, w, h, 432, 300, **kw)
-    space = max(0.02, (1 - build_fx.RING_D * w / h) / 2)
-    assert t["CdLogoG"]["Mix"] == 1 and t["CdInfoG"]["Mix"] == 1
-    lg = t["CdLogoGM1"]
+    a = w / h
+    rd = min(0.62 / a, 0.40)                                # diametro del cerchio (frazione di W)
+    space = (1 - rd * a) / 2
+    assert t["CdLogoG"]["Mix"] == 1 and t["CdInfoG"]["Mix"] == 1 and t["CdBoxG"]["Mix"] == 1
+    lg, box = t["CdLogoGM1"], t["CdBoxLF"]
     assert abs(lg["Center"][1] - (1 - space / 2)) < 1e-9 and lg["Center"][0] == 0.5
-    assert 600 * lg["Size"] <= 0.30 * w + 1e-6 and 200 * lg["Size"] <= space * 0.7 * h + 1e-6
-    tx = t["CdText"]
-    assert tx["StyledText"].split("\n") == ["IL FILM", "DIRECTOR  Regista      PRODUCTION  Mecena",
-                                             "EDITOR  Ivan      ASST. EDITOR  Anna"]
-    assert abs(tx["Center"][1] - space / 2) < 1e-9 and tx["Enabled2"] == 1
-    # il blocco sta nello spazio sotto il cerchio (maiuscole reali 0.88 del modello, interlinea calibrata)
-    cap = tx["Size"] * (w / h) / 2
-    assert cap * (0.88 + build_fx.PITCH * 2) <= space * 0.75 + 1e-9
+    assert box["Center"] == lg["Center"] and box["Level"] == 1
+    bw, bh = box["Width"] * w, box["Height"] * h
+    assert bh <= 0.72 * space * h + 2 and bw <= rd * w + 2                      # piu' piccolo del cerchio
+    assert 600 * lg["Size"] <= bw - 0.24 * bh and 200 * lg["Size"] <= bh * 0.76  # logo dentro, margine 13%
+    assert bw >= bh - 1                                                          # quadrato o piu' largo
+    tx, db = t["CdText"], t["CdBoxDF"]
+    lines = tx["StyledText"].split("\n")
+    assert lines[0] == "IL FILM" and "DIRECTOR  Regista" in tx["StyledText"] and "ASST. EDITOR  Anna" in lines[-1]
+    assert abs(tx["Center"][1] - space / 2) < 1e-9 and db["Center"] == tx["Center"]
+    # il testo sta nel riquadro e il riquadro nello spazio sotto il cerchio
+    cap = tx["Size"] * w / 2 / h                                                  # maiuscole (frazione di H)
+    assert cap * (0.88 + build_fx.PITCH * (len(lines) - 1)) <= db["Height"] + 1e-9
+    assert db["Height"] <= space and db["Width"] <= rd + 1e-9
+    assert cap * h >= 6.4                                                          # leggibile anche a 480p
     # spenti di default; logo senza file: niente
     t = dump_tools(HEAD(built), 24, w, h, 432, 300)
-    assert t["CdLogoG"]["Mix"] == 0 and t["CdInfoG"]["Mix"] == 0
+    assert t["CdLogoG"]["Mix"] == 0 and t["CdInfoG"]["Mix"] == 0 and t["CdBoxG"]["Mix"] == 0
     t = dump_tools(HEAD(built), 24, w, h, 432, 300, CdLogo=1)
     assert t["CdLogoG"]["Mix"] == 0
     # sulla slate non compaiono (fanno parte del countdown)
@@ -997,3 +1047,147 @@ def test_burnin_layout_and_outline(built):
     t = dump_tools(setting, 24, 3840, 1920, 480, 0, Seg=seg, SegIdx="000000000000000001", RecStart=86400,
                    BMatte=names.index("1.33:1 (4:3)"))
     assert abs(t["T5"]["Center"][0] - t["MatLM"]["Width"] / 2) < 1e-9
+
+
+# ------------------------------------------------------------------ 0.13
+BURN_SEG = ("86400|86880|1000|1|24|0|90000|0|A001C003_260926_R2AB~A001  ·  CAM A|SC 12A  TK 4~|"
+            "SRC TC {SRC}~AUD TC {ATC}  ·  SR 012|REC TC {REC}~FR {FRM}~{REC}|LA LUNGA NOTTE  ·  v12~26/09/2026")
+BURN_LENS = "20,33,20,2,3|10,10,10,1,1|18,39,18,2,3|18,24,18,2,2|22,35,14,2,3"
+
+
+def burn_tools(w, h, **kw):
+    setting = os.path.join(ROOT, "dist", "LeaderKit Burn-in.setting")
+    return dump_tools(setting, 24, w, h, 480, 0, Seg=BURN_SEG, SegIdx="000000000000000001", RecStart=86400,
+                      TlW=w, TlH=h, BLens=BURN_LENS, **kw)
+
+
+def burn_cap_px(t, k, w, h):
+    return t["T%d" % k]["Size"] * w / 2          # maiuscole del modello in pixel (Size = 2 * cap / AR)
+
+
+def test_engine_burnin_lengths(built, code):
+    """Aggiorna scrive le lunghezze massime dei blocchi: il generatore non rilegge i dati per la grandezza."""
+    res, _ = run_engine(code, preset="work_dailies", fps="24", program=10)
+    lens = res["burnlens"][0].split("|")
+    assert len(lens) == 5 and all(len(x.split(",")) == 5 for x in lens)
+    assert int(lens[2].split(",")[0]) >= len("SRC TC 00:00:00:00")          # {SRC} contato come timecode
+
+
+def test_burnin_matte_pillarbox_stacked(built):
+    """4:3 su 16:9: righe impilate nelle bande laterali, leggibili (non piu' minuscole)."""
+    t = burn_tools(1920, 1080, BMatte=1)
+    assert t["T1"]["StyledText"] == "A001C003_260926_R2AB\nA001\nCAM A"
+    assert t["T3"]["StyledText"] == "SRC TC 00:00:41:16\nAUD TC 01:02:30:00\nSR 012"
+    for k in range(1, 6):
+        assert burn_cap_px(t, k, 1920, 1080) >= 12
+    pb = (1920 - 1440) / 2 / 1920
+    assert abs(t["T1"]["Center"][0] - 0.05 * pb) < 1e-9 and abs(t["T4"]["Center"][0] - (1 - 0.05 * pb)) < 1e-9
+    assert t["T1"]["HorizontalLeftCenterRight"] == -1 and t["T4"]["HorizontalLeftCenterRight"] == 1
+    # la stessa grandezza per tutti i blocchi e per tutto il programma (non cambia a ogni stacco)
+    assert len(set(round(t["T%d" % k]["Size"], 9) for k in range(1, 6))) == 1
+
+
+def test_burnin_narrow_band_falls_back(built):
+    """480p con 4:3: la banda di 107 px non basta, i dati tornano ai bordi del quadro (leggibili)."""
+    t = burn_tools(854, 480, BMatte=1)
+    assert t["T1"]["StyledText"] == "A001C003_260926_R2AB\nA001  ·  CAM A"
+    assert t["T1"]["Center"][0] < 0.05 and burn_cap_px(t, 1, 854, 480) >= 8.5
+    # 1.85 su 16:9 a 480p: banda di 9 px, dati dentro l'immagine
+    t = burn_tools(854, 480, BMatte=6)
+    assert abs(t["T1"]["Center"][1] - 0.93) < 1e-9
+
+
+@pytest.mark.parametrize("w,h", [(640, 480), (854, 480), (1280, 720), (1920, 1080), (3840, 2160), (4096, 1716), (1080, 1920)])
+def test_burnin_legible_everywhere(built, w, h):
+    """Nessun mascherino, 2.39, 1.85, 4:3 e dentro l'immagine: mai sotto gli 8 px e mai fuori dal quadro."""
+    for kw in (dict(), dict(BMatte=11), dict(BMatte=6), dict(BMatte=1), dict(BPos=1)):
+        t = burn_tools(w, h, **kw)
+        for k in range(1, 6):
+            c = burn_cap_px(t, k, w, h)
+            assert c >= 7.9, (kw, k, c)
+            x, y = t["T%d" % k]["Center"]
+            assert 0 < x < 1 and 0 < y < 1
+
+
+def test_engine_fusion_output_cache(built, code):
+    """Genera accende la cache dell'uscita Fusion su leader e coda (playback fluido); se l'API manca lo dice."""
+    res, log = run_engine(code, fps="24")
+    assert res["headcache"] == ["On"] and res["tailcache"] == ["On"]
+    assert "Cache dell'uscita Fusion accesa" in log
+    res, log = run_engine(code, fps="24", nocache=1)
+    assert "Render Cache Fusion Output" in log
+
+
+LAYOUT_LUA = r"""
+dofile(arg[1])
+local W, H = tonumber(arg[3]), tonumber(arg[4])
+local cal = {}
+for _, k in ipairs({ "stars", "res", "diag", "center", "grey", "color", "checker", "skin", "ramps", "blue", "gamma",
+  "contour", "peak", "edge", "labels" }) do cal[k] = true end
+local spec = { cal = cal, fpsLabel = "24/SEC", resLabel = "HD", gamma = tonumber(arg[5]) }
+assert(LK_OVERLAY.render(arg[2], W, H, spec))
+for _, it in ipairs(LK_OVERLAY.layout(W, H, spec).items) do print(it.kind, it.x, it.y, it.w, it.h) end
+"""
+
+
+def calibration(tmp_path, w, h, gamma=2.4):
+    from PIL import Image
+    script = tmp_path / "cal.lua"
+    script.write_text(LAYOUT_LUA)
+    png = tmp_path / "cal.png"
+    out = subprocess.run([LUA, str(script), os.path.join(ROOT, "fx", "overlay.lua"), str(png), str(w), str(h), str(gamma)],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert out.returncode == 0, out.stderr.decode()
+    items = {}
+    for line in out.stdout.decode().split("\n"):
+        if line.strip():
+            k, x, y, iw, ih = line.split()
+            items.setdefault(k, []).append((int(x), int(y), int(iw), int(ih)))
+    im = Image.open(png)
+    im.load()
+    return items, im.load()
+
+
+def test_calibration_modules_like_rp428_6(tmp_path):
+    """Moduli nelle posizioni del leader SMPTE: 4 stelle, sfera divisa, bianco/nero, 24/SEC + risoluzione,
+    gamma, blu, righe, ColorChecker e toni della pelle al posto dei volti."""
+    items, px = calibration(tmp_path, 1920, 1080)
+    assert len(items["star"]) == 4
+    for k in ("sphere", "peak", "info", "gamma", "res", "blue", "checker", "skin", "rampWR", "rampGB", "grey", "colors"):
+        assert len(items[k]) == 1, k
+    # riquadro 24/SEC · HD: triangolo di righe di 1 px alterne all'angolo in basso a destra
+    x, y, s, _ = items["info"][0]
+    p = 2 + max(1, round(0.05 * s))
+    cx, cy = x + s - p - 1, y + s - p - 1
+    row = [px[cx - i, cy][0] for i in range(6)]
+    col = [px[cx, cy - i][0] for i in range(6)]
+    assert row == [255, 0, 255, 0, 255, 0] and col == row          # orizzontali e verticali, 1 px
+    # gamma 2.4: grigio 0.5^(1/2.4) = 191 accanto alle righe, in alto 2.2 (186) e 2.6 (195)
+    x, y, s, _ = items["gamma"][0]
+    iw = s - 2 * p
+    assert px[x + p + iw - 3, y + p + int(0.24 * iw) + int(0.6 * iw)][:3] == (191, 191, 191)
+    assert px[x + p + 3, y + p + 3][:3] == (186, 186, 186) and px[x + p + iw - 3, y + p + 3][:3] == (195, 195, 195)
+    # sfera divisa: alte luci sopra l'equatore, ombre sotto
+    x, y, s, _ = items["sphere"][0]
+    top, bottom = px[x + s // 2, y + s // 2 - s // 6][0], px[x + s // 2, y + s // 2 + s // 6][0]
+    assert top > 200 and bottom < 20
+    # bianco e nero: 95% nel 100%, 5% nel 0%
+    x, y, s, _ = items["peak"][0]
+    assert px[x + s // 2, y + p + (s - 2 * p) // 4][:3] == (242, 242, 242)
+    assert px[x + p + 2, y + p + 2][:3] == (255, 255, 255)
+    assert px[x + s // 2, y + s - p - (s - 2 * p) // 4][:3] == (13, 13, 13)
+
+
+def test_calibration_gamma_reference(tmp_path):
+    items, px = calibration(tmp_path, 1920, 1080, gamma=2.6)
+    x, y, s, _ = items["gamma"][0]
+    p = 2 + max(1, round(0.05 * s))
+    iw = s - 2 * p
+    assert px[x + p + iw - 3, y + p + int(0.24 * iw) + int(0.6 * iw)][:3] == (195, 195, 195)
+
+
+def test_engine_gamma_from_color_space(built, code):
+    res, log = run_engine(code, fps="24")                           # uscita Rec.709 Gamma 2.4 (harness)
+    assert "gamma di riferimento 2.4" in log
+    res, log = run_engine(code, fps="24", in_CalGammaRef=3)          # scelto nel pannello: 2.6 (DCI)
+    assert "gamma di riferimento 2.6" in log

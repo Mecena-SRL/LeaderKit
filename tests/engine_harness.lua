@@ -47,6 +47,10 @@ function Item:SetProperty(k, v) self.props = self.props or {}; self.props[k] = v
 function Item:GetMediaPoolItem() return self.mpi end
 function Item:GetSourceStartFrame() return self.srcin or 0 end
 function Item:GetTrackTypeAndIndex() return self.where end
+function Item:SetFusionOutputCache(v)
+  if opt.nocache == "1" then error("API non disponibile") end
+  self.fcache = v; return v == "On"
+end
 
 local tracks = { video = { { name = "Video 1", items = {} } }, audio = { { name = "Audio 1", items = {} } } }
 local markers = {}
@@ -83,6 +87,10 @@ headTool.inputs = { Preset = tonumber(opt.preset), Reel = 1, Custom = 0, BarsSec
   Logo = opt.logo, LogoPos = 0, LogoSize = 20, LogoOnTail = tonumber(opt.logotail or "1"), Logo2 = opt.logo2 or "",
   LogoPos2 = 1, LogoSize2 = 12, EndDot = tonumber(opt.enddot or "0"),
   SlateStyle = tonumber(opt.style or "0"), TitleImage = opt.titleimg or "", TitleImageSize = 100 }
+-- in_<Input>=valore: qualunque altro input del pannello (es. in_FL239=1)
+for k, v in pairs(opt) do
+  if k:sub(1, 3) == "in_" then headTool.inputs[k:sub(4)] = tonumber(v) or v end
+end
 local head = setmetatable({ off = 0, dur = tonumber(opt.head) * nominal, name = "LeaderKit Head",
   comp = newComp(headTool) }, Item)
 table.insert(tracks.video[1].items, head)
@@ -253,6 +261,7 @@ for _, t in ipairs(tracks.video) do
         tostring(ti.BRec) .. tostring(ti.BSrc) .. tostring(ti.BAtc) .. "|" .. tostring(ti.RecStart) .. "|" .. tostring(ti.TlFps))
       print("RESULT burnseg=" .. (tostring(ti.Seg):gsub("\n", " // ")))
       print("RESULT burnidx=" .. tostring(ti.SegIdx))
+      print("RESULT burnlens=" .. tostring(ti.BLens))
       print("RESULT burnseglen=" .. tostring(#tostring(ti.Seg)))
     end
   end
@@ -279,7 +288,8 @@ for _, t in ipairs(tracks.video) do
       table.sort(names)
       for _, n in ipairs(names) do
         local ld, ti = it.comp.loaders[n], it.comp.tool.inputs
-        local pre = ({ Logo1Ld = "Logo", Logo2Ld = "Logo2", TitleLd = "Title" })[n]
+        local pre = ({ Logo1Ld = "Logo", Logo2Ld = "Logo2", TitleLd = "Title", CalLd = "Cal", DialBLd = "DialB",
+          DialCLd = "DialC" })[n]
         print(string.format("RESULT loader=%s|%s|%s|%s|%s|%s", it.name, n, tostring(ld.Clip), tostring(ti[pre .. "W"]),
           tostring(ti[pre .. "H"]), tostring(ld.inputs.HoldLastFrame)))
       end
@@ -289,6 +299,7 @@ end
 for _, it in ipairs(tracks.video[1].items) do
   if it.name == "LeaderKit Tail" then
     local ti = it.comp.tool.inputs
+    print("RESULT tailcache=" .. tostring(it.fcache))
     print("RESULT tail=start=" .. tc(it:GetStart()) .. " dur=" .. it:GetDuration() .. " pop=" .. tostring(ti.TailPop) ..
       " flash=" .. tostring(ti.TailFlash) .. " card=" .. tostring(ti.CardText) .. " info=" .. tostring(ti.Info))
   end
@@ -296,6 +307,7 @@ end
 for _, it in ipairs(tracks.video[1].items) do
   if it.name == "LeaderKit Head" then
     print("RESULT head=" .. tc(it:GetStart()) .. "|" .. it:GetDuration() .. "|" .. tostring(it.comp.tool.inputs.Title))
+    print("RESULT headcache=" .. tostring(it.fcache))
     print("RESULT duration=" .. tostring(it.comp.tool.inputs.Duration))
     print("RESULT colorinfo=" .. tostring(it.comp.tool.inputs.ColorInfo))
     print("RESULT date=" .. tostring(it.comp.tool.inputs.Date))

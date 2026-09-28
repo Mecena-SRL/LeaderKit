@@ -21,8 +21,20 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Open Sans (il font di Text+ in LeaderKit) se installato, altrimenti DejaVu
+OPEN_SANS = "/usr/share/fonts/truetype/open-sans/OpenSans-%s.ttf"
 FONTS = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
          "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
+
+
+def font_for(style, px):
+    """(font, altezza delle maiuscole in em) per uno stile di Text+."""
+    name = {"Bold": "Bold", "Semibold": "Semibold", "Regular": "Regular", "Light": "Light"}.get(style or "Bold", "Bold")
+    path = OPEN_SANS % name
+    if os.path.exists(path):
+        return ImageFont.truetype(path, px), 0.714
+    bold = name not in ("Regular", "Light")
+    return ImageFont.truetype(FONTS[0] if bold else FONTS[1], px), 0.729
 
 
 def num(v, d=0.0):
@@ -38,7 +50,8 @@ def pt(v, d=(0.5, 0.5)):
     return d
 
 
-LOADER_KEYS = {"Logo1Ld": "Logo", "Logo2Ld": "Logo2", "TitleLd": "TitleImage"}
+LOADER_KEYS = {"Logo1Ld": "Logo", "Logo2Ld": "Logo2", "TitleLd": "TitleImage", "CalLd": "CalImage",
+               "DialBLd": "DialBImage", "DialCLd": "DialCImage"}
 
 
 class Renderer(object):
@@ -178,10 +191,9 @@ class Renderer(object):
         if not s.strip():
             return out
         size = num(self.inp(name, "Size"), 0.08)
-        bold = (self.inp(name, "Style") or "Bold") not in ("Regular", "Light")
-        # modello di Text+ usato da LeaderKit: maiuscole alte Size * larghezza / 2 (cap_size in build_fx)
         # in Resolve 21 le maiuscole di Text+ sono alte ~0.44 * Size * larghezza (misurato)
-        font = ImageFont.truetype(FONTS[0] if bold else FONTS[1], max(6, int(size * self.w * 0.44 / 0.729)))
+        _, capem = font_for(self.inp(name, "Style"), 10)
+        font, _ = font_for(self.inp(name, "Style"), max(4, int(round(size * self.w * 0.44 / capem))))
         cx, cy = pt(self.inp(name, "Center"))
         spacing = num(self.inp(name, "LineSpacing"), 1.0)
         img = Image.new("L", (self.w, self.h), 0)
