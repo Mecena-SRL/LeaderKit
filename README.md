@@ -264,7 +264,9 @@ così il timecode si legge anche sul bianco.
 
 **Dimensione e colore dei dati** (scheda Aspetto): *Piccolo* (1.3%), *Medio* (1.8%, il
 vecchio default), *Grande* (2.6%) oppure *Cursore* (1-5% del quadro, a scelta). Il colore dei
-dati può essere bianco, giallo, verde o ciano.
+dati può essere bianco, giallo, verde o ciano. Se una riga è troppo lunga per lo spazio la
+grandezza scende al massimo al 70% della scelta e la riga si tronca con "…". Il **TC grande**
+può stare nella posizione standard, **più in basso** sul bordo o al centro.
 
 **Watermark** (scheda Watermark): fino a **tre**, ognuno con il suo testo, **in alto, al
 centro o in basso**. Si posizionano da soli nello spazio che lasciano i blocchi dei dati (anche
