@@ -1392,7 +1392,7 @@ def tail(std=None):
 # ------------------------------------------------------------------ burn-in (copie di lavoro)
 BURN_NAME = "LeaderKit Burn-in"
 BURN_FIELDS = [("BRec", "Record TC (timeline)"), ("BSrc", "Source TC (clip)"),
-               ("BAtc", "TC audio e sound roll (verifica sync)"), ("BFrame", "Contatore fotogrammi"),
+               ("BAtc", "TC audio e sound roll (verifica sync)"), ("BAfmt", "Formato audio (mono, stereo, 5.1, Atmos...)"), ("BFrame", "Contatore fotogrammi"),
                ("BClip", "Nome clip"), ("BScene", "Scena / shot / take"), ("BCam", "Camera"),
                ("BReel", "Reel / roll / card"), ("BDate", "Data (ripresa, o oggi)"), ("BTitle", "Titolo / produzione"),
                ("BVersion", "Versione / fase"), ("BColor", "Spazio colore / LUT"), ("BFormat", "Formato (fps, risoluzione)"),
@@ -1401,18 +1401,23 @@ FRAME_MODES = ["Per clip da 1001 (VFX)", "Per clip da 0", "Programma da 0"]
 # fase: (nome, campi attivi, modo contatore)
 BURN_PHASES = [
     ("Scarico / verifica DIT", ["BSrc", "BClip", "BReel", "BCam", "BDate", "BFormat", "BColor"], 1),
-    ("Sync audio-video", ["BSrc", "BAtc", "BClip", "BScene", "BCam", "BReel"], 1),
+    ("Sync audio-video", ["BSrc", "BAtc", "BAfmt", "BClip", "BScene", "BCam", "BReel"], 1),
     ("Giornalieri (produzione / regia)", ["BSrc", "BClip", "BScene", "BCam", "BReel", "BDate", "BTitle", "BWater"], 1),
     ("Montaggio / offline review", ["BRec", "BSrc", "BClip", "BTitle", "BVersion", "BDate", "BWater"], 2),
     ("VFX (pull / review)", ["BSrc", "BFrame", "BClip", "BReel", "BVersion", "BFormat"], 0),
     ("Color review", ["BRec", "BSrc", "BClip", "BVersion", "BColor", "BFormat"], 2),
-    ("Suono / mix / VO / doppiaggio", ["BRec", "BBig", "BFrame", "BTitle", "BVersion"], 2),
+    ("Suono / mix / VO / doppiaggio", ["BRec", "BBig", "BFrame", "BAfmt", "BTitle", "BVersion"], 2),
     ("Approvazione cliente", ["BRec", "BTitle", "BVersion", "BDate", "BWater"], 2),
     ("Personalizzato (scegli i campi)", None, None),
 ]
 BURN_SIZES = ["Piccolo", "Medio", "Grande", "Cursore (scegli tu)"]
 BURN_SIZE_PCT = [1.3, 1.8, 2.6]            # altezza dei dati ai lati, % del lato corto del quadro
 WATER_POS = ["In alto", "Al centro", "In basso"]
+WATER_PRESETS = ["COPIA LAVORO", "NON DISTRIBUIRE", "NON DIFFONDERE", "CONFIDENZIALE", "SOLO USO INTERNO",
+                 "SOLO PER REVISIONE", "BOZZA", "VERSIONE DI LAVORO", "SCREENER - NON COPIARE",
+                 "VISIONE RISERVATA", "VIETATA LA RIPRODUZIONE", "NON PER LA PROGRAMMAZIONE",
+                 "WORK COPY", "DO NOT DISTRIBUTE", "DO NOT COPY", "CONFIDENTIAL", "INTERNAL USE ONLY",
+                 "FOR REVIEW ONLY", "DRAFT", "WORK IN PROGRESS", "NOT FOR RELEASE", "SCREENER - DO NOT COPY"]
 WATER_SLOTS = [("BWater", "BWaterText", "BWaterPos", 1, "CONFIDENZIALE"),
                ("BWater2", "BWater2Text", "BWater2Pos", 0, "NON DIFFONDERE"),
                ("BWater3", "BWater3Text", "BWater3Pos", 2, "")]
@@ -1616,7 +1621,8 @@ def burnin(std=None):
     fields = ("".join(uc_check(k, label, 0) for k, label in BURN_FIELDS if k != "BWater")
               + uc_combo("BFrameMode", "Contatore fotogrammi", FRAME_MODES))
     water = "".join(uc_check(sw, "Watermark %d" % i, 0)
-                    + uc_text(st, "Testo watermark %d" % i)
+                    + uc_combo(sw + "Pre", "Testo pronto %d" % i, ["Personalizzato (scrivi qui sotto)"] + WATER_PRESETS)
+                    + uc_text(st, "Testo personalizzato %d" % i)
                     + uc_combo(sp, "Posizione watermark %d" % i, WATER_POS)
                     for i, (sw, st, sp, _, _) in enumerate(WATER_SLOTS, 1))
     water += (uc_slider("BWaterSize", "Dimensione watermark", 0.02, 0.15, 0.06, integer=False)
@@ -1629,6 +1635,7 @@ def burnin(std=None):
              + uc_check("BChList", "Mostra l'elenco dei canali letti", 0)
              + uc_check("BChName", "Nome clip", 1)
              + uc_check("BChSrc", "SRC TC", 1)
+             + uc_check("BChFmt", "Formato audio (sulle righe audio)", 1)
              + uc_combo("BChPos", "Posizione dell'elenco", CH_POS))
     look = (uc_combo("BMatte", "Mascherino", [m for m, _ in MATTES])
             + uc_slider("BMatteRatio", "Rapporto personalizzato (x:1)", 1, 3, 2.39, integer=False)
@@ -1655,13 +1662,14 @@ def burnin(std=None):
               ("BFrameMode", "1"), ("BPos", "0"), ("BAlign", "0"), ("BMatte", "0"), ("BMatteRatio", "2.39"),
               ("BMatteAlpha", "1"), ("BSize", "1.8"), ("BSizeMode", "1"), ("BTextColor", "0"), ("BBands", "0"),
               ("BBandAlpha", "0.6"), ("BWaterAlpha", "0.18"), ("BWaterSize", "0.06"),
-              ("BChList", "0"), ("BChName", "1"), ("BChSrc", "1"), ("BChPos", "0"),
+              ("BChList", "0"), ("BChName", "1"), ("BChSrc", "1"), ("BChFmt", "1"), ("BChPos", "0"),
               ("BOutline", "1"), ("BOutlineW", "0.08"),
               ("Seg", '""'), ("SegIdx", '""'), ("BLens", '""'), ("BChLens", '""'), ("RecStart", "0"), ("TlFps", "24"), ("TlDrop", "0"),
               ("TlW", "0"), ("TlH", "0")]
     values += [(k, str(v)) for k, v in d.items()]
     values += [(sw, "0") for sw, _, _, _, _ in WATER_SLOTS[1:]]
     values += [(sp, str(pos)) for _, _, sp, pos, _ in WATER_SLOTS]
+    values += [(sw + "Pre", "0") for sw, _, _, _, _ in WATER_SLOTS]
     values += [(st, lua_string(txt)) for _, st, _, _, txt in WATER_SLOTS]
     values += [("BV%d" % i, "1") for i in range(1, CH_N + 1)] + [("BA%d" % i, "1") for i in range(1, CH_N + 1)]
     g.controls(values, uc)
@@ -1741,7 +1749,8 @@ def burnin(std=None):
     top = g.gate("MCh", top, ["TCh"], "LK.BChList > 0.5")
     # watermark: fino a tre, in alto / al centro / in basso, nello spazio che lasciano i dati
     for i, (sw, st, sp, _, _) in enumerate(WATER_SLOTS, 1):
-        txt = ("string.upper(LK.%s.Value)" % st)
+        txt = ("string.upper(({ %s })[math.floor(LK.%sPre + 0.5)] or LK.%s.Value)"
+               % (", ".join(lua_string(x) for x in WATER_PRESETS), sw, st))
         if i == 1:
             txt += ' .. (LK.BRecipient.Value == "" and "" or ("\\n" .. LK.BRecipient.Value))'
         nm = "Water%s" % ("" if i == 1 else i)
@@ -1752,8 +1761,8 @@ def burnin(std=None):
               + [(k, "Campi") for k, _ in BURN_FIELDS if k != "BWater"] + [("BFrameMode", "Campi")]
               + [("SecChV", "Canali")] + [("BV%d" % i, "Canali") for i in range(1, CH_N + 1)]
               + [("SecChA", "Canali")] + [("BA%d" % i, "Canali") for i in range(1, CH_N + 1)]
-              + [(x, "Canali") for x in ("SecChL", "BChList", "BChName", "BChSrc", "BChPos")]
-              + [(x, "Watermark") for sw, st, sp, _, _ in WATER_SLOTS for x in (sw, st, sp)]
+              + [(x, "Canali") for x in ("SecChL", "BChList", "BChName", "BChSrc", "BChFmt", "BChPos")]
+              + [(x, "Watermark") for sw, st, sp, _, _ in WATER_SLOTS for x in (sw, sw + "Pre", st, sp)]
               + [("BWaterSize", "Watermark"), ("BWaterAlpha", "Watermark")]
               + [(x, "Aspetto") for x in ("BMatte", "BMatteRatio", "BMatteAlpha", "BPos", "BAlign", "BSizeMode",
                                           "BSize", "BTextColor", "BBands", "BBandAlpha", "BOutline", "BOutlineW")])

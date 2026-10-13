@@ -269,7 +269,17 @@ dati può essere bianco, giallo, verde o ciano.
 **Watermark** (scheda Watermark): fino a **tre**, ognuno con il suo testo, **in alto, al
 centro o in basso**. Si posizionano da soli nello spazio che lasciano i blocchi dei dati (anche
 con mascherino, TC grande ed elenco dei canali) e quelli sullo stesso lato si impilano. Il
-destinatario sta sotto il watermark 1. Dimensione e opacità sono comuni.
+destinatario sta sotto il watermark 1. Dimensione e opacità sono comuni. Per ogni
+watermark c'è un **testo pronto** (COPIA LAVORO, NON DISTRIBUIRE, NON DIFFONDERE, CONFIDENZIALE,
+SOLO USO INTERNO, SOLO PER REVISIONE, BOZZA, SCREENER - NON COPIARE, VIETATA LA RIPRODUZIONE,
+oppure in inglese WORK COPY, DO NOT DISTRIBUTE, FOR REVIEW ONLY, DRAFT...) o il testo personalizzato.
+
+**Formato audio** (campo *Formato audio*, attivo nelle fasi Sync e Suono): mostra il layout
+della traccia audio della timeline (MONO, STEREO, LCR, LCRS, QUAD, 5.0, 5.1, 7.0, 7.1, anche
+"FILM" come nell'ordine dei canali Resolve, ADAPTIVE), più il codec del clip se è Dolby Digital
+(DD), Dolby Digital Plus (DD+), Dolby Atmos (ATMOS) o DTS. Se l'API non dà il layout si usa il
+numero di canali del clip. Sta accanto al TC audio (`AUD TC ...   5.1 DD+`) o da solo
+(`AUD 5.1`), e anche sulle righe audio dell'elenco dei canali (`A2  SND_B  5.1  SRC ...`).
 
 **Canali** (scheda Canali): si scelgono i canali **video V1-V8** e **audio A1-A8** da cui
 leggere i dati, uno, più, nessuno o tutti (sopra l'8 vale "tutti spuntati"). I dati principali

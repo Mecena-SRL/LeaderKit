@@ -1363,7 +1363,7 @@ def seg_lines(res):
 
 def test_engine_burnin_channels_select(built, code):
     """Canali video / audio scelti: l'elenco mostra nome clip e SRC TC solo dei canali letti."""
-    base = dict(preset="work_dailies", progstart="6", program="10", extra="1", bin_BChList=1)
+    base = dict(preset="work_dailies", progstart="6", program="10", extra="1", bin_BChList=1, bin_BChFmt=0)
     res, _ = run_engine(code, **base)
     segs = seg_lines(res)
     assert len(segs) == 2                                                  # V2 compare nell'ultimo secondo
@@ -1386,3 +1386,45 @@ def test_engine_burnin_channels_select(built, code):
     assert "V1  SRC {X" in seg_lines(res)[0] and "A001C003  SRC" not in seg_lines(res)[0].split("|")[-1]
     res, _ = run_engine(code, preset="work_dailies", progstart="6", program="10", extra="1")
     assert all(l.endswith("|") for l in seg_lines(res)) and res["burnchlens"][0] == "0,0"
+
+
+def test_engine_burnin_audio_format(built, code):
+    """Formato audio dal layout della traccia (mono, stereo, 5.1 film...) e dal codec (Dolby, Atmos, DTS)."""
+    base = dict(preset="work_sound", progstart="15", program="10")          # la fase Suono mostra il formato
+    for sub, want in (("mono", "MONO"), ("stereo", "STEREO"), ("5.1", "5.1"), ("7.1film", "7.1 FILM"),
+                      ("lcrs", "LCRS"), ("adaptive1", "ADAPTIVE")):
+        res, _ = run_engine(code, asub=sub, **base)
+        assert "|AUD %s~" % want in burn_of(res)["seg"], (sub, burn_of(res)["seg"])
+    # con il TC audio acceso il formato si accoda; il codec Dolby / DTS / Atmos si aggiunge
+    res, _ = run_engine(code, asub="5.1", audcodec="Dolby Digital Plus (E-AC-3)", post_BAtc=1,
+                        burncode=code["burnin"], **base)
+    assert "AUD TC {ATC}   S012   5.1 DD+~" in burn_of(res)["seg"]
+    res, _ = run_engine(code, asub="5.1", audcodec="Dolby Atmos (IAB)", **base)
+    assert "|AUD 5.1 ATMOS~" in burn_of(res)["seg"]
+    res, _ = run_engine(code, asub="stereo", audcodec="AC-3", **base)
+    assert "|AUD STEREO DD~" in burn_of(res)["seg"]
+    # senza l'API del layout: numero di canali del clip
+    res, _ = run_engine(code, nosub="1", audch="6", **base)
+    assert "|AUD 5.1~" in burn_of(res)["seg"]
+    res, _ = run_engine(code, nosub="1", audch="1", **base)
+    assert "|AUD MONO~" in burn_of(res)["seg"]
+    # nell'elenco dei canali, sulle righe audio (A2 e' 5.1)
+    res, _ = run_engine(code, extra="1", asub2="5.1", bin_BChList=1, **base)
+    assert "A1  A001C003  STEREO  SRC {X" in seg_lines(res)[0] and "A2  SND_B  5.1  SRC {X" in seg_lines(res)[0]
+    assert "V1  A001C003  SRC {X" in seg_lines(res)[0]
+    res, _ = run_engine(code, extra="1", bin_BChList=1, bin_BChFmt=0, **base)
+    assert "A1  A001C003  SRC {X" in seg_lines(res)[0]
+
+
+def test_burnin_watermark_presets(built):
+    """Testi pronti (copia lavoro, non distribuire...) al posto del testo personalizzato."""
+    names = ["Personalizzato"] + build_fx.WATER_PRESETS
+    assert build_fx.WATER_PRESETS[0] == "COPIA LAVORO" and "DO NOT DISTRIBUTE" in build_fx.WATER_PRESETS
+    t = burn_tools(1920, 1080, BWater=1, BWaterText="mio testo")
+    assert t["Water"]["StyledText"] == "MIO TESTO"                                  # personalizzato (default)
+    for slot, pre in (("Water", "BWaterPre"), ("Water2", "BWater2Pre"), ("Water3", "BWater3Pre")):
+        n = {"Water": "BWater", "Water2": "BWater2", "Water3": "BWater3"}[slot]
+        t = burn_tools(1920, 1080, **{n: 1, pre: names.index("NON DISTRIBUIRE")})
+        assert t[slot]["StyledText"] == "NON DISTRIBUIRE"
+    t = burn_tools(1920, 1080, BWater=1, BWaterPre=names.index("COPIA LAVORO"), BRecipient="Mario Rossi")
+    assert t["Water"]["StyledText"] == "COPIA LAVORO\nMario Rossi"
