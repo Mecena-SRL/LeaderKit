@@ -1428,3 +1428,57 @@ def test_burnin_watermark_presets(built):
         assert t[slot]["StyledText"] == "NON DISTRIBUIRE"
     t = burn_tools(1920, 1080, BWater=1, BWaterPre=names.index("COPIA LAVORO"), BRecipient="Mario Rossi")
     assert t["Water"]["StyledText"] == "COPIA LAVORO\nMario Rossi"
+
+
+def test_burnin_size_not_shrunk_by_one_long_line(built):
+    """Una riga lunghissima in un punto del programma non azzera la scelta Piccolo / Medio / Grande."""
+    long_lens = "158,158,40,2,3|38,38,38,1,1|20,20,20,2,2|20,20,20,2,2|51,51,51,2,2"
+    px = []
+    for mode in range(3):
+        t = dump_tools(os.path.join(ROOT, "dist", "LeaderKit Burn-in.setting"), 24, 4096, 2048, 480, 0, Seg=BURN_SEG,
+                       SegIdx="000000000000000001", RecStart=86400, TlW=4096, TlH=2048, BLens=long_lens,
+                       BSizeMode=mode)
+        px.append(burn_cap_px(t, 1, 4096, 2048))
+    assert px[0] < px[1] < px[2], px
+    assert px[1] >= 0.7 * 1.8 / 100 * 2048 - 0.01
+    # la riga che non ci sta si tronca con "…" invece di uscire dal quadro
+    seg = "86400|86880|1000|1|24|0|-1|0|" + "A" * 150 + "~|~|SRC {SRC}~|REC {REC}~~{REC}|~"
+    t = dump_tools(os.path.join(ROOT, "dist", "LeaderKit Burn-in.setting"), 24, 4096, 2048, 480, 0, Seg=seg,
+                   SegIdx="000000000000000001", RecStart=86400, TlW=4096, TlH=2048, BLens=long_lens, BSizeMode=2)
+    txt = t["T1"]["StyledText"]
+    assert txt.endswith("…") and 4 < len(txt) < 150
+    # un testo breve non cambia
+    assert burn_tools(4096, 2048)["T1"]["StyledText"] == "A001C003_260926_R2AB\nA001  ·  CAM A"
+
+
+def test_burnin_big_timecode_position(built):
+    """TC grande: standard, piu' in basso sul bordo, o al centro; i watermark in basso lo seguono."""
+    std = burn_tools(1920, 1080, BBig=1)["Big"]["Center"][1]
+    low = burn_tools(1920, 1080, BBig=1, BBigPos=1)["Big"]["Center"][1]
+    mid = burn_tools(1920, 1080, BBig=1, BBigPos=2)["Big"]["Center"][1]
+    assert low < std and abs(mid - 0.5) < 1e-9 and low > 0
+    wl = burn_tools(1920, 1080, BBig=1, BBigPos=1, BWater=1, BWaterPos=2)["Water"]["Center"][1]
+    ws = burn_tools(1920, 1080, BBig=1, BBigPos=0, BWater=1, BWaterPos=2)["Water"]["Center"][1]
+    assert wl < ws
+    lb = (1 - (1920 / 1080) / 2.39) / 2
+    assert burn_tools(1920, 1080, BBig=1, BBigPos=1, BMatte=11)["Big"]["Center"][1] > lb          # dentro l'immagine
+    assert 0 < burn_tools(1920, 1080, BBig=1, BBigPos=1, BMatte=1)["Big"]["Center"][1] < 0.3         # pillarbox
+
+
+def test_burnin_big_timecode_independent(built):
+    """TC grande governato da solo: dimensione, posizione, colore non dipendono dai dati agli angoli."""
+    def big(**kw):
+        return burn_tools(1920, 1080, BBig=1, **kw)["Big"]
+    base = big()
+    assert abs(base["Size"] - 10 * 0.018 * 1080 / 1920) < 1e-6            # come prima: 9% del quadro di maiuscole
+    assert big(BSizeMode=0)["Size"] == base["Size"] == big(BSizeMode=2)["Size"]          # non segue i dati
+    assert big(BBigPct=18)["Size"] > 1.9 * base["Size"] and big(BBigPct=4)["Size"] < base["Size"]
+    x0, y0 = base["Center"]
+    x1, y1 = big(BBigX=10, BBigY=-5)["Center"]
+    assert abs(x1 - x0 - 0.1) < 1e-9 and abs(y1 - y0 + 0.05) < 1e-9
+    assert base["Blue1"] == 1 and big(BTextColor=1)["Blue1"] == big(BTextColor=1, BBigColor=0)["Blue1"] < 0.5
+    assert big(BTextColor=1, BBigColor=1)["Blue1"] == 1                                    # bianco solo per il TC grande
+    assert burn_tools(1920, 1080, BTextColor=1, BBig=1, BBigColor=3)["T1"]["Blue1"] < 0.5   # i dati restano gialli
+    # la zona libera dei watermark segue il TC spostato / ingrandito
+    w = lambda **kw: burn_tools(1920, 1080, BBig=1, BWater=1, BWaterPos=2, **kw)["Water"]["Center"][1]
+    assert w(BBigPct=18) > w() and w(BBigY=10) > w()

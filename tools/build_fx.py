@@ -1424,6 +1424,7 @@ WATER_SLOTS = [("BWater", "BWaterText", "BWaterPos", 1, "CONFIDENZIALE"),
 TEXT_COLORS = [("Bianco", (1, 1, 1)), ("Giallo", (1, 0.92, 0.2)), ("Verde", (0.35, 1, 0.4)), ("Ciano", (0.3, 0.95, 1))]
 CH_N = 8                                   # canali video (V1-V8) e audio (A1-A8) selezionabili
 CH_POS = ["In alto", "In basso"]
+BIG_POS = ["Standard (sopra i dati in basso)", "Piu' in basso (sul bordo)", "Al centro"]
 BURN_POS = ["Ai bordi (nelle bande del mascherino, se c'e')", "Dentro l'immagine (safe 90%)"]
 MATTES = [("Nessuno (formato della timeline)", 0), ("1.33:1 (4:3)", 4.0 / 3.0), ("1.37:1 (Academy)", 1.37),
           ("1.43:1 (IMAX)", 1.43), ("1.66:1", 1.66), ("1.78:1 (16:9)", 16.0 / 9.0), ("1.85:1 (Flat)", 1.85),
@@ -1470,6 +1471,7 @@ BURN_GEO = (
     "local PB = (MR > 0 and MR < AR - 0.01) and (W - 2 * math.floor(H * MR / 2 + 0.5)) / (2 * W) or 0 "
     # maiuscole (frazione di H): percentuale del lato corto, mai sotto 9 px; MINC = minimo nelle bande
     "local SZ = ({ %s })[math.floor(LK.BSizeMode + 0.5) + 1] or LK.BSize "
+    "local BCAP = math.max(LK.BBigPct / 100 * REF, 9) / H "
     "local CAP = math.max(SZ / 100 * REF, 9) / H local MINC = math.max(0.011 * REF, 8) / H "
     "local INSIDE = LK.BPos > 0.5 "
     % (len(MATTES) - 1, ", ".join(repr(max(r, 0)) for _, r in MATTES), ", ".join(repr(x) for x in BURN_SIZE_PCT)))
@@ -1484,9 +1486,12 @@ BURN_LAY = (
     "LN[#LN + 1] = { a + 0, b + 0, c + 0, d + 0, e + 0 } end "
     "for k = #LN + 1, 5 do LN[k] = { 22, 34, 20, 2, 3 } end "
     "local C5 = LN[5][1] > 0 "
+    # la grandezza scelta (Piccolo / Medio / Grande / cursore) non scende sotto il 70%: una riga lunga in un
+    # punto del programma non rimpicciolisce tutto; le righe che non ci stanno si troncano con "…"
+    "local FL = 0.7 * CAP "
     "local WID = { C5 and 0.33 or 0.46, C5 and 0.33 or 0.46, 0.46, 0.46, 0.28 } "
     "local function FITW(i, w) local c = 9 for k = 1, 5 do if LN[k][i] > 0 then "
-    "c = math.min(c, w[k] * AR / (%s * LN[k][i])) end end return c end "
+    "c = math.min(c, w[k] * AR / (%s * LN[k][i])) end end return math.max(c, FL) end "
     "local MODE, C = 'EDGE', 0 "
     "if INSIDE or (LB <= 0 and PB <= 0) then MODE, C = (INSIDE and 'IN' or 'EDGE'), math.min(CAP, FITW(1, WID)) "
     "elseif LB > 0 then local c2 = math.min(CAP, LB / 3.2, FITW(1, WID)) local c1 = math.min(CAP, LB / 1.7, FITW(2, WID)) "
@@ -1495,6 +1500,13 @@ BURN_LAY = (
     "else local w = 0.9 * PB local cp = math.min(CAP, FITW(3, { w, w, w, w, w })) "
     "if cp >= MINC then MODE, C = 'PB', cp else MODE, C = 'EDGE', math.min(CAP, FITW(1, WID)) end end "
     "local PC = %s * C local function HB(n) return (math.max(1, n) - 1) * PC + 0.88 * C end "
+    # TC grande: standard (sopra i dati in basso), piu' in basso (sul bordo) o al centro
+    "local BP = math.floor(LK.BBigPos + 0.5) "
+    "local BYS = (MODE == 'IN') and 0.15 or ((MODE == 'LB2' or MODE == 'LB1') and LB + 0.06 or 4.6 * C + 0.055) "
+    "local BYL = (MODE == 'IN') and (0.04 + 0.5 * BCAP) or ((MODE == 'LB2' or MODE == 'LB1') and (LB + 0.015 + 0.5 * BCAP) or (0.02 + 0.5 * BCAP)) "
+    "local BY = (BP == 1) and BYL or ((BP == 2) and 0.5 or BYS) "
+    "if MODE == 'PB' then BY = (BP == 1) and (0.03 + 0.5 * BCAP) or 0.5 end "
+    "BY = BY + LK.BBigY / 100 "
     % (0.76, PITCH))
 
 # Zona libera tra i blocchi dei dati (watermark in alto / in basso, elenco dei canali): dipende dalle
@@ -1509,8 +1521,7 @@ BURN_ZONE = (
     "elseif MODE == 'IN' then ZT = (NT > 0) and (0.93 - HB(NT) / 2) or 0.98 "
     "ZB = (NB > 0) and (0.07 + HB(NB) / 2) or 0.02 "
     "elseif MODE ~= 'PB' then ZT, ZB = 1 - LB, LB end "
-    "local BY = (MODE == 'IN') and 0.15 or ((MODE == 'LB2' or MODE == 'LB1') and LB + 0.06 or 4.6 * C + 0.055) "
-    "if LK.BBig > 0.5 and MODE ~= 'PB' then ZB = math.max(ZB, BY + 2.4 * CAP) end "
+    "if LK.BBig > 0.5 and MODE ~= 'PB' and BP ~= 2 then ZB = math.max(ZB, BY + 0.5 * BCAP) end "
     "ZT = math.min(ZT, 1 - LB) - GAP ZB = math.max(ZB, LB) + GAP "
     # elenco dei canali: sul bordo scelto, i watermark restano nello spazio che avanza
     "local CHTOP = LK.BChPos < 0.5 local CHT0, CHB0 = ZT, ZB "
@@ -1569,6 +1580,12 @@ BURN_ROW = (
     "return { t1, t2, t3, t4, t5, t6 }, sub end "
     # testo di un blocco (k = 5: alto centro): due righe, una sola nelle bande sottili, righe impilate
     # (separate da "  ·  ") nelle bande laterali
+    "local function TRL(txt, m) local o = '' m = math.max(m, 4) "
+    "local one = '[\\1-\\127\\194-\\244][\\128-\\191]*' "
+    "for ln in string.gmatch(txt .. '\\n', '([^\\n]*)\\n') do "
+    "if string.match(ln, '^' .. string.rep(one, m + 1)) then "
+    "ln = string.match(ln, '^' .. string.rep(one, m - 1)) .. '…' end "
+    "o = o .. (o ~= '' and '\\n' or '') .. ln end return o end "
     "local function CORNER(k) local r, sub = ROW() if not r then return '' end "
     "local parts = {} for x in string.gmatch((r[k] or '') .. '~', '([^~]*)~') do parts[#parts + 1] = x end "
     "local p1, p2 = parts[1] or '', parts[2] or '' local s = '' "
@@ -1576,7 +1593,7 @@ BURN_ROW = (
     "if q ~= '' then s = s .. (s ~= '' and '\\n' or '') .. q end end "
     "elseif MODE == 'LB1' then s = p1 .. ((p1 ~= '' and p2 ~= '') and '     ' or '') .. p2 "
     "elseif p1 ~= '' and p2 ~= '' then s = p1 .. '\\n' .. p2 else s = p1 .. p2 end "
-    "return sub(s) end "
+    "return TRL(sub(s), math.floor(((MODE == 'PB') and 0.9 * PB or WID[k]) * AR / (0.76 * C) + 0.5)) end "
     "local function BIG() local r, sub = ROW() if not r then return '' end "
     "local parts = {} for x in string.gmatch((r[4] or '') .. '~', '([^~]*)~') do parts[#parts + 1] = x end "
     "return sub(parts[3] or '') end "
@@ -1645,6 +1662,11 @@ def burnin(std=None):
             + uc_combo("BSizeMode", "Dimensione dei dati ai lati", BURN_SIZES)
             + uc_slider("BSize", "Altezza col cursore (% del quadro)", 1, 5, 1.8, integer=False)
             + uc_combo("BTextColor", "Colore dei dati", [n for n, _ in TEXT_COLORS])
+            + uc_combo("BBigPos", "TC grande: posizione", BIG_POS)
+            + uc_slider("BBigPct", "TC grande: dimensione (% del quadro)", 2, 20, 9, integer=False)
+            + uc_slider("BBigX", "TC grande: sposta in orizzontale (%)", -40, 40, 0, integer=False)
+            + uc_slider("BBigY", "TC grande: sposta in verticale (%)", -40, 40, 0, integer=False)
+            + uc_combo("BBigColor", "TC grande: colore", ["Come i dati"] + [n for n, _ in TEXT_COLORS])
             + uc_check("BBands", "Bande semitrasparenti dietro ai dati (senza mascherino)", 0)
             + uc_slider("BBandAlpha", "Opacita' delle bande", 0, 1, 0.6, integer=False)
             + uc_check("BOutline", "Contorno nero sui dati (leggibili anche sul bianco)", 1)
@@ -1660,7 +1682,8 @@ def burnin(std=None):
     values = [("BPhase", "2"), ("BTitleText", '""'), ("BVersionText", '""'),
               ("BRecipient", '""'), ("BInfo", '"Metti il clip sopra il montato (V3/V4) e premi Aggiorna"'),
               ("BFrameMode", "1"), ("BPos", "0"), ("BAlign", "0"), ("BMatte", "0"), ("BMatteRatio", "2.39"),
-              ("BMatteAlpha", "1"), ("BSize", "1.8"), ("BSizeMode", "1"), ("BTextColor", "0"), ("BBands", "0"),
+              ("BMatteAlpha", "1"), ("BSize", "1.8"), ("BSizeMode", "1"), ("BTextColor", "0"), ("BBigPos", "0"), ("BBigPct", "9"),
+              ("BBigX", "0"), ("BBigY", "0"), ("BBigColor", "0"), ("BBands", "0"),
               ("BBandAlpha", "0.6"), ("BWaterAlpha", "0.18"), ("BWaterSize", "0.06"),
               ("BChList", "0"), ("BChName", "1"), ("BChSrc", "1"), ("BChFmt", "1"), ("BChPos", "0"),
               ("BOutline", "1"), ("BOutlineW", "0.08"),
@@ -1682,6 +1705,10 @@ def burnin(std=None):
 
     def bt(body):
         return ("expr", "(function() %s %s %s return %s end)()" % (BURN_GEO, BURN_LAY, BURN_ROW, body))
+
+    bi = "(LK.BBigColor > 0.5 and math.floor(LK.BBigColor + 0.5) or math.floor(LK.BTextColor + 0.5) + 1)"
+    big_ink = [(ch, ("expr", "({ %s })[%s] or 1" % (", ".join(repr(c[i]) for _, c in TEXT_COLORS), bi)))
+               for i, ch in enumerate(("Red1", "Green1", "Blue1"))]
 
     def bw(body):
         return ("expr", "(function() %s %s %s %s return %s end)()" % (BURN_GEO, BURN_LAY, BURN_ZONE, BURN_WATER, body))
@@ -1729,12 +1756,11 @@ def burnin(std=None):
     top = g.merge("MBottom", top, g.chain("TBot", corners[2:4]))
     # record TC grande (in basso al centro)
     g._add("Big", "TextPlus", G.CREATOR + [
-        ("Center", bl("Point(MODE == 'PB' and 1 - PB / 2 or 0.5, MODE == 'PB' and 0.5 or "
-                      "((MODE == 'LB2' or MODE == 'LB1') and LB + 0.06 or (MODE == 'IN' and 0.15 or 4.6 * C + 0.055)))")),
+        ("Center", bl("Point((MODE == 'PB' and 1 - PB / 2 or 0.5) + LK.BBigX / 100, BY)")),
         ("Font", '"Open Sans"'), ("Style", '"Bold"'),
-        ("Size", bl("MODE == 'PB' and math.min(10 * CAP / AR, 0.9 * PB / 4.8) or 10 * CAP / AR")),
+        ("Size", bl("MODE == 'PB' and math.min(2 * BCAP / AR, 0.9 * PB / 4.8) or 2 * BCAP / AR")),
         ("StyledText", bt("Text(BIG())")),
-        ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")] + ink + outline)
+        ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")] + big_ink + outline)
     top = g.gate("MBig", top, ["Big"], "LK.BBig > 0.5")
     # elenco dei canali letti (V1, A2...): a sinistra, sul bordo scelto, sotto / sopra i dati
     nl = "local _, nl = string.gsub(CHL(), '\\n', '') nl = nl + 1 "
@@ -1765,7 +1791,8 @@ def burnin(std=None):
               + [(x, "Watermark") for sw, st, sp, _, _ in WATER_SLOTS for x in (sw, sw + "Pre", st, sp)]
               + [("BWaterSize", "Watermark"), ("BWaterAlpha", "Watermark")]
               + [(x, "Aspetto") for x in ("BMatte", "BMatteRatio", "BMatteAlpha", "BPos", "BAlign", "BSizeMode",
-                                          "BSize", "BTextColor", "BBands", "BBandAlpha", "BOutline", "BOutlineW")])
+                                          "BSize", "BTextColor", "BBigPos", "BBigPct", "BBigX", "BBigY",
+                                          "BBigColor", "BBands", "BBandAlpha", "BOutline", "BOutlineW")])
     return group(BURN_NAME, g, top, inputs)
 
 
