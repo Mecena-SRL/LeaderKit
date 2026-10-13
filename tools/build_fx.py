@@ -1471,6 +1471,7 @@ BURN_GEO = (
     "local PB = (MR > 0 and MR < AR - 0.01) and (W - 2 * math.floor(H * MR / 2 + 0.5)) / (2 * W) or 0 "
     # maiuscole (frazione di H): percentuale del lato corto, mai sotto 9 px; MINC = minimo nelle bande
     "local SZ = ({ %s })[math.floor(LK.BSizeMode + 0.5) + 1] or LK.BSize "
+    "local BCAP = math.max(LK.BBigPct / 100 * REF, 9) / H "
     "local CAP = math.max(SZ / 100 * REF, 9) / H local MINC = math.max(0.011 * REF, 8) / H "
     "local INSIDE = LK.BPos > 0.5 "
     % (len(MATTES) - 1, ", ".join(repr(max(r, 0)) for _, r in MATTES), ", ".join(repr(x) for x in BURN_SIZE_PCT)))
@@ -1502,9 +1503,10 @@ BURN_LAY = (
     # TC grande: standard (sopra i dati in basso), piu' in basso (sul bordo) o al centro
     "local BP = math.floor(LK.BBigPos + 0.5) "
     "local BYS = (MODE == 'IN') and 0.15 or ((MODE == 'LB2' or MODE == 'LB1') and LB + 0.06 or 4.6 * C + 0.055) "
-    "local BYL = (MODE == 'IN') and (0.04 + 2.4 * CAP) or ((MODE == 'LB2' or MODE == 'LB1') and (LB + 0.015 + 2.4 * CAP) or (0.02 + 2.4 * CAP)) "
+    "local BYL = (MODE == 'IN') and (0.04 + 0.5 * BCAP) or ((MODE == 'LB2' or MODE == 'LB1') and (LB + 0.015 + 0.5 * BCAP) or (0.02 + 0.5 * BCAP)) "
     "local BY = (BP == 1) and BYL or ((BP == 2) and 0.5 or BYS) "
-    "if MODE == 'PB' then BY = (BP == 1) and (0.03 + 2.4 * CAP) or 0.5 end "
+    "if MODE == 'PB' then BY = (BP == 1) and (0.03 + 0.5 * BCAP) or 0.5 end "
+    "BY = BY + LK.BBigY / 100 "
     % (0.76, PITCH))
 
 # Zona libera tra i blocchi dei dati (watermark in alto / in basso, elenco dei canali): dipende dalle
@@ -1519,7 +1521,7 @@ BURN_ZONE = (
     "elseif MODE == 'IN' then ZT = (NT > 0) and (0.93 - HB(NT) / 2) or 0.98 "
     "ZB = (NB > 0) and (0.07 + HB(NB) / 2) or 0.02 "
     "elseif MODE ~= 'PB' then ZT, ZB = 1 - LB, LB end "
-    "if LK.BBig > 0.5 and MODE ~= 'PB' and BP ~= 2 then ZB = math.max(ZB, BY + 2.4 * CAP) end "
+    "if LK.BBig > 0.5 and MODE ~= 'PB' and BP ~= 2 then ZB = math.max(ZB, BY + 0.5 * BCAP) end "
     "ZT = math.min(ZT, 1 - LB) - GAP ZB = math.max(ZB, LB) + GAP "
     # elenco dei canali: sul bordo scelto, i watermark restano nello spazio che avanza
     "local CHTOP = LK.BChPos < 0.5 local CHT0, CHB0 = ZT, ZB "
@@ -1660,7 +1662,11 @@ def burnin(std=None):
             + uc_combo("BSizeMode", "Dimensione dei dati ai lati", BURN_SIZES)
             + uc_slider("BSize", "Altezza col cursore (% del quadro)", 1, 5, 1.8, integer=False)
             + uc_combo("BTextColor", "Colore dei dati", [n for n, _ in TEXT_COLORS])
-            + uc_combo("BBigPos", "Posizione del TC grande", BIG_POS)
+            + uc_combo("BBigPos", "TC grande: posizione", BIG_POS)
+            + uc_slider("BBigPct", "TC grande: dimensione (% del quadro)", 2, 20, 9, integer=False)
+            + uc_slider("BBigX", "TC grande: sposta in orizzontale (%)", -40, 40, 0, integer=False)
+            + uc_slider("BBigY", "TC grande: sposta in verticale (%)", -40, 40, 0, integer=False)
+            + uc_combo("BBigColor", "TC grande: colore", ["Come i dati"] + [n for n, _ in TEXT_COLORS])
             + uc_check("BBands", "Bande semitrasparenti dietro ai dati (senza mascherino)", 0)
             + uc_slider("BBandAlpha", "Opacita' delle bande", 0, 1, 0.6, integer=False)
             + uc_check("BOutline", "Contorno nero sui dati (leggibili anche sul bianco)", 1)
@@ -1676,7 +1682,8 @@ def burnin(std=None):
     values = [("BPhase", "2"), ("BTitleText", '""'), ("BVersionText", '""'),
               ("BRecipient", '""'), ("BInfo", '"Metti il clip sopra il montato (V3/V4) e premi Aggiorna"'),
               ("BFrameMode", "1"), ("BPos", "0"), ("BAlign", "0"), ("BMatte", "0"), ("BMatteRatio", "2.39"),
-              ("BMatteAlpha", "1"), ("BSize", "1.8"), ("BSizeMode", "1"), ("BTextColor", "0"), ("BBigPos", "0"), ("BBands", "0"),
+              ("BMatteAlpha", "1"), ("BSize", "1.8"), ("BSizeMode", "1"), ("BTextColor", "0"), ("BBigPos", "0"), ("BBigPct", "9"),
+              ("BBigX", "0"), ("BBigY", "0"), ("BBigColor", "0"), ("BBands", "0"),
               ("BBandAlpha", "0.6"), ("BWaterAlpha", "0.18"), ("BWaterSize", "0.06"),
               ("BChList", "0"), ("BChName", "1"), ("BChSrc", "1"), ("BChFmt", "1"), ("BChPos", "0"),
               ("BOutline", "1"), ("BOutlineW", "0.08"),
@@ -1698,6 +1705,10 @@ def burnin(std=None):
 
     def bt(body):
         return ("expr", "(function() %s %s %s return %s end)()" % (BURN_GEO, BURN_LAY, BURN_ROW, body))
+
+    bi = "(LK.BBigColor > 0.5 and math.floor(LK.BBigColor + 0.5) or math.floor(LK.BTextColor + 0.5) + 1)"
+    big_ink = [(ch, ("expr", "({ %s })[%s] or 1" % (", ".join(repr(c[i]) for _, c in TEXT_COLORS), bi)))
+               for i, ch in enumerate(("Red1", "Green1", "Blue1"))]
 
     def bw(body):
         return ("expr", "(function() %s %s %s %s return %s end)()" % (BURN_GEO, BURN_LAY, BURN_ZONE, BURN_WATER, body))
@@ -1745,11 +1756,11 @@ def burnin(std=None):
     top = g.merge("MBottom", top, g.chain("TBot", corners[2:4]))
     # record TC grande (in basso al centro)
     g._add("Big", "TextPlus", G.CREATOR + [
-        ("Center", bl("Point(MODE == 'PB' and 1 - PB / 2 or 0.5, BY)")),
+        ("Center", bl("Point((MODE == 'PB' and 1 - PB / 2 or 0.5) + LK.BBigX / 100, BY)")),
         ("Font", '"Open Sans"'), ("Style", '"Bold"'),
-        ("Size", bl("MODE == 'PB' and math.min(10 * CAP / AR, 0.9 * PB / 4.8) or 10 * CAP / AR")),
+        ("Size", bl("MODE == 'PB' and math.min(2 * BCAP / AR, 0.9 * PB / 4.8) or 2 * BCAP / AR")),
         ("StyledText", bt("Text(BIG())")),
-        ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")] + ink + outline)
+        ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")] + big_ink + outline)
     top = g.gate("MBig", top, ["Big"], "LK.BBig > 0.5")
     # elenco dei canali letti (V1, A2...): a sinistra, sul bordo scelto, sotto / sopra i dati
     nl = "local _, nl = string.gsub(CHL(), '\\n', '') nl = nl + 1 "
@@ -1780,7 +1791,8 @@ def burnin(std=None):
               + [(x, "Watermark") for sw, st, sp, _, _ in WATER_SLOTS for x in (sw, sw + "Pre", st, sp)]
               + [("BWaterSize", "Watermark"), ("BWaterAlpha", "Watermark")]
               + [(x, "Aspetto") for x in ("BMatte", "BMatteRatio", "BMatteAlpha", "BPos", "BAlign", "BSizeMode",
-                                          "BSize", "BTextColor", "BBigPos", "BBands", "BBandAlpha", "BOutline", "BOutlineW")])
+                                          "BSize", "BTextColor", "BBigPos", "BBigPct", "BBigX", "BBigY",
+                                          "BBigColor", "BBands", "BBandAlpha", "BOutline", "BOutlineW")])
     return group(BURN_NAME, g, top, inputs)
 
 

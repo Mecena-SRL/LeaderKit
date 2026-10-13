@@ -266,7 +266,9 @@ così il timecode si legge anche sul bianco.
 vecchio default), *Grande* (2.6%) oppure *Cursore* (1-5% del quadro, a scelta). Il colore dei
 dati può essere bianco, giallo, verde o ciano. Se una riga è troppo lunga per lo spazio la
 grandezza scende al massimo al 70% della scelta e la riga si tronca con "…". Il **TC grande**
-può stare nella posizione standard, **più in basso** sul bordo o al centro.
+può stare nella posizione standard, **più in basso** sul bordo o al centro, ed è **autonomo**
+dai dati agli angoli: ha la sua dimensione (% del quadro), lo spostamento orizzontale e
+verticale e il suo colore (scheda Aspetto). I watermark in basso seguono la sua posizione.
 
 **Watermark** (scheda Watermark): fino a **tre**, ognuno con il suo testo, **in alto, al
 centro o in basso**. Si posizionano da soli nello spazio che lasciano i blocchi dei dati (anche

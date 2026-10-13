@@ -1463,3 +1463,22 @@ def test_burnin_big_timecode_position(built):
     lb = (1 - (1920 / 1080) / 2.39) / 2
     assert burn_tools(1920, 1080, BBig=1, BBigPos=1, BMatte=11)["Big"]["Center"][1] > lb          # dentro l'immagine
     assert 0 < burn_tools(1920, 1080, BBig=1, BBigPos=1, BMatte=1)["Big"]["Center"][1] < 0.3         # pillarbox
+
+
+def test_burnin_big_timecode_independent(built):
+    """TC grande governato da solo: dimensione, posizione, colore non dipendono dai dati agli angoli."""
+    def big(**kw):
+        return burn_tools(1920, 1080, BBig=1, **kw)["Big"]
+    base = big()
+    assert abs(base["Size"] - 10 * 0.018 * 1080 / 1920) < 1e-6            # come prima: 9% del quadro di maiuscole
+    assert big(BSizeMode=0)["Size"] == base["Size"] == big(BSizeMode=2)["Size"]          # non segue i dati
+    assert big(BBigPct=18)["Size"] > 1.9 * base["Size"] and big(BBigPct=4)["Size"] < base["Size"]
+    x0, y0 = base["Center"]
+    x1, y1 = big(BBigX=10, BBigY=-5)["Center"]
+    assert abs(x1 - x0 - 0.1) < 1e-9 and abs(y1 - y0 + 0.05) < 1e-9
+    assert base["Blue1"] == 1 and big(BTextColor=1)["Blue1"] == big(BTextColor=1, BBigColor=0)["Blue1"] < 0.5
+    assert big(BTextColor=1, BBigColor=1)["Blue1"] == 1                                    # bianco solo per il TC grande
+    assert burn_tools(1920, 1080, BTextColor=1, BBig=1, BBigColor=3)["T1"]["Blue1"] < 0.5   # i dati restano gialli
+    # la zona libera dei watermark segue il TC spostato / ingrandito
+    w = lambda **kw: burn_tools(1920, 1080, BBig=1, BWater=1, BWaterPos=2, **kw)["Water"]["Center"][1]
+    assert w(BBigPct=18) > w() and w(BBigY=10) > w()
