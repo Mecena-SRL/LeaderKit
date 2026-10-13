@@ -1740,7 +1740,6 @@ def burnin(std=None):
         ("HorizontalLeftCenterRight", "-1"), ("HorizontalJustificationNew", "0")] + ink + outline)
     top = g.gate("MCh", top, ["TCh"], "LK.BChList > 0.5")
     # watermark: fino a tre, in alto / al centro / in basso, nello spazio che lasciano i dati
-    wm = []
     for i, (sw, st, sp, _, _) in enumerate(WATER_SLOTS, 1):
         txt = ("string.upper(LK.%s.Value)" % st)
         if i == 1:
