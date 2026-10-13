@@ -257,11 +257,28 @@ in Avid):
 | **In alto** | nome file · reel e camera | titolo · versione, data | scena / take, formato · colore |
 | **In basso** | `SRC TC`, `AUD TC` + sound roll | TC grande (suono, VO) | `REC TC`, contatore `FR` |
 
-Watermark e destinatario stanno al centro. Tutti i blocchi hanno la stessa
-grandezza, la più grande con cui ognuno sta nel suo spazio **per tutto il programma** (non
-cambia a ogni stacco: Aggiorna scrive le lunghezze massime dei testi), e un **contorno nero**
-(spunta e spessore nella scheda Aspetto, attivo di default), così il timecode si
-legge anche sul bianco.
+Tutti i blocchi hanno la stessa grandezza, la più grande con cui ognuno sta nel suo spazio
+**per tutto il programma** (non cambia a ogni stacco: Aggiorna scrive le lunghezze massime dei
+testi), e un **contorno nero** (spunta e spessore nella scheda Aspetto, attivo di default),
+così il timecode si legge anche sul bianco.
+
+**Dimensione e colore dei dati** (scheda Aspetto): *Piccolo* (1.3%), *Medio* (1.8%, il
+vecchio default), *Grande* (2.6%) oppure *Cursore* (1-5% del quadro, a scelta). Il colore dei
+dati può essere bianco, giallo, verde o ciano.
+
+**Watermark** (scheda Watermark): fino a **tre**, ognuno con il suo testo, **in alto, al
+centro o in basso**. Si posizionano da soli nello spazio che lasciano i blocchi dei dati (anche
+con mascherino, TC grande ed elenco dei canali) e quelli sullo stesso lato si impilano. Il
+destinatario sta sotto il watermark 1. Dimensione e opacità sono comuni.
+
+**Canali** (scheda Canali): si scelgono i canali **video V1-V8** e **audio A1-A8** da cui
+leggere i dati, uno, più, nessuno o tutti (sopra l'8 vale "tutti spuntati"). I dati principali
+(nome clip, scena, source TC...) vengono dal canale video più alto tra quelli scelti, il TC
+audio dal più basso. Con **Mostra l'elenco dei canali letti** compare un blocco a sinistra, in
+alto o in basso, con una riga per ogni canale che ha un clip in quel punto
+(`V2  B002C001  SRC 10:00:00:00`, `A1  SND_B  SRC ...`); si sceglie se vedere il **nome clip**,
+il **SRC TC** o entrambi. Il TC dell'elenco scorre come gli altri. Premere Aggiorna dopo aver
+cambiato i canali.
 
 Record TC e contatore fotogrammi sono calcolati a ogni fotogramma. Il segmento del
 fotogramma si trova con una **ricerca binaria** su un indice scritto da Aggiorna

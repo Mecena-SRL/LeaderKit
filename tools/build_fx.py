@@ -1396,7 +1396,7 @@ BURN_FIELDS = [("BRec", "Record TC (timeline)"), ("BSrc", "Source TC (clip)"),
                ("BClip", "Nome clip"), ("BScene", "Scena / shot / take"), ("BCam", "Camera"),
                ("BReel", "Reel / roll / card"), ("BDate", "Data (ripresa, o oggi)"), ("BTitle", "Titolo / produzione"),
                ("BVersion", "Versione / fase"), ("BColor", "Spazio colore / LUT"), ("BFormat", "Formato (fps, risoluzione)"),
-               ("BWater", "Watermark al centro"), ("BBig", "Record TC grande (suono / VO / doppiaggio)")]
+               ("BWater", "Watermark 1"), ("BBig", "Record TC grande (suono / VO / doppiaggio)")]
 FRAME_MODES = ["Per clip da 1001 (VFX)", "Per clip da 0", "Programma da 0"]
 # fase: (nome, campi attivi, modo contatore)
 BURN_PHASES = [
@@ -1410,6 +1410,15 @@ BURN_PHASES = [
     ("Approvazione cliente", ["BRec", "BTitle", "BVersion", "BDate", "BWater"], 2),
     ("Personalizzato (scegli i campi)", None, None),
 ]
+BURN_SIZES = ["Piccolo", "Medio", "Grande", "Cursore (scegli tu)"]
+BURN_SIZE_PCT = [1.3, 1.8, 2.6]            # altezza dei dati ai lati, % del lato corto del quadro
+WATER_POS = ["In alto", "Al centro", "In basso"]
+WATER_SLOTS = [("BWater", "BWaterText", "BWaterPos", 1, "CONFIDENZIALE"),
+               ("BWater2", "BWater2Text", "BWater2Pos", 0, "NON DIFFONDERE"),
+               ("BWater3", "BWater3Text", "BWater3Pos", 2, "")]
+TEXT_COLORS = [("Bianco", (1, 1, 1)), ("Giallo", (1, 0.92, 0.2)), ("Verde", (0.35, 1, 0.4)), ("Ciano", (0.3, 0.95, 1))]
+CH_N = 8                                   # canali video (V1-V8) e audio (A1-A8) selezionabili
+CH_POS = ["In alto", "In basso"]
 BURN_POS = ["Ai bordi (nelle bande del mascherino, se c'e')", "Dentro l'immagine (safe 90%)"]
 MATTES = [("Nessuno (formato della timeline)", 0), ("1.33:1 (4:3)", 4.0 / 3.0), ("1.37:1 (Academy)", 1.37),
           ("1.43:1 (IMAX)", 1.43), ("1.66:1", 1.66), ("1.78:1 (16:9)", 16.0 / 9.0), ("1.85:1 (Flat)", 1.85),
@@ -1455,9 +1464,10 @@ BURN_GEO = (
     "local LB = (MR > AR + 0.01) and (H - 2 * math.floor(W / MR / 2 + 0.5)) / (2 * H) or 0 "
     "local PB = (MR > 0 and MR < AR - 0.01) and (W - 2 * math.floor(H * MR / 2 + 0.5)) / (2 * W) or 0 "
     # maiuscole (frazione di H): percentuale del lato corto, mai sotto 9 px; MINC = minimo nelle bande
-    "local CAP = math.max(LK.BSize / 100 * REF, 9) / H local MINC = math.max(0.011 * REF, 8) / H "
+    "local SZ = ({ %s })[math.floor(LK.BSizeMode + 0.5) + 1] or LK.BSize "
+    "local CAP = math.max(SZ / 100 * REF, 9) / H local MINC = math.max(0.011 * REF, 8) / H "
     "local INSIDE = LK.BPos > 0.5 "
-    % (len(MATTES) - 1, ", ".join(repr(max(r, 0)) for _, r in MATTES)))
+    % (len(MATTES) - 1, ", ".join(repr(max(r, 0)) for _, r in MATTES), ", ".join(repr(x) for x in BURN_SIZE_PCT)))
 
 # Impaginazione, calcolata solo con numeri: le lunghezze massime dei testi di ogni blocco (su tutto il
 # programma) le scrive Aggiorna in LK.BLens, cosi' la grandezza non cambia a ogni stacco e non serve
@@ -1482,6 +1492,41 @@ BURN_LAY = (
     "local PC = %s * C local function HB(n) return (math.max(1, n) - 1) * PC + 0.88 * C end "
     % (0.76, PITCH))
 
+# Zona libera tra i blocchi dei dati (watermark in alto / in basso, elenco dei canali): dipende dalle
+# stesse lunghezze massime (LK.BLens), quindi segue mascherino, grandezza, righe dei blocchi e TC grande.
+BURN_ZONE = (
+    "local cl, cn = string.match(LK.BChLens.Value, '(%%d+),(%%d+)') cl = (cl or 0) + 0 cn = (cn or 0) + 0 "
+    "local GAP = 0.6 * C "
+    "local NT, NB = math.max(LN[1][4], LN[2][4], LN[5][4]), math.max(LN[3][4], LN[4][4]) "
+    "local ZT, ZB = 1, 0 "
+    "if MODE == 'EDGE' then ZT = (NT > 0) and (1 - 2.3 * C - HB(NT) / 2) or 0.98 "
+    "ZB = (NB > 0) and (2.3 * C + HB(NB) / 2) or 0.02 "
+    "elseif MODE == 'IN' then ZT = (NT > 0) and (0.93 - HB(NT) / 2) or 0.98 "
+    "ZB = (NB > 0) and (0.07 + HB(NB) / 2) or 0.02 "
+    "elseif MODE ~= 'PB' then ZT, ZB = 1 - LB, LB end "
+    "local BY = (MODE == 'IN') and 0.15 or ((MODE == 'LB2' or MODE == 'LB1') and LB + 0.06 or 4.6 * C + 0.055) "
+    "if LK.BBig > 0.5 and MODE ~= 'PB' then ZB = math.max(ZB, BY + 2.4 * CAP) end "
+    "ZT = math.min(ZT, 1 - LB) - GAP ZB = math.max(ZB, LB) + GAP "
+    # elenco dei canali: sul bordo scelto, i watermark restano nello spazio che avanza
+    "local CHTOP = LK.BChPos < 0.5 local CHT0, CHB0 = ZT, ZB "
+    "local CHC = math.max(math.min(C, 0.4 * (1 - 2 * PB) * AR / (%s * math.max(cl, 1))), 0.6 * C) "
+    "if LK.BChList > 0.5 and cn > 0 then if CHTOP then ZT = ZT - HB(cn) - GAP else ZB = ZB + HB(cn) + GAP end end "
+    % 0.76)
+
+# Watermark (fino a tre): ognuno in alto, al centro o in basso; quelli sullo stesso lato si impilano.
+BURN_WATER = (
+    "local WE = { LK.BWater > 0.5, LK.BWater2 > 0.5, LK.BWater3 > 0.5 } "
+    "local WP = { math.floor(LK.BWaterPos + 0.5), math.floor(LK.BWater2Pos + 0.5), math.floor(LK.BWater3Pos + 0.5) } "
+    "local WS = %s * LK.BWaterSize * AR / 2 "
+    "local WH = { ((LK.BRecipient.Value ~= '') and 2 or 1) * WS, WS, WS } "
+    "local function WY(k) local bef, tot, n = 0, 0, 0 "
+    "for j = 1, 3 do if WE[j] and WP[j] == WP[k] then tot = tot + WH[j] n = n + 1 "
+    "if j < k then bef = bef + WH[j] + GAP end end end "
+    "tot = tot + math.max(n - 1, 0) * GAP "
+    "if WP[k] == 0 then return ZT - bef - WH[k] / 2 elseif WP[k] == 2 then return ZB + bef + WH[k] / 2 end "
+    "return 0.5 + tot / 2 - bef - WH[k] / 2 end " % PITCH)
+
+
 # Riga del fotogramma corrente: ricerca binaria su LK.SegIdx (O(log n) anche con migliaia di
 # tagli), con i segnaposto {REC} {SRC} {ATC} {FRM} calcolati qui. Solo funzioni sicure nelle
 # espressioni di Fusion (niente tonumber: le cifre si convertono con "+ 0").
@@ -1503,16 +1548,20 @@ BURN_ROW = (
     "if a and rec >= a + 0 and rec < b + 0 then line = l break end end end "
     "if not line then return nil end "
     "local P12 = '^(%-?%d+)|(%-?%d+)|(%-?[%d%.]+)|([%d%.]+)|(%d+)|(%d+)|(%-?%d+)|(%-?%d+)|([^|]*)|([^|]*)|([^|]*)|([^|]*)' "
-    "local a, b, sv, st, sn, sd, au, fr, t1, t2, t3, t4, t5 = string.match(line, P12 .. '|([^|]*)$') "
-    "if not a then a, b, sv, st, sn, sd, au, fr, t1, t2, t3, t4 = string.match(line, P12 .. '$') t5 = '' end "
+    "local a, b, sv, st, sn, sd, au, fr, t1, t2, t3, t4, t5, t6 = string.match(line, P12 .. '|([^|]*)|([^|]*)$') "
+    "if not a then a, b, sv, st, sn, sd, au, fr, t1, t2, t3, t4, t5 = string.match(line, P12 .. '|([^|]*)$') t6 = '' end "
+    "if not a then a, b, sv, st, sn, sd, au, fr, t1, t2, t3, t4 = string.match(line, P12 .. '$') t5 = '' t6 = '' end "
     "if not a or rec < a + 0 or rec >= b + 0 then return nil end "
     "local e = rec - a local tn, td = math.max(1, LK.TlFps), LK.TlDrop "
     "local function sub(txt) "
     "txt = string.gsub(txt, '{REC}', tc(rec, tn, td)) "
     "txt = string.gsub(txt, '{SRC}', tc((sv + 0) < 0 and -1 or (sv + 0) + e * (st + 0), (sn + 0), (sd + 0))) "
     "txt = string.gsub(txt, '{ATC}', tc((au + 0) < 0 and -1 or (au + 0) + e, tn, td)) "
-    "txt = string.gsub(txt, '{FRM}', tostring(fr + e)) return txt end "
-    "return { t1, t2, t3, t4, t5 }, sub end "
+    "txt = string.gsub(txt, '{FRM}', tostring(fr + e)) "
+    # TC sorgente di un canale scelto: {X<inizio>,<passo>,<nominale>,<drop>}
+    "txt = string.gsub(txt, '{X(%-?[%d%.]+),([%d%.]+),(%d+),(%d+)}', function(v, p, n2, d2) "
+    "return tc((v + 0) < 0 and -1 or (v + 0) + e * (p + 0), n2 + 0, d2 + 0) end) return txt end "
+    "return { t1, t2, t3, t4, t5, t6 }, sub end "
     # testo di un blocco (k = 5: alto centro): due righe, una sola nelle bande sottili, righe impilate
     # (separate da "  ·  ") nelle bande laterali
     "local function CORNER(k) local r, sub = ROW() if not r then return '' end "
@@ -1525,7 +1574,10 @@ BURN_ROW = (
     "return sub(s) end "
     "local function BIG() local r, sub = ROW() if not r then return '' end "
     "local parts = {} for x in string.gmatch((r[4] or '') .. '~', '([^~]*)~') do parts[#parts + 1] = x end "
-    "return sub(parts[3] or '') end ")
+    "return sub(parts[3] or '') end "
+    # elenco dei canali scelti (V1, A2...): una riga per canale, separate da "~" nei dati
+    "local function CHL() local r, sub = ROW() if not r or (r[6] or '') == '' then return '' end "
+    "local s = string.gsub(r[6], '~', '\\n') return sub(s) end ")
 
 
 def burn_x(hx):
@@ -1560,35 +1612,58 @@ def burnin(std=None):
             + uc_text("BInfo", "Esito", lines=4, read_only=True)
             + uc_text("BTitleText", "Titolo / produzione (vuoto = dalla slate)")
             + uc_text("BVersionText", "Versione / fase")
-            + uc_text("BWaterText", "Watermark")
-            + uc_text("BRecipient", "Destinatario (screener)"))
-    fields = ("".join(uc_check(k, label, 0) for k, label in BURN_FIELDS)
+            + uc_text("BRecipient", "Destinatario (screener, sotto il watermark 1)"))
+    fields = ("".join(uc_check(k, label, 0) for k, label in BURN_FIELDS if k != "BWater")
               + uc_combo("BFrameMode", "Contatore fotogrammi", FRAME_MODES))
+    water = "".join(uc_check(sw, "Watermark %d" % i, 0)
+                    + uc_text(st, "Testo watermark %d" % i)
+                    + uc_combo(sp, "Posizione watermark %d" % i, WATER_POS)
+                    for i, (sw, st, sp, _, _) in enumerate(WATER_SLOTS, 1))
+    water += (uc_slider("BWaterSize", "Dimensione watermark", 0.02, 0.15, 0.06, integer=False)
+              + uc_slider("BWaterAlpha", "Opacita' watermark", 0, 1, 0.18, integer=False))
+    chans = (uc_label("SecChV", "Canali video letti (nessuno = non legge il video)")
+             + "".join(uc_check("BV%d" % i, "V%d" % i, 1) for i in range(1, CH_N + 1))
+             + uc_label("SecChA", "Canali audio letti (nessuno = nessun TC audio)")
+             + "".join(uc_check("BA%d" % i, "A%d" % i, 1) for i in range(1, CH_N + 1))
+             + uc_label("SecChL", "Elenco dei canali sul video")
+             + uc_check("BChList", "Mostra l'elenco dei canali letti", 0)
+             + uc_check("BChName", "Nome clip", 1)
+             + uc_check("BChSrc", "SRC TC", 1)
+             + uc_combo("BChPos", "Posizione dell'elenco", CH_POS))
     look = (uc_combo("BMatte", "Mascherino", [m for m, _ in MATTES])
             + uc_slider("BMatteRatio", "Rapporto personalizzato (x:1)", 1, 3, 2.39, integer=False)
             + uc_slider("BMatteAlpha", "Opacita' del mascherino", 0, 1, 1, integer=False)
             + uc_combo("BPos", "Posizione dei dati", BURN_POS)
             + uc_combo("BAlign", "Allineamento dei dati", ["Ai bordi (sinistra / destra)", "Centrati nelle celle"])
-            + uc_slider("BSize", "Altezza testo (% del quadro)", 1, 5, 1.8, integer=False)
+            + uc_combo("BSizeMode", "Dimensione dei dati ai lati", BURN_SIZES)
+            + uc_slider("BSize", "Altezza col cursore (% del quadro)", 1, 5, 1.8, integer=False)
+            + uc_combo("BTextColor", "Colore dei dati", [n for n, _ in TEXT_COLORS])
             + uc_check("BBands", "Bande semitrasparenti dietro ai dati (senza mascherino)", 0)
             + uc_slider("BBandAlpha", "Opacita' delle bande", 0, 1, 0.6, integer=False)
             + uc_check("BOutline", "Contorno nero sui dati (leggibili anche sul bianco)", 1)
-            + uc_slider("BOutlineW", "Spessore del contorno", 0, 0.3, 0.08, integer=False)
-            + uc_slider("BWaterAlpha", "Opacita' watermark", 0, 1, 0.18, integer=False))
-    uc = on_page("Burn-in", main) + on_page("Campi", fields) + on_page("Aspetto", look)
+            + uc_slider("BOutlineW", "Spessore del contorno", 0, 0.3, 0.08, integer=False))
+    uc = (on_page("Burn-in", main) + on_page("Campi", fields) + on_page("Canali", chans)
+          + on_page("Watermark", water) + on_page("Aspetto", look))
     uc += (uc_hidden("Seg", "Text") + uc_hidden("SegIdx", "Text") + uc_hidden("BLens", "Text")
+           + uc_hidden("BChLens", "Text")
            + "".join(uc_hidden(k) for k in ("RecStart", "TlFps", "TlDrop", "TlW", "TlH")))
     d = dict((k, 0) for k, _ in BURN_FIELDS)
     for k in BURN_PHASES[2][1]:
         d[k] = 1
-    values = [("BPhase", "2"), ("BTitleText", '""'), ("BVersionText", '""'), ("BWaterText", '"CONFIDENZIALE"'),
+    values = [("BPhase", "2"), ("BTitleText", '""'), ("BVersionText", '""'),
               ("BRecipient", '""'), ("BInfo", '"Metti il clip sopra il montato (V3/V4) e premi Aggiorna"'),
               ("BFrameMode", "1"), ("BPos", "0"), ("BAlign", "0"), ("BMatte", "0"), ("BMatteRatio", "2.39"),
-              ("BMatteAlpha", "1"), ("BSize", "1.8"), ("BBands", "0"), ("BBandAlpha", "0.6"), ("BWaterAlpha", "0.18"),
+              ("BMatteAlpha", "1"), ("BSize", "1.8"), ("BSizeMode", "1"), ("BTextColor", "0"), ("BBands", "0"),
+              ("BBandAlpha", "0.6"), ("BWaterAlpha", "0.18"), ("BWaterSize", "0.06"),
+              ("BChList", "0"), ("BChName", "1"), ("BChSrc", "1"), ("BChPos", "0"),
               ("BOutline", "1"), ("BOutlineW", "0.08"),
-              ("Seg", '""'), ("SegIdx", '""'), ("BLens", '""'), ("RecStart", "0"), ("TlFps", "24"), ("TlDrop", "0"),
+              ("Seg", '""'), ("SegIdx", '""'), ("BLens", '""'), ("BChLens", '""'), ("RecStart", "0"), ("TlFps", "24"), ("TlDrop", "0"),
               ("TlW", "0"), ("TlH", "0")]
     values += [(k, str(v)) for k, v in d.items()]
+    values += [(sw, "0") for sw, _, _, _, _ in WATER_SLOTS[1:]]
+    values += [(sp, str(pos)) for _, _, sp, pos, _ in WATER_SLOTS]
+    values += [(st, lua_string(txt)) for _, st, _, _, txt in WATER_SLOTS]
+    values += [("BV%d" % i, "1") for i in range(1, CH_N + 1)] + [("BA%d" % i, "1") for i in range(1, CH_N + 1)]
     g.controls(values, uc)
 
     def bx(body):
@@ -1599,6 +1674,16 @@ def burnin(std=None):
 
     def bt(body):
         return ("expr", "(function() %s %s %s return %s end)()" % (BURN_GEO, BURN_LAY, BURN_ROW, body))
+
+    def bw(body):
+        return ("expr", "(function() %s %s %s %s return %s end)()" % (BURN_GEO, BURN_LAY, BURN_ZONE, BURN_WATER, body))
+
+    def bc(body):
+        return ("expr", "(function() %s %s %s %s return %s end)()" % (BURN_GEO, BURN_LAY, BURN_ROW, BURN_ZONE, body))
+
+    ink = [("Red1", ("expr", "({ %s })[math.floor(LK.BTextColor + 0.5) + 1] or 1" % ", ".join(repr(c[0]) for _, c in TEXT_COLORS))),
+           ("Green1", ("expr", "({ %s })[math.floor(LK.BTextColor + 0.5) + 1] or 1" % ", ".join(repr(c[1]) for _, c in TEXT_COLORS))),
+           ("Blue1", ("expr", "({ %s })[math.floor(LK.BTextColor + 0.5) + 1] or 1" % ", ".join(repr(c[2]) for _, c in TEXT_COLORS)))]
 
     g.background("Bg", rgb=["0", "0", "0"], alpha="0")
     # mascherino: bande sopra/sotto (letterbox) o ai lati (pillarbox), un solo Background
@@ -1630,7 +1715,7 @@ def burnin(std=None):
         g._add(nm, "TextPlus", G.CREATOR + [
             ("Center", center), ("Font", '"Open Sans"'),
             ("Style", '"Bold"'), ("Size", bl("2 * C / AR")), ("StyledText", bt("Text((CORNER(%d)))" % corner)),
-            ("Red1", "1"), ("Green1", "1"), ("Blue1", "1"), ("VerticalJustificationNew", "3")] + align + outline)
+            ("VerticalJustificationNew", "3")] + ink + align + outline)
         corners.append(nm)
     top = g.merge("MTop", top, g.chain("TTop", [corners[0], corners[4], corners[1]]))
     top = g.merge("MBottom", top, g.chain("TBot", corners[2:4]))
@@ -1641,18 +1726,38 @@ def burnin(std=None):
         ("Font", '"Open Sans"'), ("Style", '"Bold"'),
         ("Size", bl("MODE == 'PB' and math.min(10 * CAP / AR, 0.9 * PB / 4.8) or 10 * CAP / AR")),
         ("StyledText", bt("Text(BIG())")),
-        ("Red1", "1"), ("Green1", "1"), ("Blue1", "1"),
-        ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")] + outline)
+        ("VerticalJustificationNew", "3"), ("HorizontalJustificationNew", "3")] + ink + outline)
     top = g.gate("MBig", top, ["Big"], "LK.BBig > 0.5")
-    g.text("Water", "{ 0.5, 0.5 }", "0.06",
-           'Text(string.upper(LK.BWaterText.Value) .. (LK.BRecipient.Value == "" and "" or ("\\n" .. LK.BRecipient.Value)))',
-           ["1", "1", "1"])
-    top = g.gate("MWater", top, ["Water"], "LK.BWater > 0.5", mix="LK.BWaterAlpha")
+    # elenco dei canali letti (V1, A2...): a sinistra, sul bordo scelto, sotto / sopra i dati
+    nl = "local _, nl = string.gsub(CHL(), '\\n', '') nl = nl + 1 "
+    chx = "(MODE == 'PB' and PB + 0.02 or (MODE == 'IN' and 0.05 or 0.02))"
+    chy = "(CHTOP and CHT0 - HB(nl) / 2 or CHB0 + HB(nl) / 2)"
+    g._add("TCh", "TextPlus", G.CREATOR + [
+        ("Center", ("expr", "(function() %s %s %s %s %s return Point(%s, %s) end)()"
+                    % (BURN_GEO, BURN_LAY, BURN_ROW, BURN_ZONE, nl, chx, chy))),
+        ("Font", '"Open Sans"'), ("Style", '"Bold"'), ("Size", bc("2 * CHC / AR")),
+        ("StyledText", bc("Text(CHL())")), ("VerticalJustificationNew", "3"),
+        ("HorizontalLeftCenterRight", "-1"), ("HorizontalJustificationNew", "0")] + ink + outline)
+    top = g.gate("MCh", top, ["TCh"], "LK.BChList > 0.5")
+    # watermark: fino a tre, in alto / al centro / in basso, nello spazio che lasciano i dati
+    wm = []
+    for i, (sw, st, sp, _, _) in enumerate(WATER_SLOTS, 1):
+        txt = ("string.upper(LK.%s.Value)" % st)
+        if i == 1:
+            txt += ' .. (LK.BRecipient.Value == "" and "" or ("\\n" .. LK.BRecipient.Value))'
+        nm = "Water%s" % ("" if i == 1 else i)
+        g.text(nm, bw("Point(0.5, WY(%d))" % i), "LK.BWaterSize", "Text(%s)" % txt, ["1", "1", "1"])
+        top = g.gate("M" + nm, top, [nm], "LK.%s > 0.5" % sw, mix="LK.BWaterAlpha")
     inputs = ([(x, "Burn-in") for x in ("SecBurn", "BPhase", "BUpdate", "BInfo", "BTitleText", "BVersionText",
-                                        "BWaterText", "BRecipient")]
-              + [(k, "Campi") for k, _ in BURN_FIELDS] + [("BFrameMode", "Campi")]
-              + [(x, "Aspetto") for x in ("BMatte", "BMatteRatio", "BMatteAlpha", "BPos", "BAlign", "BSize",
-                                          "BBands", "BBandAlpha", "BOutline", "BOutlineW", "BWaterAlpha")])
+                                        "BRecipient")]
+              + [(k, "Campi") for k, _ in BURN_FIELDS if k != "BWater"] + [("BFrameMode", "Campi")]
+              + [("SecChV", "Canali")] + [("BV%d" % i, "Canali") for i in range(1, CH_N + 1)]
+              + [("SecChA", "Canali")] + [("BA%d" % i, "Canali") for i in range(1, CH_N + 1)]
+              + [(x, "Canali") for x in ("SecChL", "BChList", "BChName", "BChSrc", "BChPos")]
+              + [(x, "Watermark") for sw, st, sp, _, _ in WATER_SLOTS for x in (sw, st, sp)]
+              + [("BWaterSize", "Watermark"), ("BWaterAlpha", "Watermark")]
+              + [(x, "Aspetto") for x in ("BMatte", "BMatteRatio", "BMatteAlpha", "BPos", "BAlign", "BSizeMode",
+                                          "BSize", "BTextColor", "BBands", "BBandAlpha", "BOutline", "BOutlineW")])
     return group(BURN_NAME, g, top, inputs)
 
 

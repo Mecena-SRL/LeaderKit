@@ -107,6 +107,17 @@ if progDur > 0 then
   table.insert(tracks.audio[1].items, setmetatable({ off = progOff, dur = progDur, name = "A001C003.mov", mpi = ampi,
     srcin = 48 }, Item))
 end
+if opt.extra == "1" and progDur > 0 then
+  -- secondo canale video (V2, solo l'ultimo secondo) e secondo canale audio (A2, tutto il programma)
+  local m2 = { ["Start TC"] = "10:00:00:00", FPS = opt.fps }
+  local mpi2 = { GetMetadata = function(_, k) return m2[k] end, GetClipProperty = function(_, k) return m2[k] end }
+  local a2 = { ["Start TC"] = "05:00:00:00" }
+  local ampi2 = { GetMetadata = function(_, k) return a2[k] end, GetClipProperty = function(_, k) return a2[k] end }
+  tracks.video[2] = { name = "Video 2", items = { setmetatable({ off = progOff + progDur - nominal, dur = nominal,
+    name = "B002C001.mov", mpi = mpi2 }, Item) } }
+  tracks.audio[2] = { name = "Audio 2", items = { setmetatable({ off = progOff, dur = progDur, name = "SND_B.wav",
+    mpi = ampi2 }, Item) } }
+end
 if opt.usermarker == "1" then markers[5] = { name = "nota utente", customData = "" } end
 
 local tl = {}
@@ -164,7 +175,13 @@ function tl:InsertFusionGeneratorIntoTimeline(name)
     if opt.marks == "abs_incl" and marks[1] < tlStart then off, dur = -1, 5 * nominal end
     if off < 0 then off = tcf(playhead) - tlStart end
   end
-  if name == "LeaderKit Burn-in" then t.inputs = { BPhase = 2, BFrameMode = 1 } end
+  if name == "LeaderKit Burn-in" then
+    t.inputs = { BPhase = 2, BFrameMode = 1 }
+    -- bin_<Input>=valore: altri input del pannello del burn-in (canali, elenco...)
+    for k, v in pairs(opt) do
+      if k:sub(1, 4) == "bin_" then t.inputs[k:sub(5)] = tonumber(v) or v end
+    end
+  end
   local ti = 1
   while tracks.video[ti] and tracks.video[ti].locked do ti = ti + 1 end
   if not tracks.video[ti] then return nil end
@@ -262,6 +279,7 @@ for _, t in ipairs(tracks.video) do
       print("RESULT burnseg=" .. (tostring(ti.Seg):gsub("\n", " // ")))
       print("RESULT burnidx=" .. tostring(ti.SegIdx))
       print("RESULT burnlens=" .. tostring(ti.BLens))
+      print("RESULT burnchlens=" .. tostring(ti.BChLens))
       print("RESULT burnseglen=" .. tostring(#tostring(ti.Seg)))
     end
   end

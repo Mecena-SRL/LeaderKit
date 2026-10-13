@@ -73,12 +73,28 @@ function BURN.fill(item, lkb, opts)
     end
     return out
   end
-  local vids, auds = users("video"), users("audio")
-  local cuts = { [rs] = true, [re_] = true }
-  for _, v in ipairs(vids) do
-    if v.st > rs and v.st < re_ then cuts[v.st] = true end
-    if v.en > rs and v.en < re_ then cuts[v.en] = true end
+  -- canali letti: V1-V8 / A1-A8 spuntati nel pannello (di default tutti; sopra l'8 vale "tutti spuntati")
+  local function chOn(k)
+    local okk, v = pcall(function() return lkb:GetInput(k) end)
+    if not okk or v == nil then return true end
+    return v > 0.5
   end
+  local function chan(prefix, t)
+    if t <= 8 then return chOn(prefix .. t) end
+    for i = 1, 8 do if not chOn(prefix .. i) then return false end end
+    return true
+  end
+  local listCh = on("BChList")
+  local vids, auds = {}, {}
+  for _, x in ipairs(users("video")) do if chan("BV", x.track) then vids[#vids + 1] = x end end
+  for _, x in ipairs(users("audio")) do if chan("BA", x.track) then auds[#auds + 1] = x end end
+  local cuts = { [rs] = true, [re_] = true }
+  local function cutAt(x)
+    if x.st > rs and x.st < re_ then cuts[x.st] = true end
+    if x.en > rs and x.en < re_ then cuts[x.en] = true end
+  end
+  for _, v in ipairs(vids) do cutAt(v) end
+  if listCh or on("BAtc") then for _, x in ipairs(auds) do cutAt(x) end end
   local points = {}
   for f in pairs(cuts) do points[#points + 1] = f end
   table.sort(points)
@@ -93,8 +109,10 @@ function BURN.fill(item, lkb, opts)
   -- lunghezze massime (in caratteri) di ogni blocco su tutto il programma: il generatore ne ricava
   -- la grandezza del testo e l'impaginazione senza rileggere i dati a ogni fotogramma
   local lens = { {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0} }
+  local chLen, chRows = 0, 0              -- elenco dei canali: riga piu' lunga e numero massimo di righe
   local function ulen(x)
-    x = string.gsub(string.gsub(x, "{[RSA][ERT][CC]}", "00:00:00:00"), "{FRM}", "0000000")
+    x = string.gsub(string.gsub(string.gsub(x, "{[RSA][ERT][CC]}", "00:00:00:00"), "{FRM}", "0000000"),
+      "{X[^}]*}", "00:00:00:00")
     local _, nch = string.gsub(x, "[^\128-\191]", "")
     return nch
   end
@@ -110,6 +128,46 @@ function BURN.fill(item, lkb, opts)
     L[4] = math.max(L[4], (a > 0 and 1 or 0) + (b > 0 and 1 or 0))
     L[5] = math.max(L[5], nst)
   end
+  local wantName, wantSrc = chOn("BChName"), chOn("BChSrc")
+  -- una riga dell'elenco: "V2  A001C003  SRC {X...}" (il TC corre da solo, come {SRC})
+  local function chanLine(label, x, a, isVideo)
+    local cmpi = BURN.mpi(x.item)
+    local parts = { label }
+    if wantName then
+      local nm = BURN.meta(cmpi, { "File Name", "Clip Name" })
+      if nm == "" then nm = clean(x.item:GetName()) end
+      parts[#parts + 1] = (string.gsub(nm, "%.[%w]+$", ""))
+    end
+    if wantSrc then
+      local sv, step, sn, sd = -1, 1, r.nominal, r.drop
+      local stc = BURN.meta(cmpi, { "Start TC" })
+      if isVideo then
+        local cfps = tonumber(string.match(BURN.meta(cmpi, { "FPS" }), "[%d%.]+") or "") or r.fps
+        local cr = makeRate(tostring(cfps), string.find(stc, ";", 1, true) and "1" or "0")
+        sn, sd, step = cr.nominal, cr.drop, cfps / r.fps
+        if string.match(stc, "%d+[:;]%d+[:;]%d+[:;.]%d+") then
+          sv = tcToFrames(stc, cr) + BURN.srcStart(x.item) + (a - x.st) * step
+        end
+      elseif string.match(stc, "%d+[:;]%d+[:;]%d+[:;.]%d+") then
+        sv = tcToFrames(stc, r) + BURN.srcStart(x.item) + (a - x.st)
+      end
+      parts[#parts + 1] = string.format("SRC {X%.4f,%.6f,%d,%d}", sv, step, sn, sd)
+    end
+    return table.concat(parts, "  ")
+  end
+  local function chanList(a)
+    local out = {}
+    local function pick(set, desc, label, isVideo)
+      local at = {}
+      for _, x in ipairs(set) do if x.st <= a and x.en > a then at[#at + 1] = x end end
+      table.sort(at, function(p, q) if desc then return p.track > q.track end return p.track < q.track end)
+      for _, x in ipairs(at) do out[#out + 1] = chanLine(label .. x.track, x, a, isVideo) end
+    end
+    pick(vids, true, "V", true)
+    pick(auds, false, "A", false)
+    return out
+  end
+
   for i = 1, #points - 1 do
     local a, b = points[i], points[i + 1]
     local v = nil
@@ -183,9 +241,16 @@ function BURN.fill(item, lkb, opts)
     if bl1 == "" then bl1, bl2 = bl2, "" end
     if br1 == "" then br1, br2 = br2, "" end
     measure(1, tl1, tl2); measure(2, tr1, tr2); measure(3, bl1, bl2); measure(4, br1, br2); measure(5, tc1, tc2)
-    lines[#lines + 1] = string.format("%d|%d|%s|%s|%d|%d|%d|%d|%s~%s|%s~%s|%s~%s|%s~%s~{REC}|%s~%s",
+    local chl = ""
+    if listCh and (wantName or wantSrc) then
+      local cl = chanList(a)
+      for _, q in ipairs(cl) do chLen = math.max(chLen, ulen(q)) end
+      chRows = math.max(chRows, #cl)
+      chl = table.concat(cl, "~")
+    end
+    lines[#lines + 1] = string.format("%d|%d|%s|%s|%d|%d|%d|%d|%s~%s|%s~%s|%s~%s|%s~%s~{REC}|%s~%s|%s",
       a, b, string.format("%.4f", srcv), string.format("%.6f", step), sn, sd, aud, fr0,
-      tl1, tl2, tr1, tr2, bl1, bl2, br1, br2, tc1, tc2)
+      tl1, tl2, tr1, tr2, bl1, bl2, br1, br2, tc1, tc2, chl)
   end
   -- indice a record fissi (inizio relativo al clip, posizione della riga in Seg): il generatore
   -- trova il segmento del fotogramma con una ricerca binaria, senza rileggere tutto Seg
@@ -199,6 +264,7 @@ function BURN.fill(item, lkb, opts)
   local ls = {}
   for k = 1, 5 do ls[k] = table.concat(lens[k], ",") end
   set(lkb, "BLens", table.concat(ls, "|"))
+  set(lkb, "BChLens", chLen .. "," .. chRows)
   set(lkb, "RecStart", rs)
   set(lkb, "TlFps", r.nominal)
   set(lkb, "TlDrop", r.drop)

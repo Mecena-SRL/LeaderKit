@@ -1279,3 +1279,110 @@ def test_calibration_switches_with_style(built):
             kw[k + "W"], kw[k + "H"] = 1920, 1080
         t = dump_tools(HEAD(built), 24, 1920, 1080, 432, 300, **kw)
         assert [t[m]["Mix"] for m in ("MCal", "MCal1", "MCal2")] == [int(st == i) for i in range(3)]
+
+
+# ------------------------------------------------------------------ 1.1: Burn-in con canali, watermark, grandezze
+def test_burnin_three_sizes_and_cursor(built):
+    """Piccolo / Medio / Grande, oppure il cursore: la grandezza dei dati ai lati cambia in proporzione."""
+    short = "86400|86880|1000|1|24|0|-1|0|CLIP~|~|SRC {SRC}~|REC {REC}~~{REC}|~"
+    px = {}
+    for mode in range(4):
+        t = dump_tools(os.path.join(ROOT, "dist", "LeaderKit Burn-in.setting"), 24, 1920, 1080, 480, 0, Seg=short,
+                       SegIdx="000000000000000001", RecStart=86400, TlW=1920, TlH=1080,
+                       BLens="4,4,4,1,1|0,0,0,0,0|18,18,18,1,1|18,18,18,1,1|0,0,0,0,0", BSizeMode=mode, BSize=2.2)
+        px[mode] = burn_cap_px(t, 1, 1920, 1080)
+    for mode, pct in enumerate((1.3, 1.8, 2.6, 2.2)):
+        assert abs(px[mode] - pct / 100 * 1080) < 0.01, (mode, px)            # Medio = il vecchio default 1.8
+    t = burn_tools(1920, 1080)
+    assert t["T1"]["Size"] == burn_tools(1920, 1080, BSizeMode=1)["T1"]["Size"]
+
+
+def test_burnin_text_color(built):
+    t = burn_tools(1920, 1080, BTextColor=1)
+    assert t["T1"]["Red1"] == 1 and t["T1"]["Blue1"] < 0.5 and t["Big"]["Green1"] == t["T1"]["Green1"]
+    assert burn_tools(1920, 1080)["T1"]["Blue1"] == 1
+
+
+def test_burnin_watermarks_top_center_bottom(built):
+    """Fino a tre watermark: in alto / al centro / in basso, dentro lo spazio che lasciano i blocchi dei dati."""
+    t = burn_tools(1920, 1080, BWater=1, BWaterPos=0, BWater2=1, BWater2Pos=2, BWater3=1, BWater3Pos=1,
+                   BWater2Text="NON DIFFONDERE", BWater3Text="PROVA")
+    assert [t["MWater"]["Mix"], t["MWater2"]["Mix"], t["MWater3"]["Mix"]] == [t["MWater"]["Mix"]] * 3
+    assert t["MWater"]["Mix"] > 0 and t["MWater3"]["Mix"] > 0
+    y1, y2, y3 = (t[n]["Center"][1] for n in ("Water", "Water2", "Water3"))
+    assert y1 > 0.5 > y2 and abs(y3 - 0.5) < 1e-9
+    top_edge = min(t["T1"]["Center"][1], t["T5"]["Center"][1])
+    bottom_edge = max(t["T3"]["Center"][1], t["T4"]["Center"][1])
+    assert y1 < top_edge and y2 > bottom_edge                      # sotto i dati in alto, sopra quelli in basso
+    assert t["Water2"]["StyledText"] == "NON DIFFONDERE" and t["Water3"]["StyledText"] == "PROVA"
+    assert t["Water"]["Size"] == 0.06
+
+
+def test_burnin_watermarks_stack_and_follow_layout(built):
+    # due watermark nello stesso lato si impilano senza sovrapporsi
+    t = burn_tools(1920, 1080, BWater=1, BWaterPos=0, BWater2=1, BWater2Pos=0, BWaterSize=0.05)
+    a, b = t["Water"]["Center"][1], t["Water2"]["Center"][1]
+    assert a > b and a - b > 0.05 * 1.65 * 1920 / 1080 / 2 * 0.99
+    # il TC grande in basso alza il limite dei watermark in basso; il mascherino li tiene nell'immagine
+    base = burn_tools(1920, 1080, BWater=1, BWaterPos=2)["Water"]["Center"][1]
+    big = burn_tools(1920, 1080, BWater=1, BWaterPos=2, BBig=1)["Water"]["Center"][1]
+    assert big > base
+    lb = (1 - (1920 / 1080) / 2.39) / 2
+    t = burn_tools(1920, 1080, BWater=1, BWaterPos=0, BWater2=1, BWater2Pos=2, BMatte=11)
+    assert t["Water2"]["Center"][1] > lb and t["Water"]["Center"][1] < 1 - lb
+    # spenti: niente nodi calcolati
+    assert burn_tools(1920, 1080, BWater=0)["MWater"]["Mix"] == 0
+    assert burn_tools(1920, 1080)["MWater2"]["Mix"] == 0 and burn_tools(1920, 1080)["MWater3"]["Mix"] == 0
+
+
+CH_SEG = ("86400|86880|1000|1|24|0|-1|0|A001C003~A001|SC 12~|SRC TC {SRC}~|REC TC {REC}~~{REC}|FILM~|"
+          "V2  B002C001  SRC {X36000.0000,1.000000,24,0}~V1  A001C003  SRC {X1000.0000,1.000000,24,0}~A1  SND_B")
+
+
+def test_burnin_channel_list_render(built):
+    setting = os.path.join(built, "LeaderKit Burn-in.setting")
+    kw = dict(Seg=CH_SEG, SegIdx="000000000000000001", RecStart=86400, TlW=1920, TlH=1080, BLens=BURN_LENS,
+              BChLens="30,3")
+    t = dump_tools(setting, 24, 1920, 1080, 480, 0, BChList=1, **kw)
+    assert t["TCh"]["StyledText"] == "V2  B002C001  SRC 00:25:00:00\nV1  A001C003  SRC 00:00:41:16\nA1  SND_B"
+    assert t["MCh"]["Mix"] == 1 and t["TCh"]["Center"][0] < 0.1 and t["TCh"]["Center"][1] > 0.5   # in alto a sinistra
+    top_blocks = min(t["T1"]["Center"][1], t["T5"]["Center"][1])
+    assert t["TCh"]["Center"][1] < top_blocks
+    b = dump_tools(setting, 24, 1920, 1080, 480, 0, BChList=1, BChPos=1, **kw)
+    assert b["TCh"]["Center"][1] < 0.5 and b["TCh"]["Center"][1] > max(b["T3"]["Center"][1], b["T4"]["Center"][1])
+    assert dump_tools(setting, 24, 1920, 1080, 480, 0, **kw)["MCh"]["Mix"] == 0                 # spento di default
+    # i watermark in alto si abbassano sotto l'elenco
+    w = dump_tools(setting, 24, 1920, 1080, 480, 0, BChList=1, BWater=1, BWaterPos=0, **kw)["Water"]["Center"][1]
+    w0 = dump_tools(setting, 24, 1920, 1080, 480, 0, BWater=1, BWaterPos=0, **kw)["Water"]["Center"][1]
+    assert w < w0
+
+
+def seg_lines(res):
+    return burn_of(res)["seg"].split(" // ")
+
+
+def test_engine_burnin_channels_select(built, code):
+    """Canali video / audio scelti: l'elenco mostra nome clip e SRC TC solo dei canali letti."""
+    base = dict(preset="work_dailies", progstart="6", program="10", extra="1", bin_BChList=1)
+    res, _ = run_engine(code, **base)
+    segs = seg_lines(res)
+    assert len(segs) == 2                                                  # V2 compare nell'ultimo secondo
+    assert "V1  A001C003  SRC {X" in segs[0] and "V2" not in segs[0] and "A1  A001C003  SRC {X" in segs[0]
+    assert "A2  SND_B  SRC {X" in segs[0]
+    assert "V2  B002C001  SRC {X%d.0000," % (10 * 3600 * 24 + int(0)) in segs[1]
+    assert res["burnchlens"][0].split(",")[1] == "4"
+    # solo V2: i dati principali seguono V2, niente V1 e niente audio spuntato
+    res, _ = run_engine(code, bin_BV1=0, bin_BA1=0, bin_BA2=0, **base)
+    segs = seg_lines(res)
+    assert "V1" not in "".join(segs) and "A1" not in "".join(segs) and "|A001C003~" not in "".join(segs)
+    assert "V2  B002C001" in segs[-1] and len(segs) == 2
+    # nessun canale video: nessun dato dai clip video, ma la data e il resto restano
+    off = dict((("bin_BV%d" % i), 0) for i in range(1, 9))
+    res, _ = run_engine(code, **dict(base, **off))
+    assert "A001" not in burn_of(res)["seg"].split("|")[8] and "V1" not in burn_of(res)["seg"]
+    assert "A1  A001C003" in burn_of(res)["seg"]
+    # soli SRC TC (senza nome) e senza elenco
+    res, _ = run_engine(code, bin_BChName=0, **base)
+    assert "V1  SRC {X" in seg_lines(res)[0] and "A001C003  SRC" not in seg_lines(res)[0].split("|")[-1]
+    res, _ = run_engine(code, preset="work_dailies", progstart="6", program="10", extra="1")
+    assert all(l.endswith("|") for l in seg_lines(res)) and res["burnchlens"][0] == "0,0"
