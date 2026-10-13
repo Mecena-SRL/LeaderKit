@@ -100,12 +100,24 @@ if progDur > 0 then
   local md = { Scene = "12", Take = "3", ["Camera #"] = "A", ["Reel Name"] = "A001", ["Good Take"] = "1",
     ["Start TC"] = opt.srctc or "14:22:10:00", FPS = opt.srcfps or opt.fps }
   local mpi = { GetMetadata = function(_, k) return md[k] end, GetClipProperty = function(_, k) return md[k] end }
-  local amd = { ["Start TC"] = opt.audtc or "14:22:10:00", ["Sound Roll #"] = "S012" }
+  local amd = { ["Start TC"] = opt.audtc or "14:22:10:00", ["Sound Roll #"] = "S012", ["Audio Ch"] = opt.audch,
+    ["Audio Codec"] = opt.audcodec }
   local ampi = { GetMetadata = function(_, k) return amd[k] end, GetClipProperty = function(_, k) return amd[k] end }
   table.insert(tracks.video[1].items, setmetatable({ off = progOff, dur = progDur, name = "A001C003.mov", mpi = mpi,
     srcin = 48 }, Item))
   table.insert(tracks.audio[1].items, setmetatable({ off = progOff, dur = progDur, name = "A001C003.mov", mpi = ampi,
     srcin = 48 }, Item))
+end
+if opt.extra == "1" and progDur > 0 then
+  -- secondo canale video (V2, solo l'ultimo secondo) e secondo canale audio (A2, tutto il programma)
+  local m2 = { ["Start TC"] = "10:00:00:00", FPS = opt.fps }
+  local mpi2 = { GetMetadata = function(_, k) return m2[k] end, GetClipProperty = function(_, k) return m2[k] end }
+  local a2 = { ["Start TC"] = "05:00:00:00" }
+  local ampi2 = { GetMetadata = function(_, k) return a2[k] end, GetClipProperty = function(_, k) return a2[k] end }
+  tracks.video[2] = { name = "Video 2", items = { setmetatable({ off = progOff + progDur - nominal, dur = nominal,
+    name = "B002C001.mov", mpi = mpi2 }, Item) } }
+  tracks.audio[2] = { name = "Audio 2", items = { setmetatable({ off = progOff, dur = progDur, name = "SND_B.wav",
+    mpi = ampi2 }, Item) } }
 end
 if opt.usermarker == "1" then markers[5] = { name = "nota utente", customData = "" } end
 
@@ -123,6 +135,10 @@ function tl:SetStartTimecode(s) tlStart = tcf(s); print("RESULT starttc=" .. s);
 function tl:GetTrackCount(k) return #tracks[k] end
 function tl:SetTrackLock(k, i, v) if opt.nolock == "1" then error("no lock api") end; tracks[k][i].locked = v; return true end
 function tl:GetIsTrackLocked(k, i) return tracks[k][i].locked or false end
+function tl:GetTrackSubType(k, i)
+  if opt.nosub == "1" then error("API non disponibile") end
+  return (i == 2 and opt.asub2) or opt.asub or "stereo"
+end
 function tl:GetTrackName(k, i) return tracks[k][i].name end
 function tl:SetTrackName(k, i, n) tracks[k][i].name = n; return true end
 function tl:AddTrack(k) table.insert(tracks[k], { name = k .. " " .. (#tracks[k] + 1), items = {} }); return true end
@@ -164,7 +180,13 @@ function tl:InsertFusionGeneratorIntoTimeline(name)
     if opt.marks == "abs_incl" and marks[1] < tlStart then off, dur = -1, 5 * nominal end
     if off < 0 then off = tcf(playhead) - tlStart end
   end
-  if name == "LeaderKit Burn-in" then t.inputs = { BPhase = 2, BFrameMode = 1 } end
+  if name == "LeaderKit Burn-in" then
+    t.inputs = { BPhase = 2, BFrameMode = 1 }
+    -- bin_<Input>=valore: altri input del pannello del burn-in (canali, elenco...)
+    for k, v in pairs(opt) do
+      if k:sub(1, 4) == "bin_" then t.inputs[k:sub(5)] = tonumber(v) or v end
+    end
+  end
   local ti = 1
   while tracks.video[ti] and tracks.video[ti].locked do ti = ti + 1 end
   if not tracks.video[ti] then return nil end
@@ -230,6 +252,10 @@ if opt.burncode then
   for _, t in ipairs(tracks.video) do for _, it in ipairs(t.items) do
     if it.name == "LeaderKit Burn-in" then
       it.comp.tool.inputs.Seg = ""; it.comp.tool.inputs.BFrameMode = 0
+      -- post_<Input>=valore: input cambiati dall'utente prima di "Aggiorna dai metadati"
+      for k, v in pairs(opt) do
+        if k:sub(1, 5) == "post_" then it.comp.tool.inputs[k:sub(6)] = tonumber(v) or v end
+      end
       comp = it.comp; tool = it.comp.tool
     end
   end end
@@ -262,6 +288,7 @@ for _, t in ipairs(tracks.video) do
       print("RESULT burnseg=" .. (tostring(ti.Seg):gsub("\n", " // ")))
       print("RESULT burnidx=" .. tostring(ti.SegIdx))
       print("RESULT burnlens=" .. tostring(ti.BLens))
+      print("RESULT burnchlens=" .. tostring(ti.BChLens))
       print("RESULT burnseglen=" .. tostring(#tostring(ti.Seg)))
     end
   end
