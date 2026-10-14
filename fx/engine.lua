@@ -46,6 +46,11 @@ local countFrom = math.floor(dur("countdown", "CountFrom") + 0.5)
 local tailSec = dur("tail", "TailSec")
 local reel = math.floor(get("Reel", 1) + 0.5)
 local tailOn = get("TailOn", 1) > 0.5 and tailSec > 0
+-- tipo di barre: 0 100% (100/0/100/0), 1 EBU 75% (100/0/75/0), 2 SMPTE RP 219 (dallo standard o scelto)
+local BARS_KIND = { ["100"] = 0, ["75"] = 1, smpte = 2 }
+local barsChoice = math.floor(get("BarsType", 0) + 0.5)
+local barsKind = (barsChoice > 0) and (barsChoice - 1) or (BARS_KIND[P.bars_type or "100"] or 0)
+local BARS_NAME = { [0] = "Barre 100% (100/0/100/0)", [1] = "Barre EBU 75% (100/0/75/0)", [2] = "Barre SMPTE RP 219" }
 local popChoice = math.floor(get("PopLevel", 0) + 0.5)          -- 0 standard, 1 -20, 2 -18
 local popLevel = (popChoice == 1) and -20 or ((popChoice == 2) and -18 or (P.pop_dbfs or -20))
 local beepEach = get("BeepEach", 0) > 0.5
@@ -418,9 +423,10 @@ end
 local leaderStart = head:GetStart()
 local syncTc, popTc = "—", "—"
 if barsSec > 0 then
-  local lvl = P.bars_dbfs or -18
+  -- tono di line-up: dallo standard; altrimenti -20 dBFS con le barre SMPTE (USA), -18 dBFS (EBU) con le altre
+  local lvl = P.bars_dbfs or ((barsKind == 2) and -20 or -18)
   placeAudio(toneClip(lvl, 30, 30), leaderStart, math.floor(barsSec * n + 0.5), "Tono di line-up")
-  marker(leaderStart, "Purple", "BARS", string.format("Barre 100%% + tono 1 kHz %d dBFS", lvl), "bars")
+  marker(leaderStart, "Purple", "BARS", string.format("%s + tono 1 kHz %d dBFS", BARS_NAME[barsKind], lvl), "bars")
 end
 local slateStart = leaderStart + math.floor(barsSec * n + 0.5)
 if slateSec > 0 then
@@ -580,7 +586,28 @@ local function targetGamma()
   if string.find(cs, "srgb", 1, true) or string.find(cs, "2.2", 1, true) then return 2.2 end
   return 2.4
 end
+-- primari dello spazio colore di uscita (per ColorChecker e incarnati della taratura, -I/+Q delle barre)
+local function targetPrimaries()
+  local cs = ""
+  pcall(function() cs = string.lower(tostring(project:GetSetting("colorSpaceOutput") or "")) end)
+  if string.find(cs, "2020", 1, true) or string.find(cs, "2100", 1, true) then return "2020" end
+  if string.find(cs, "p3", 1, true) then return "p3" end
+  return "709"
+end
 local accent = { get("AccentRed", 0.85), get("AccentGreen", 0.85), get("AccentBlue", 0.85) }
+-- tema del countdown (come nel generatore): sfondo e colore delle linee, per bordi e didascalie della taratura
+local function themeColor(v, style, isBg)
+  if type(v) == "number" then return { v, v, v } end
+  if v == "" or v == nil then
+    if isBg then
+      if style == 1 then return { 0.08, 0.08, 0.08 } end
+      return { get("BgRed", 0), get("BgGreen", 0), get("BgBlue", 0) }
+    end
+    return accent
+  end
+  return { get(v .. "Red", 0), get(v .. "Green", 0), get(v .. "Blue", 0) }
+end
+local cdTheme = (LK_CD_THEMES or {})[math.floor(get("CdTheme", 0) + 0.5) + 1] or { "", "Accent" }
 
 -- chiave del file in cache: tutti i valori della spec, in ordine
 local function specKey(v)
@@ -611,9 +638,17 @@ end
 -- taratura sul countdown, a tutto quadro: sotto frame lines, cerchio, logo e dati (sono nel generatore)
 if countFrom > 0 and get("CalOn", 1) > 0.5 then
   local cal = {}
-  for _, k in ipairs(LK_CALIBRATION or {}) do cal[string.lower(string.sub(k, 4))] = get(k, 1) > 0.5 end
+  -- Mostra: 0 spento, 1 normale, 2 piccolo, 3 grande
+  local sizes = {}
+  for _, k in ipairs(LK_CALIBRATION or {}) do
+    local v = math.floor(get(k, 1) + 0.5)
+    local name = string.lower(string.sub(k, 4))
+    cal[name] = v > 0
+    sizes[name] = (v > 0) and v or nil
+  end
   local spec = { accent = accent, cal = cal, fpsLabel = string.format("%g/SEC", r.fps), resLabel = resClass(),
-    gamma = targetGamma(), cdLogo = get("CdLogo", 0) > 0.5 and get("Logo", "") ~= "", cdInfo = get("CdInfo", 0) > 0.5,
+    sizes = sizes, starsPos = math.floor(get("CalStarsPos", 0) + 0.5),
+    gamma = targetGamma(), prim = targetPrimaries(), cdLogo = get("CdLogo", 0) > 0.5 and get("Logo", "") ~= "", cdInfo = get("CdInfo", 0) > 0.5,
     style = math.floor(get("CdStyle", 0) + 0.5) }
   -- con le frame lines sul countdown i moduli stanno dentro l'area comune delle linee accese e gli
   -- angoli di ogni formato hanno il triangolo (come le frecce del leader SMPTE)
@@ -639,6 +674,7 @@ if countFrom > 0 and get("CalOn", 1) > 0.5 then
     local sp = {}
     for kk, vv in pairs(spec) do sp[kk] = vv end
     sp.style = st - 1
+    sp.bg, sp.ink = themeColor(cdTheme[1], sp.style, true), themeColor(cdTheme[2], sp.style, false)
     local pth = genImage("Taratura", sp, function(p) return LK_OVERLAY.render(p, w, h, sp) end,
       k .. "Image", k .. "Ld", k .. "W", k .. "H", "Taratura")
     if sp.style == spec.style then path = pth end
@@ -652,6 +688,19 @@ else
     set(lk, k .. "Image", "")
     LK_IMAGE.sync(c, lk, k .. "Image", k .. "Ld", k .. "W", k .. "H", "")
   end
+end
+
+-- barre: tipo risolto per il generatore; le SMPTE RP 219 sono un PNG alla risoluzione della timeline
+set(lk, "BarsKind", barsKind)
+if barsSec > 0 and barsKind == 2 then
+  local spec = { kind = "rp219", prim = targetPrimaries() }
+  if genImage("Barre", spec, function(p) return LK_OVERLAY.renderBars(p, w, h, spec) end,
+    "BarsImage", "BarsLd", "BarsW", "BarsH", "Barre SMPTE") then
+    ok(string.format("Barre SMPTE RP 219 %dx%d (il PLUGE -2%% esce come 0%%: livelli video a 8 bit).", w, h))
+  end
+else
+  set(lk, "BarsImage", "")
+  LK_IMAGE.sync(c, lk, "BarsImage", "BarsLd", "BarsW", "BarsH", "")
 end
 
 -- quadranti degli stili Quadrante e Orologio: entrambi pronti, cosi' cambiando stile non manca nulla
@@ -840,3 +889,9 @@ report[#report + 1] = "\nCONTROLLI\n" .. table.concat(checks, "\n")
 if P.notes and #P.notes > 0 then report[#report + 1] = "\nNOTE DELLO STANDARD\n- " .. table.concat(P.notes, "\n- ") end
 warnings = {}   -- gia' elencati nei controlli
 show("LeaderKit — Genera")
+-- pannello in ordine: solo le voci che servono a questo standard e a queste scelte
+pcall(function()
+  local code = lk:GetInput("VisCode") or ""
+  local f = (code ~= "") and (loadstring or load)(code)
+  if f then f(lk) end
+end)

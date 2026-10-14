@@ -52,7 +52,7 @@ _TOKENS = [
     # diametro del cerchio del countdown (frazione della larghezza): min(0.62 H, 0.40 W), come la taratura
     # stile del countdown: 0 Standard, 1 Pannelli, 2 Quadrante
     ("_CS", "local _CS = math.floor(LK.CdStyle + 0.5)", ()),
-    ("_RD", "local _RD = math.min(({ 0.62, 0.50, 0.56 })[_CS + 1] / _A, ({ 0.40, 0.34, 0.36 })[_CS + 1])", ("_A", "_CS")),
+    ("_RD", "local _RD = math.min(({ 0.62, 0.50, 0.48 })[_CS + 1] / _A, ({ 0.40, 0.34, 0.31 })[_CS + 1])", ("_A", "_CS")),
 ]
 
 
@@ -247,10 +247,26 @@ def uc_slider(name, label, lo, hi, default, integer=True):
             % (name, "true" if integer else "false", lo, hi, lo, hi * 10, default, lua_string(label)))
 
 
-def uc_check(name, label, default):
+def uc_check(name, label, default, on_change=None):
+    extra = ("INPS_ExecuteOnChange = %s, " % lua_string(on_change)) if on_change else ""
     return ("\t\t\t\t\t\t%s = { LINKID_DataType = \"Number\", INPID_InputControl = \"CheckboxControl\", "
-            "INP_Integer = true, INP_Default = %d, CBC_TriState = false, LINKS_Name = %s, },\n"
-            % (name, default, lua_string(label)))
+            "INP_Integer = true, INP_Default = %d, CBC_TriState = false, %sLINKS_Name = %s, },\n"
+            % (name, default, extra, lua_string(label)))
+
+
+def tip(controls_text, text):
+    """Spiegazione mostrata passando con il mouse sul controllo (barra di stato di Fusion / Resolve)."""
+    return controls_text.replace("LINKS_Name = ", "INPS_StatusText = %s, LINKS_Name = " % lua_string(text))
+
+
+def hide(controls_text):
+    """Controllo nascosto finche' lo script di visibilita' non lo mostra (dipende da un'altra voce)."""
+    return controls_text.replace("LINKS_Name = ", "IC_Visible = false, LINKS_Name = ")
+
+
+def uc_help(name, title, text, lines):
+    """Guida richiudibile: un'intestazione con la freccia e sotto il testo (sola lettura)."""
+    return (uc_label(name, "ⓘ " + title, fold=1) + uc_text(name + "T", "", lines=lines, read_only=True))
 
 
 def uc_color(prefix, label, group, default):
@@ -276,6 +292,7 @@ GUIDE_COLORS = ([("CFLTL", "Colore: formato della timeline", (1.0, 1.0, 1.0))]
                 + [("CSafeAction", "Colore safe action", (0.85, 0.85, 0.85)),
                    ("CSafeTitle", "Colore safe title", (0.85, 0.85, 0.85))])
 GUIDE_GROUP = COLOR_GROUP_BASE + len(COLOR_DEFAULTS)
+CD_GROUP = GUIDE_GROUP + len(GUIDE_COLORS)                 # colori del tema Personalizzato del countdown
 
 
 def guide_color(key):
@@ -291,7 +308,7 @@ def color_controls():
 
 
 def control_group(src):
-    for i, (p, _, _) in enumerate(COLOR_DEFAULTS + GUIDE_COLORS):
+    for i, (p, _, _) in enumerate(COLOR_DEFAULTS + GUIDE_COLORS + CD_COLORS):
         if src.startswith(p) and src[len(p):] in ("Red", "Green", "Blue"):
             return COLOR_GROUP_BASE + i
     return None
@@ -416,6 +433,7 @@ def engine(mode, std=None):
                  + "LK_GUIDES = %s\n" % lua_literal([[k, "ar", ar] for k, _, ar in FRAMELINES]
                                                     + [[k, "safe", pct] for k, pct, _ in SAFE_AREAS])
                  + "LK_DIALS = %s\n" % lua_literal({"b": list(DIAL_B), "c": list(DIAL_C)})
+                 + "LK_CD_THEMES = %s\n" % lua_literal([[t[1] if t[1] is not None else "", t[2]] for t in CD_THEMES])
                  # impronta del disegno: se overlay.lua cambia, Genera ridisegna i PNG invece di riusarli
                  + "LK_DRAW = %s\n" % lua_literal(hashlib.sha1(fx_source("overlay.lua").encode("utf-8")).hexdigest()[:12]))
         libs = fx_source("overlay.lua") + "\n" + fx_source("image.lua") + "\n"
@@ -472,7 +490,7 @@ def field(presets, key):
     return pv(presets, key)
 
 
-PAGES = ["Progetto", "Dati", "Aspetto", "Guide", "Tecnico"]
+PAGES = ["Progetto", "Dati", "Slate", "Countdown", "Guide", "Tecnico"]
 
 PRODUCTION_FIELDS = [("Title", "Titolo", None), ("Production", "Produzione", "PRODUCTION"),
                      ("Producer", "Produttore", "PRODUCER"), ("Director", "Regia", "DIRECTOR"),
@@ -502,16 +520,183 @@ CALIBRATION = [("CalStars", "Stelle di Siemens negli angoli (fuoco)", 1),
                ("CalBlue", "Verifica del blu (filtro Wratten 47B)", 1),
                ("CalContour", "Sfera divisa: alte luci e ombre (contouring)", 1),
                ("CalPeak", "Riferimenti del bianco (95% nel 100%) e del nero (5% nel 0%)", 1),
+               ("CalPluge", "PLUGE: nero +2% / +4% e bianco (ITU-R BT.814)", 1),
+               ("CalZone", "Zone plate (scalatura e aliasing)", 1),
                ("CalEdge", "Bordo del raster e angoli", 1),
                ("CalCenter", "Mirino centrale", 1), ("CalLabels", "Fotogrammi al secondo e risoluzione", 1)]
+BARS_TYPES = ["Dallo standard", "100% (100/0/100/0, DPP)", "75% (EBU 100/0/75/0)",
+              "SMPTE RP 219 HD (75%, -I/+Q, rampa, PLUGE)"]
 GAMMA_REFS = ["Dallo spazio colore di uscita", "2.2 (sRGB, web)", "2.4 (Rec.709 / BT.1886)", "2.6 (DCI, cinema)"]
+# spiegazioni al passaggio del mouse (INPS_StatusText) e guide richiudibili in cima a ogni scheda
+TIPS = {
+    "Preset": "Lo standard decide durate, timecode, barre, audio e righe della slate.",
+    "Reel": "Numero del rullo: il FFOA cade a N:00:08:00 (convenzione cinema).",
+    "DurSel": "Libera: fine dell'ultimo clip. Slot: durata della categoria. Personalizzata: scrivi il TC qui sotto.",
+    "Slot": "Durata prevista dalla categoria: Genera crea il contenitore e dice di quanto il montato e' piu' lungo o corto.",
+    "ProgramTC": "Durata del programma in HH:MM:SS:FF.",
+    "Breaks": "Marker dei break pubblicitari. Automatici: direttiva AVMSD (al massimo 1 ogni 30' programmati).",
+    "MarkersOn": "Marker di cambio rullo a intervalli regolari (cinema).",
+    "MarkerEvery": "Minuti tra un cambio rullo e l'altro; 0 = valore dello standard.",
+    "TailOn": "Genera mette la coda (tail pop, fine programma) subito dopo l'ultimo fotogramma.",
+    "Generate": "Crea o aggiorna tutto sulla timeline. Premilo dopo aver cambiato standard, stile, tema o taratura.",
+    "Remove": "Cancella solo cio' che ha creato LeaderKit: marker, audio, coda, immagini, burn-in.",
+    "Custom": "Solo con lo standard Personalizzato: durate di barre, slate, nero, countdown e coda.",
+    "DateAuto": "Mostra sempre la data del giorno del render invece del campo Data.",
+    "Phase": "Fase di lavorazione scritta sulla slate.",
+    "Status": "TEMP nel colore evidenza, FINAL in verde.",
+    "SlateStyle": "Impaginazione della slate: Pannelli, Quadrante, Orologio, Minimale, oppure i fotogrammi "
+                  "d'identificazione della testa SMPTE Universal in sequenza.",
+    "TitleImage": "PNG con trasparenza che sostituisce il titolo di testo; incolla il percorso o usa Scegli.",
+    "TitleImageSize": "Grandezza del titolo in PNG rispetto al suo riquadro.",
+    "Logo": "PNG o JPG; incolla il percorso o usa Scegli. Genera lo ricarica e segnala i file mancanti.",
+    "LogoSize": "Larghezza del logo in percentuale della larghezza del quadro.",
+    "LogoOnTail": "Ripete i loghi sulla coda.",
+    "Colors": "Testo, sfondo ed evidenza di slate e coda; Grafica del leader colora cerchi e croce con i temi Dallo stile e Nero.",
+    "CdStyle": "Standard: leader SMPTE. Pannelli: schede grigie accanto al cerchio. Quadrante: test sulla ghiera e due pannelli ordinati.",
+    "CdTheme": "Sfondo, linee e cifra del countdown. Personalizzato mostra i selettori dei colori. Premi Genera per adattare la taratura.",
+    "CdDisc": "Riempie l'interno del cerchio. Dal tema: solo lo stile Pannelli con il tema Dallo stile.",
+    "CdColor": "Colore del tema Personalizzato.",
+    "CdCF": "Lettere C C (in alto) e F F (in basso) durante il secondo del 4, come i fotogrammi di controllo del leader "
+            "SMPTE Universal: si usavano per controllare inquadratura e fuoco in proiezione.",
+    "CdLogo": "Logo in un riquadro nero sopra il cerchio.",
+    "CdInfo": "Titolo e ruoli scelti in un riquadro nero sotto il cerchio.",
+    "CalOn": "Strumenti di verifica disegnati da Genera alla risoluzione e nel gamma di uscita.",
+    "CalGammaRef": "Gamma del display di riferimento: dallo spazio colore di uscita oppure 2.2, 2.4, 2.6.",
+    "EndDot": "Pallino sull'ultimo fotogramma prima del FFOA, come i cue mark della pellicola.",
+    "GuidesSlate": "Disegna le guide accese sotto i testi della slate.",
+    "GuidesCd": "Disegna le guide sul countdown; Genera impagina la taratura dentro le linee accese.",
+    "Guide": "Accendi la guida: compare il selettore del suo colore.",
+    "ColorInfo": "Spazio colore di uscita letto dal progetto: decide gamma e primari della taratura.",
+    "AudioFormat": "Formato audio scritto nella scheda tecnica della slate.",
+    "BarsType": "100%: DPP e TV europee. EBU 75%: spot. SMPTE RP 219: USA e streaming. Dallo standard: sceglie Genera.",
+    "PopLevel": "Livello di pop e bip: -20 dBFS (SMPTE, USA) o -18 dBFS (EBU, Europa).",
+    "BeepEach": "Un bip a ogni secondo del countdown (non previsto dagli standard).",
+}
+CAL_TIPS = {
+    "CalStars": "Il disco grigio al centro deve essere piccolo, rotondo e uguale nei quattro angoli.",
+    "CalRes": "Righe di 1-4 px nette e righe RGB pure, senza frange.",
+    "CalPluge": "Su nero: il +2% si vede appena, il +4% si vede; la toppa bianca serve a regolare il contrasto (Quadrante).",
+    "CalZone": "Alla mappatura 1:1 solo anelli concentrici; cerchi in piu' o grigio piatto = immagine scalata (Quadrante).",
+    "CalDiag": "Righe di 1 px annidate: nette con la mappatura 1:1, moire' se il display scala.",
+    "CalGamma": "Righe orizzontali di 1 px: da lontano spariscono nel grigio del gamma giusto; in alto gamma -0.2 e +0.2.",
+    "CalGrey": "11 gradini distinti; nei neri a passi dell'1% il primo visibile dice dove si perde il dettaglio.",
+    "CalColor": "Primari e secondari al 100% e al 75%: al vettorscopio cadono nei loro bersagli.",
+    "CalChecker": "ColorChecker 24 convertito nel gamma e nei primari di uscita.",
+    "CalSkin": "I 10 toni della scala Monk: distinti e naturali.",
+    "CalRamps": "Sfumature continue, senza gradini ne' cambi di tinta.",
+    "CalBlue": "Con il filtro 47B o il solo canale blu i quadrati interni spariscono.",
+    "CalContour": "Sfera divisa: alte luci e ombre senza anelli; l'ombra sparisce nel nero senza bordo.",
+    "CalPeak": "SMPTE RP 133: il 95% nel bianco e il 5% nel nero devono vedersi entrambi.",
+    "CalEdge": "Bordo di 1 px e triangoli negli angoli: se si vedono, il display mostra tutto il quadro.",
+    "CalCenter": "Mirino al centro del quadro.",
+    "CalLabels": "Frame rate e risoluzione della timeline.",
+}
+# spiegazione sempre visibile sotto ogni strumento di taratura: norma, a cosa serve, quando usarlo, come si legge
+CAL_HELP = {
+    "CalStars": "Stelle di Siemens (36 cicli), negli angoli. Fuoco e uniformita' del fuoco di proiettore, monitor o "
+                "lente: il fuoco cala prima ai bordi. A fuoco il disco grigio al centro, dove i raggi si fondono, e' "
+                "piccolo, rotondo e uguale nei quattro angoli. Frange rosse o blu = convergenza RGB.",
+    "CalRes": "Righe di 1, 2, 3, 4 px e righe rosse, verdi e blu di 1 px. Nitidezza, scalatura, registrazione dei "
+              "pannelli, sottocampionamento del colore (4:2:0, 4:2:2): ogni riga deve essere netta e pura.",
+    "CalDiag": "Righe di 1 px annidate (orizzontali e verticali) nel riquadro 24/SEC. Mappatura 1:1 dei pixel: "
+               "moire', righe doppie o grigio piatto = il display o il proiettore scala l'immagine.",
+    "CalGamma": "Verifica del gamma (come il 2,6 del leader SMPTE RP 428-6), nel gamma di uscita. Righe orizzontali "
+                "di 1 px nero/bianco = 50% di luce: guardate da lontano devono sparire nel grigio accanto. Se "
+                "somigliano alla toppa in alto a sinistra il gamma del display e' piu' basso, a destra piu' alto.",
+    "CalGrey": "Scala dei grigi 0-100% (11 gradini) e neri 0-10% a passi dell'1%. Livello del nero e linearita': "
+               "gradini neutri e tutti distinti; il primo nero visibile dice dove il display perde il dettaglio.",
+    "CalColor": "Primari e secondari al 100% e al 75% (come le barre EBU 100/0/75/0 e SMPTE). Saturazione e tinta: "
+                "al vettorscopio ogni toppa cade nel suo bersaglio; a occhio tinte pulite.",
+    "CalChecker": "ColorChecker 24 (X-Rite), convertito nel gamma e nei primari di uscita. Resa del colore: confronto "
+                  "con la tavola vera o con una sonda; l'ultima fila e' la scala neutra.",
+    "CalSkin": "Toni della pelle: i 10 della scala Monk (al posto dei volti del leader SMPTE). Incarnati distinti e "
+               "naturali, senza dominanti: e' il primo posto dove si nota una taratura sbagliata.",
+    "CalRamps": "Rampe continue bianco/nero, rosso, verde, blu. Banding e clip di un canale: sfumature senza "
+                "gradini e senza cambi di tinta (8 bit, compressione, LUT).",
+    "CalBlue": "Verifica del blu: magenta, ciano, blu e bianco hanno lo stesso blu. Con il solo canale blu del "
+               "monitor (blue only) o il filtro Wratten 47B i quadrati interni spariscono; si usa per tinta e "
+               "saturazione.",
+    "CalContour": "Sfera divisa (contouring, leader SMPTE RP 428-6): alte luci 60-100% sopra, ombre 0-16% sotto. "
+                  "Sfumature senza anelli; in basso l'ombra entra nel nero senza bordo.",
+    "CalPeak": "Bianco e nero (SMPTE RP 133): 95% dentro il 100% e 5% dentro lo 0%. Bianchi tagliati e neri "
+               "schiacciati: si devono vedere entrambi i quadrati.",
+    "CalPluge": "PLUGE (ITU-R BT.814), parte sopra il nero, con la toppa bianca. Regolazione di luminosita' "
+                "(nero) e contrasto: il +2% si vede appena, il +4% si vede; poi il bianco al livello giusto. Il -2% "
+                "sotto il nero richiede un generatore di segnale. Vista Quadrante.",
+    "CalZone": "Zone plate: anelli sempre piu' fitti fino a 0.5 cicli per pixel sul bordo. Scalatura, filtri, "
+               "aliasing: alla mappatura 1:1 solo anelli concentrici; cerchi in piu' o grigio piatto = immagine "
+               "scalata o filtrata. Vista Quadrante.",
+    "CalEdge": "Bordo di 1 px e triangoli negli angoli. Overscan e mascherini: se si vedono tutti e quattro, "
+               "il display mostra il quadro intero.",
+    "CalCenter": "Mirino: quadrati e asterisco al centro. Centro ottico e allineamento del proiettore, con la croce "
+                 "del countdown.",
+    "CalLabels": "Frame rate e risoluzione della timeline scritti in chiaro (come 24/SEC del leader SMPTE): "
+                 "conferma che si sta guardando la versione giusta.",
+}
+CAL_SHOW = ["Spento", "Normale", "Piccolo", "Grande"]
+STARS_POS = ["Angoli dell'area utile (dentro le frame lines)", "Angoli del quadro intero"]
+
+
+HELP = {
+    "Progetto": ("Come si usa", "1. Trascina LeaderKit dove inizia il leader (anche a timeline vuota).\n"
+                 "2. Scegli lo standard e la durata del programma.\n"
+                 "3. Premi Genera: durata esatta, start TC, audio, marker, coda, burn-in e taratura.\n"
+                 "4. Dopo aver cambiato standard, stile, tema o taratura premi di nuovo Genera.\n"
+                 "Rimuovi cancella solo cio' che ha creato LeaderKit. Passa con il mouse sulle voci per una spiegazione.", 6),
+    "Dati": ("Dati della slate", "Compaiono solo i campi compilati; i testi lunghi si riducono e, se serve, finiscono con '…'.\n"
+             "Data sempre aggiornata: usa la data del render.\n"
+             "Stato dei reparti: FINAL in verde, TEMP nel colore evidenza.", 4),
+    "Slate": ("Slate, loghi e colori", "Stile: impaginazione della slate.\n"
+              "Titolo in PNG: sostituisce il titolo di testo.\n"
+              "Loghi: PNG o JPG, larghezza in % del quadro, margini fissi; anche sulla coda.\n"
+              "Colori: testo, sfondo ed evidenza valgono per slate e coda.", 5),
+    "Countdown": ("Countdown, tema e taratura", "Stile: disegno di cerchi, croce e cifra.\n"
+                  "Tema: Nero (leader digitale SMPTE RP 428-6), Grigio medio (SMPTE Universal), Bianco (Academy), "
+                  "Grigio scuro (orologio TV) o Personalizzato con i tuoi colori.\n"
+                  "Disco: riempie l'interno del cerchio.\n"
+                  "Taratura: Genera la disegna nel gamma e nei primari di uscita; premi Genera dopo aver cambiato stile o tema.\n"
+                  "Pallino: segna l'ultimo fotogramma prima del programma.", 7),
+    "Guide": ("Frame lines e safe area", "Formati letterbox o pillarbox a pixel interi e pari, con la risoluzione reale.\n"
+              "Safe action 93% e safe title 90% (EBU R95).\n"
+              "Accendendo una guida compare il suo colore.\n"
+              "Sul countdown Genera impagina la taratura dentro le linee accese.", 5),
+    "Tecnico": ("Barre e audio", "Spazio colore: letto dal progetto da Genera.\n"
+                "Barre: 100% (DPP, TV europee), EBU 75% (spot), SMPTE RP 219 (USA, streaming); Dallo standard sceglie Genera.\n"
+                "Pop e bip: -20 dBFS (SMPTE) o -18 dBFS (EBU).", 4),
+}
+
+
+def cal_section(key, label):
+    """Strumento di taratura: intestazione richiudibile, Mostra (spento / normale / piccolo / grande), per le stelle
+    la posizione, e sotto la spiegazione sempre visibile."""
+    n = 3 if key == "CalStars" else 2
+    out = (uc_label("Sec" + key, label, fold=n)
+           + tip(uc_combo(key, "Mostra", CAL_SHOW), CAL_TIPS[key]))
+    if key == "CalStars":
+        out += tip(uc_combo("CalStarsPos", "Posizione", STARS_POS), "Angoli dell'area utile: dentro le frame lines "
+                   "accese. Angoli del quadro: il fuoco si valuta sui bordi veri del display.")
+    return out + uc_text(key + "Help", "", lines=4, read_only=True)
+
+
+def cal_inputs():
+    out = []
+    for key, _, _ in CALIBRATION:
+        out += ["Sec" + key, key] + (["CalStarsPos"] if key == "CalStars" else []) + [key + "Help"]
+    return out
+
+
+def help_block(page):
+    title, _, lines = HELP[page]
+    return uc_help(page + "Help", title, "", lines)
+
+
 LOGO_POS = ["In alto a destra", "In alto a sinistra", "In basso a destra", "In basso a sinistra", "Al centro"]
 END_DOT_POS = ["In alto a destra (cue mark)", "Al centro", "In alto a sinistra"]
-HIDDEN_NUM = ["LogoW", "LogoH", "Logo2W", "Logo2H", "TitleW", "TitleH"]
+HIDDEN_NUM = ["LogoW", "LogoH", "Logo2W", "Logo2H", "TitleW", "TitleH", "BarsKind"]
 # immagini create da Genera e caricate nei Loader (percorso e dimensioni in pixel, input di servizio)
 GEN_IMAGES = [("CalImage", "CalLd", "CalW", "CalH"), ("Cal1Image", "Cal1Ld", "Cal1W", "Cal1H"),
               ("Cal2Image", "Cal2Ld", "Cal2W", "Cal2H"), ("DialBImage", "DialBLd", "DialBW", "DialBH"),
-              ("DialCImage", "DialCLd", "DialCW", "DialCH")]
+              ("DialCImage", "DialCLd", "DialCW", "DialCH"), ("BarsImage", "BarsLd", "BarsW", "BarsH")]
 HIDDEN_GEN = [k for im in GEN_IMAGES for k in im[2:]]
 
 
@@ -519,29 +704,35 @@ def param_names():
     """Parametri del pannello da ricopiare quando Genera ricrea il blocco."""
     skip = ("Generate", "Remove", "Guide", "Duration", "Info", "ColorInfo", "DateToday",
             "LogoPick", "Logo2Pick", "TitlePick")
-    return [src for src, _ in head_inputs() if not src.startswith("Sec") and src not in skip]
+    return [src for src, _ in head_inputs() if not src.startswith("Sec") and "Help" not in src and src not in skip]
 
 
 def head_inputs():
     """(input, scheda) nell'ordine dell'Inspector."""
-    prog = ["SecPreset", "Preset", "Reel", "DurSel", "SecSlots"] + [i for _, i, _ in SLOT_INPUTS] + [
+    def hb(page):
+        return [page + "Help", page + "HelpT"]
+    prog = ["SecPreset"] + hb("Progetto") + ["Preset", "Reel", "DurSel", "SecSlots"] + [i for _, i, _ in SLOT_INPUTS] + [
         "ProgramTC", "Breaks", "MarkersOn", "MarkerEvery", "TailOn", "Generate", "Remove", "Guide", "Duration",
         "Info", "SecCustom", "Custom", "BarsSec", "SlateSec", "GapSec", "CountFrom", "TailSec"]
     out = [(x, "Progetto") for x in prog]
-    data = (["SecProd"] + [f for f, _, _ in PRODUCTION_FIELDS] + ["DateAuto", "DateToday", "SecPost"]
+    data = (["SecProd"] + hb("Dati") + [f for f, _, _ in PRODUCTION_FIELDS] + ["DateAuto", "DateToday", "SecPost"]
             + [f for f, _, _ in POST_FIELDS] + ["Phase"] + [f for f, _, _ in STATUSES] + ["Note"])
     out += [(x, "Dati") for x in data]
-    look = (["SecStyle", "SlateStyle", "TitleImage", "TitlePick", "TitleImageSize",
+    slate = (["SecStyle"] + hb("Slate") + ["SlateStyle", "TitleImage", "TitlePick", "TitleImageSize",
              "SecLogo", "Logo", "LogoPick", "LogoPos", "LogoSize", "Logo2", "Logo2Pick", "LogoPos2", "LogoSize2",
-             "LogoOnTail", "SecCd", "CdStyle", "CdLogo", "CdLogoSize", "CdInfo"] + [k for k, _, _, _ in CD_FIELDS]
-            + ["SecLook"] + color_inputs())
-    out += [(x, "Aspetto") for x in look]
-    guides = (["SecGuides", "GuidesSlate", "GuidesCd"]
-              + [x for k in GUIDE_KEYS for x in [k] + ["C%s%s" % (k, ch) for ch in ("Red", "Green", "Blue")]]
-              + ["SecEnd", "EndDot", "EndDotPos", "EndDotSize"])
+             "LogoOnTail", "SecLook"] + color_inputs())
+    out += [(x, "Slate") for x in slate]
+    cd = (["SecCd"] + hb("Countdown") + ["CdStyle", "CdTheme", "CdDisc", "CdCF"]
+          + [p + ch for p, _, _ in CD_COLORS for ch in ("Red", "Green", "Blue")]
+          + ["SecCdBox", "CdLogo", "CdLogoSize", "CdInfo"] + [k for k, _, _, _ in CD_FIELDS]
+          + ["SecCal", "CalOn", "CalGammaRef"] + cal_inputs()
+          + ["SecEnd", "EndDot", "EndDotPos", "EndDotSize"])
+    out += [(x, "Countdown") for x in cd]
+    guides = (["SecGuides"] + hb("Guide") + ["GuidesSlate", "GuidesCd"]
+              + [x for k in GUIDE_KEYS for x in [k] + ["C%s%s" % (k, ch) for ch in ("Red", "Green", "Blue")]])
     out += [(x, "Guide") for x in guides]
-    tech = (["SecTech", "ColorInfo", "AudioFormat", "SecAudio", "PopLevel", "BeepEach", "SecCal", "CalOn", "CalGammaRef"]
-            + [f for f, _, _ in CALIBRATION])
+    tech = (["SecTech"] + hb("Tecnico") + ["ColorInfo", "AudioFormat", "SecBars", "BarsType", "SecAudio", "PopLevel",
+                                          "BeepEach"])
     out += [(x, "Tecnico") for x in tech]
     return out
 
@@ -566,7 +757,21 @@ def visibility_script(std):
         "SecCustom": 'cat == "custom"', "Custom": 'cat == "custom"', "BarsSec": 'cat == "custom"',
         "SlateSec": 'cat == "custom"', "GapSec": 'cat == "custom"', "CountFrom": 'cat == "custom"',
         "TailSec": 'cat == "custom"', "PopLevel": "pop", "BeepEach": "pop",
+        "SecBars": 'bars or cat == "custom"', "BarsType": 'bars or cat == "custom"',
+        "CdLogoSize": "on('CdLogo')", "EndDotPos": "on('EndDot')", "EndDotSize": "on('EndDot')",
+        "CalGammaRef": "on('CalOn')",
     }
+    for k, _, _, _ in CD_FIELDS:
+        rules[k] = "on('CdInfo')"
+    for k in cal_inputs():
+        rules[k] = "on('CalOn')"
+    for p_, _, _ in CD_COLORS:
+        cond = "num('CdDisc') == 2" if p_ == "CdDiscC" else "num('CdTheme') == %d" % (len(CD_THEMES) - 1)
+        for ch in ("Red", "Green", "Blue"):
+            rules[p_ + ch] = cond
+    for k in GUIDE_KEYS:
+        for ch in ("Red", "Green", "Blue"):
+            rules["C%s%s" % (k, ch)] = "on('%s')" % k
     lines = ["local t = tool",
              "if not t then return end",
              "local cats = %s" % lua_literal(cats),
@@ -575,6 +780,9 @@ def visibility_script(std):
              "local cat = cats[p] or 'cinema'",
              "local pop = (pops[p] or 0) == 1",
              "local dur = math.floor((t:GetInput('DurSel') or 0) + 0.5)",
+             "local function num(k) local v = 0 pcall(function() v = t:GetInput(k) or 0 end) return math.floor(v + 0.5) end",
+             "local function on(k) return num(k) > 0 end",
+             "local bars = (%s)[p] == 1" % lua_literal([1 if (pr.get("bars") or 0) > 0 else 0 for pr in presets]),
              "local grp = nil",
              "pcall(function() grp = t:GetAttrs().TOOLH_GroupParent end)",
              "local function vis(name, gin, on)",
@@ -628,18 +836,24 @@ def slate_columns():
 
 # ------------------------------------------------------------------ elementi grafici
 def bars_stack(g):
-    """Barre 100% a pieno raster (DPP: bianco, giallo, ciano, verde, magenta, rosso, blu, nero)."""
+    """Barre a pieno raster: bianco, giallo, ciano, verde, magenta, rosso, blu, nero. BarsKind 0: 100%
+    (100/0/100/0, DPP); 1: EBU 100/0/75/0 (bianco al 100%, colori al 75%). BarsKind 2: SMPTE RP 219
+    (PNG di Genera nel Loader BarsLd, sopra queste; prima di Genera restano queste)."""
     colors = [(1, 1, 0), (0, 1, 1), (0, 1, 0), (1, 0, 1), (1, 0, 0), (0, 0, 1), (0, 0, 0)]
     top = g.background("Bar0", rgb=["1", "1", "1"])
+    amp = "(math.floor(LK.BarsKind + 0.5) == 1 and 0.75 or 1)"
     for i, (rr, gg, bb) in enumerate(colors, 1):
         cx = (i + 0.5) / 8.0
         g.mask("Bar%dM" % i, "RectangleMask", repr(1 / 8.0 + 0.001), "1", center="{ %s, 0.5 }" % repr(cx))
-        g.background("Bar%d" % i, rgb=[repr(float(rr)), repr(float(gg)), repr(float(bb))], mask="Bar%dM" % i)
+        g.background("Bar%d" % i, rgb=[X("%s * %s" % (repr(float(v)), amp)) if v else "0.0" for v in (rr, gg, bb)],
+                     mask="Bar%dM" % i)
         top = g.merge("BarsM%d" % i, top, "Bar%d" % i)
-    return top
+    on = ('math.floor(LK.BarsKind + 0.5) == 2 and LK.BarsImage.Value ~= "" and LK.BarsW > 0 and LK.BarsH > 0 '
+          'and math.abs(LK.BarsW / LK.BarsH - _A) < 0.01')
+    return g.gate("MBarsImg", top, [("BarsLd", X("Point(0.5, 0.5)"), X("_W / math.max(1, LK.BarsW)"))], on)
 
 
-def leader_stack(g, prefix, base, digit_expr, sweep_vis=None, cd=None, extras=()):
+def leader_stack(g, prefix, base, digit_expr, sweep_vis=None, cd=None, extras=(), line=None, digit=None):
     """Cerchi e croce (un solo Background), braccio rotante e cifra centrale sopra 'base'.
     extras: (nome, livelli, condizione) messi sotto la cifra, ognuno con il suo gate."""
     # Standard: due cerchi spessi e croce a tutto quadro (leader SMPTE / Academy); Pannelli: cerchi piu'
@@ -653,21 +867,21 @@ def leader_stack(g, prefix, base, digit_expr, sweep_vis=None, cd=None, extras=()
            X("%s * _A * ({ 1, 0.7, 0.5 })[_CS + 1]" % LINE_W), chain=prefix + "RingI")
     g.mask(prefix + "LineV", "RectangleMask", X("%s * ({ 1, 0.7, 0.5 })[_CS + 1]" % LINE_W),
            X("({ 1, _RD * _A * 1.12, _RD * _A * 0.08 })[_CS + 1]"), chain=prefix + "LineH")
-    g.background(prefix + "Rings", color="Accent", mask=prefix + "LineV")
+    g.background(prefix + "Rings", color="Accent", rgb=line, mask=prefix + "LineV")
     top = g.merge(prefix + "M1", base, prefix + "Rings")
     if sweep_vis:
         # braccio: dal centro al cerchio (Standard, Pannelli), solo un tratto sul bordo (Quadrante)
         g.mask(prefix + "Arm", "RectangleMask", X("%s * ({ 1.6, 1.1, 0.8 })[_CS + 1]" % LINE_W),
                X("_RD / 2 * _A * ({ 1, 1, 0.3 })[_CS + 1]"),
                center=X("Point(0.5, 0.5 + _RD / 2 * _A * ({ 0.5, 0.5, 0.85 })[_CS + 1])"))
-        g.background(prefix + "ArmBg", color="Accent", mask=prefix + "Arm")
+        g.background(prefix + "ArmBg", color="Accent", rgb=line, mask=prefix + "Arm")
         g.transform(prefix + "Sweep", prefix + "ArmBg", ex("-360 * math.fmod((%s) * _FPS - _REM, _FPS) / _FPS" % cd))
         top = g.gate(prefix + "ArmG", top, [prefix + "Sweep"], sweep_vis)
     for name, layers, cond in extras:
         top = g.gate(name, top, layers, cond)
-    g.text(prefix + "Digit", "{ 0.5, 0.5 }", X("_RD * 0.30 / 0.36"), X(digit_expr), tint("Text"))
+    g.text(prefix + "Digit", "{ 0.5, 0.5 }", X("_RD * 0.30 / 0.36"), X(digit_expr), digit or tint("Text"))
     # Quadrante: cifra Light, piu' grande e piu' fine
-    g.text(prefix + "DigitL", "{ 0.5, 0.5 }", X("_RD * 0.36 / 0.36"), X(digit_expr), tint("Text"), style="Light")
+    g.text(prefix + "DigitL", "{ 0.5, 0.5 }", X("_RD * 0.36 / 0.36"), X(digit_expr), digit or tint("Text"), style="Light")
     digit = g.dissolve(prefix + "DigitS", prefix + "Digit", prefix + "DigitL", X("_CS == 2 and 1 or 0"))
     return g.merge(prefix + "M5", top, digit)
 
@@ -797,11 +1011,13 @@ def footer(g, name, static, note=False, top=None, x="0.5", width="0.94"):
 
 # ------------------------------------------------------------------ stili della slate
 SLATE_STYLES = ["Pannelli (produzione / post / tecnico)", "Quadrante (fotogrammi, dati a destra)",
-                "Orologio (titolo e dati a destra)", "Minimale (titolo al centro)"]
+                "Orologio (titolo e dati a destra)", "Minimale (titolo al centro)",
+                "Testa SMPTE Universal (fotogrammi d'identificazione)"]
 # riquadro del titolo in PNG per stile: (x, y, larghezza, altezza, ancora) in frazioni del quadro;
 # ancora "center" = x e' il centro, "left" = x e' il bordo sinistro.
 TITLE_BOXES = [(0.5, 0.815, 0.60, 0.11, "center"), (0.53, 0.845, 0.42, 0.10, "left"),
-               (0.58, 0.80, 0.38, 0.16, "left"), (0.5, 0.60, 0.70, 0.18, "center")]
+               (0.58, 0.80, 0.38, 0.16, "left"), (0.5, 0.60, 0.70, 0.18, "center"),
+               (0.5, 0.9, 0.36, 0.08, "center")]
 # quadranti: centro x (W), centro y (H), raggio (espressione, frazione di H): stretti sui formati stretti
 DIAL_B = (0.27, 0.5, "math.min(0.36, 0.22 * _A)")
 DIAL_C = (0.28, 0.5, "math.min(0.31, 0.20 * _A)")
@@ -1007,6 +1223,68 @@ def slate_style_d(g, P, base, static):
     return g.merge("DMs", top, status_chips(g, "DSt", "0.21"))
 
 
+# Testa SMPTE Universal (SMPTE 55, ripresa da EBU Tech 3203): la sezione d'identificazione prima del
+# countdown, in fotogrammi che si susseguono durante la slate, come sulla pellicola: dati del film, SMPTE
+# UNIVERSAL LEADER, PICTURE HEAD (con il punto), formato e tipo di suono, PICTURE con rullo / colore /
+# durata, SOUND START (cerchio con la croce). Testi diritti (sulla pellicola stanno di traverso).
+UNIVERSAL_CARDS = [(0.0, 0.30), (0.30, 0.44), (0.44, 0.56), (0.56, 0.70), (0.70, 0.84), (0.84, 1.0)]
+
+
+def slate_style_e(g, P, base, static):
+    S, GP, C = field(P, "slate"), field(P, "gap"), field(P, "countdown")
+    frac = "local _F = ((%s + %s + %s) * _FPS - _REM) / math.max(1, %s * _FPS) " % (S, GP, C, S)
+
+    def card(i):
+        a, b = UNIVERSAL_CARDS[i]
+        return frac + "local _ON = (_F >= %s and _F < %s) " % (repr(a), repr(b))
+
+    top = base
+    # 1) identificazione: etichette a sinistra, valori a destra
+    rows = [("PICTURE", "LK.Title.Value"), ("COMPANY", "LK.Production.Value"), ("SERIES", "LK.Episode.Value"),
+            ("REEL NO.", 'tostring(math.floor(LK.Reel + 0.5))'), ("PROD. NO.", "LK.Code.Value"),
+            ("PLAY DATE", DATE_EXPR % TODAY)]
+    labels = "\\n".join(r[0] for r in rows)
+    values = "(" + " .. '\\n' .. ".join("string.upper(tostring(%s))" % r[1] for r in rows) + ")"
+    pre = card(0)
+    g.text("ULab", X("Point(0.16, 0.5)"), X("2 * 0.045 / _A * _N"), ex('Text(_ON and "%s" or "")' % labels, pre),
+           tint("Text", 0.7), align="l", spacing=1.25)
+    g.text("UVal", X("Point(0.42, 0.5)"), X("2 * 0.06 / _A * _N"), ex('Text(_ON and %s or "")' % values, pre),
+           tint("Text"), style="Regular", align="l", spacing=1.0)
+    # 2) SMPTE UNIVERSAL LEADER, ripetuto come sulla pellicola
+    g.text("ULead", "{ 0.5, 0.5 }", X("2 * 0.05 / _A * _N"),
+           ex('Text(_ON and "SMPTE\\nUNIVERSAL\\nLEADER" or "")', card(1)), tint("Text"), spacing=1.05)
+    # 3) PICTURE HEAD con il punto (la marca di partenza)
+    g.text("UHead", "{ 0.5, 0.5 }", X("2 * 0.06 / _A * _N"), ex('Text(_ON and "PICTURE           HEAD" or "")', card(2)),
+           tint("Text"))
+    g.mask("UDotM", "EllipseMask", X("0.045 / _A"), X("0.045 / _A"), center="{ 0.5, 0.5 }")
+    dot = g.background("UDot", color="Text", mask="UDotM")
+    # 4) formato e tipo di suono
+    asp = 'string.format("%.2f:1", _A)'
+    snd = '(LK.AudioFormat.Value ~= "" and string.upper(LK.AudioFormat.Value) or "—")'
+    g.text("UAsp", "{ 0.5, 0.5 }", X("2 * 0.045 / _A * _N"),
+           ex('Text(_ON and ("ASPECT RATIO   " .. %s .. "\\n\\nTYPE OF SOUND   " .. %s) or "")' % (asp, snd), card(3)),
+           tint("Text"), spacing=1.0)
+    # 5) PICTURE grande e la riga rullo / colore / durata / soggetto
+    g.text("UPic", "{ 0.5, 0.58 }", X("2 * 0.11 / _A * _N"), ex('Text(_ON and "PICTURE" or "")', card(4)), tint("Text"))
+    meta = ('"REEL " .. tostring(math.floor(LK.Reel + 0.5)) .. "     COLOR " .. (LK.ColorInfo.Value ~= "" and '
+            'string.upper(LK.ColorInfo.Value) or "—") .. "     LENGTH " .. LK.Duration.Value .. "     SUBJECT " .. '
+            'string.upper(LK.Title.Value)')
+    text_fit(g, "UMeta", "Point(0.5, 0.36)", "0.03", "0.9", "(_ON and (%s) or '')" % meta, tint("Text", 0.85),
+             style="Regular", pre=card(4))
+    # 6) SOUND START: cerchio con la croce, come i fotogrammi di partenza del suono
+    g.mask("USndR", "EllipseMask", X("0.5 / _A"), X("0.5 / _A"), border=X("%s * 1.4" % LINE_W))
+    g.mask("USndH", "RectangleMask", X("0.2 / _A"), X("%s * 1.6 * _A" % LINE_W), chain="USndR")
+    g.mask("USndV", "RectangleMask", X("%s * 1.6" % LINE_W), "0.2", chain="USndH")
+    ring = g.background("USndBg", color="Text", mask="USndV")
+    g.text("USnd", "{ 0.5, 0.5 }", X("2 * 0.03 / _A * _N"),
+           ex('Text(_ON and "\\n\\n\\n\\nSOUND START" or "")', card(5)), tint("Text"))
+    for name in ("ULab", "UVal", "ULead", "UHead", "UAsp", "UPic", "UMeta", "USnd"):
+        top = g.merge("UM" + name, top, name)
+    top = g.gate("UGDot", top, [dot], "(function() %s return _ON end)()" % card(2))
+    top = g.gate("UGSnd", top, [ring], "(function() %s return _ON end)()" % card(5))
+    return top
+
+
 # ------------------------------------------------------------------ immagini (logo, titolo in PNG)
 def logo_pre(sfx):
     """Lua: riquadro del logo largo LogoSize% del quadro (alto al massimo meta'), margini 3.5% / 4%."""
@@ -1040,6 +1318,43 @@ def title_image_layer():
 
 # ------------------------------------------------------------------ logo e dati sul countdown
 CD_STYLES = ["Standard (leader SMPTE)", "Pannelli (schede grigie)", "Quadrante (moderno)"]
+# Temi del countdown: sfondo, linee (cerchi, croce, braccio), cifra. Numero = grigio fisso, nome = colore
+# del pannello (Accent, Text, CdBgC...), None = sfondo dello stile (nero; antracite su Pannelli).
+# Riferimenti: leader digitale SMPTE RP 428-6 (nero), SMPTE Universal leader (grigio medio, poi scurito),
+# Academy leader (SMPTE 301, chiaro con cifre nere), orologi TV (grigio scuro).
+CD_THEMES = [
+    ("Dallo stile (nero; Pannelli: antracite e disco grigio)", None, "Accent", "Text"),
+    ("Nero: leader digitale SMPTE RP 428-6", 0.0, "Accent", "Text"),
+    ("Grigio medio: SMPTE Universal (linee e cifre bianche)", 0.46, 1.0, 1.0),
+    ("Bianco: Academy (linee e cifre nere)", 0.95, 0.0, 0.0),
+    ("Grigio scuro: orologio TV (linee chiare)", 0.14, 0.85, 1.0),
+    ("Personalizzato (colori qui sotto)", "CdBgC", "CdLineC", "CdDigitC"),
+]
+CD_DISC = ["Dal tema", "Nessuno", "Pieno (colore del disco)"]
+CD_COLORS = [("CdBgC", "Sfondo del countdown", (0.3, 0.3, 0.3)), ("CdLineC", "Cerchi, croce e braccio", (1.0, 1.0, 1.0)),
+             ("CdDigitC", "Cifra", (1.0, 1.0, 1.0)), ("CdDiscC", "Disco dentro il cerchio", (0.2, 0.2, 0.2))]
+
+
+def theme_rgb(slot):
+    """Espressioni R, G, B del colore del tema (slot 1 sfondo, 2 linee, 3 cifra)."""
+    out = []
+    for ch in ("Red", "Green", "Blue"):
+        vals = []
+        for th in CD_THEMES:
+            v = th[slot]
+            if v is None:
+                vals.append("(_CS == 1 and 0.08 or LK.Bg%s)" % ch)
+            elif isinstance(v, str):
+                vals.append("LK.%s%s" % (v, ch))
+            else:
+                vals.append(repr(float(v)))
+        out.append(X("({ %s })[math.floor(LK.CdTheme + 0.5) + 1] or 0" % ", ".join(vals)))
+    return out
+
+
+# disco dentro il cerchio: "Dal tema" lo accende solo sullo stile Pannelli del tema "Dallo stile"
+CD_DISC_ON = ("(math.floor(LK.CdDisc + 0.5) == 2 or (math.floor(LK.CdDisc + 0.5) == 0 "
+              "and math.floor(LK.CdTheme + 0.5) == 0 and _CS == 1))")
 # spunta, etichetta, default, (etichetta sullo schermo, valore) per i ruoli della seconda riga
 CD_FIELDS = [("CdTitle", "Titolo", 1, None), ("CdVersion", "Versione", 0, None),
              ("CdDirector", "Regia", 1, ("DIRECTOR", "LK.Director.Value")),
@@ -1106,7 +1421,7 @@ def countdown_extras(g):
            center=X("Point(0.5, SP / 2)", data), border=X("blw / _W", data),
            level=X("(%s and N > 0) and 1 or 0" % info_on, data), chain="CdBoxLB")
     g.background("CdBoxFill", rgb=["0", "0", "0"], mask="CdBoxDF")
-    g.background("CdBoxLine", color="Accent", mask="CdBoxDB")
+    g.background("CdBoxLine", rgb=theme_rgb(2), mask="CdBoxDB")
     logo = ("Logo1Ld", X("Point(0.5, cy)", CD_LOGO), X("lw / iw", CD_LOGO))
     g.text("CdText", X("Point(0.5, SP / 2)", data), X("2 * CP / _W", data), ex("Text(S)", data), tint("Text", 0.92))
     return [("CdBoxG", ["CdBoxFill", "CdBoxLine"], "(%s) or (%s)" % (logo_on, info_on)),
@@ -1189,88 +1504,103 @@ def head(std=None):
     LEADVIS = "(%s > 0 and _REM <= %s * _FPS and (_REM > 2 * _FPS or (_REM == 2 * _FPS and %s > 0.5)))" % (C, C, POP)
     ANY_GUIDE = "((%s) > 0.5)" % " + ".join("LK.%s" % k for k in GUIDE_KEYS)
     static = pv(P, "slate_lines", fn=lambda p: "\n".join(x for x in p.get("slate_lines", []) if "{" not in x))
-    vis = visibility_script(std)
+    # lo script di visibilita' sta una volta sola nell'input nascosto VisCode; le voci che lo usano lo eseguono
+    vis_code = "local tool = ...\n" + visibility_script(std)
+    vis = ('local c = "" pcall(function() c = tool:GetInput("VisCode") or "" end) '
+           'local f = (c ~= "") and (loadstring or load)(c) if f then pcall(f, tool) end')
 
-    # --- controlli, per scheda
-    prog = (uc_label("SecPreset", "LeaderKit %s" % __version__)
-            + uc_combo("Preset", "Standard", [p["name"] for p in P], on_change=vis)
-            + uc_slider("Reel", "Rullo (FFOA a N:00:08:00)", 1, 23, 1)
-            + uc_combo("DurSel", "Durata programma", ["Libera (fine dei tuoi clip)", "Slot dello standard",
-                                                     "Personalizzata"], on_change=vis)
+    # --- controlli, per scheda (stesso ordine di head_inputs(); verificato in fondo)
+    T = TIPS
+    prog = (uc_label("SecPreset", "LeaderKit %s" % __version__) + help_block("Progetto")
+            + tip(uc_combo("Preset", "Standard", [p["name"] for p in P], on_change=vis), T["Preset"])
+            + tip(uc_slider("Reel", "Rullo (FFOA a N:00:08:00)", 1, 23, 1), T["Reel"])
+            + tip(uc_combo("DurSel", "Durata programma", ["Libera (fine dei tuoi clip)", "Slot dello standard",
+                                                         "Personalizzata"], on_change=vis), T["DurSel"])
             + uc_label("SecSlots", "Slot (quello della categoria dello standard)", fold=len(SLOT_INPUTS)))
     for cat, inp, label in SLOT_INPUTS:
-        prog += uc_combo(inp, label, [x[0] for x in SLOTS[cat]])
-    prog += (uc_text("ProgramTC", "Durata (HH:MM:SS:FF)")
-             + uc_combo("Breaks", "Break pubblicitari", BREAKS)
-             + uc_check("MarkersOn", "Marker di fine rullo", 1)
-             + uc_slider("MarkerEvery", "Rullo ogni (min, 0 = standard)", 0, 60, 0, integer=False)
-             + uc_check("TailOn", "Inserisci la coda", 1)
-             + uc_button("Generate", "Genera sulla timeline", engine("generate", std))
-             + uc_button("Remove", "Rimuovi elementi generati", engine("remove", std))
+        prog += tip(uc_combo(inp, label, [x[0] for x in SLOTS[cat]]), T["Slot"])
+    prog += (tip(uc_text("ProgramTC", "Durata (HH:MM:SS:FF)"), T["ProgramTC"])
+             + tip(uc_combo("Breaks", "Break pubblicitari", BREAKS), T["Breaks"])
+             + tip(uc_check("MarkersOn", "Marker di fine rullo", 1), T["MarkersOn"])
+             + tip(uc_slider("MarkerEvery", "Rullo ogni (min, 0 = standard)", 0, 60, 0, integer=False), T["MarkerEvery"])
+             + tip(uc_check("TailOn", "Inserisci la coda", 1), T["TailOn"])
+             + tip(uc_button("Generate", "Genera sulla timeline", engine("generate", std)), T["Generate"])
+             + tip(uc_button("Remove", "Rimuovi elementi generati", engine("remove", std)), T["Remove"])
              + uc_text("Guide", "Esito", lines=6, read_only=True)
              + uc_text("Duration", "Durata del programma", read_only=True)
              + uc_text("Info", "Timecode", lines=2, read_only=True)
              + uc_label("SecCustom", "Durate del leader (standard Personalizzato)", fold=6)
-             + uc_check("Custom", "Personalizza le durate", 0)
+             + tip(uc_check("Custom", "Personalizza le durate", 0), T["Custom"])
              + uc_slider("BarsSec", "Barre (s)", 0, 60, 0) + uc_slider("SlateSec", "Slate (s)", 0, 30, 8)
              + uc_slider("GapSec", "Nero prima del programma (s)", 0, 10, 2)
              + uc_slider("CountFrom", "Countdown da (0 = nessuno)", 0, 11, 8)
              + uc_slider("TailSec", "Coda (s)", 0, 30, 8))
     today_code = 'pcall(function() tool:SetInput("Date", os.date("%d/%m/%Y")) end)'
-    data = uc_label("SecProd", "Produzione") + "".join(uc_text(f, label) for f, label, _ in PRODUCTION_FIELDS)
-    data += (uc_check("DateAuto", "Data sempre aggiornata (data del render)", 1)
+    data = uc_label("SecProd", "Produzione") + help_block("Dati")
+    data += "".join(uc_text(f, label) for f, label, _ in PRODUCTION_FIELDS)
+    data += (tip(uc_check("DateAuto", "Data sempre aggiornata (data del render)", 1), T["DateAuto"])
              + uc_button("DateToday", "Oggi", today_code)
              + uc_label("SecPost", "Post-produzione"))
     data += "".join(uc_text(f, label) for f, label, _ in POST_FIELDS)
-    data += uc_combo("Phase", "Fase di lavorazione", PHASES)
-    data += "".join(uc_combo(f, label, STATUS_VALUES) for f, label, _ in STATUSES)
+    data += tip(uc_combo("Phase", "Fase di lavorazione", PHASES), T["Phase"])
+    data += "".join(tip(uc_combo(f, label, STATUS_VALUES), T["Status"]) for f, label, _ in STATUSES)
     data += uc_text("Note", "Note (riga libera)")
-    look = (uc_label("SecStyle", "Slate")
-            + uc_combo("SlateStyle", "Stile", SLATE_STYLES)
-            + uc_text("TitleImage", "Titolo in PNG (file)", on_change=image_script("TitleImage", "sync"))
-            + uc_button("TitlePick", "Scegli il titolo in PNG...", image_script("TitleImage", "pick"))
-            + uc_slider("TitleImageSize", "Dimensione del titolo in PNG (%)", 20, 200, 100, integer=False)
-            + uc_label("SecLogo", "Loghi (sulla slate; anche sulla coda se vuoi)")
-            + uc_text("Logo", "Logo (file)", on_change=image_script("Logo", "sync"))
-            + uc_button("LogoPick", "Scegli il logo...", image_script("Logo", "pick"))
-            + uc_combo("LogoPos", "Posizione", LOGO_POS)
-            + uc_slider("LogoSize", "Larghezza (% del quadro)", 5, 100, 12, integer=False)
-            + uc_text("Logo2", "Secondo logo (file)", on_change=image_script("Logo2", "sync"))
-            + uc_button("Logo2Pick", "Scegli il secondo logo...", image_script("Logo2", "pick"))
-            + uc_combo("LogoPos2", "Posizione del secondo logo", LOGO_POS)
-            + uc_slider("LogoSize2", "Larghezza del secondo logo (%)", 5, 100, 12, integer=False)
-            + uc_check("LogoOnTail", "Loghi anche sulla coda", 0)
-            + uc_label("SecCd", "Countdown: stile, logo sopra il cerchio, dati sotto")
-            + uc_combo("CdStyle", "Stile del countdown", CD_STYLES)
-            + uc_check("CdLogo", "Logo sopra il countdown (riquadro nero)", 0)
-            + uc_slider("CdLogoSize", "Dimensione del riquadro del logo (%)", 20, 140, 70, integer=False)
-            + uc_check("CdInfo", "Dati sotto il countdown (riquadro nero)", 0)
-            + "".join(uc_check(k, "  " + lab, d) for k, lab, d, _ in CD_FIELDS)
-            + uc_label("SecLook", "Colori") + color_controls())
-    guide = (uc_label("SecGuides", "Frame lines e safe area (a pixel interi)")
-             + uc_check("GuidesSlate", "Sulla slate (sotto i testi)", 1)
-             + uc_check("GuidesCd", "Sul countdown e la taratura (Genera impagina la taratura dentro)", 1)
-             + "".join(uc_check(k, lab, 0) + uc_color(*[guide_color(k)[i] for i in (0, 1, 3, 2)])
+    slate = (uc_label("SecStyle", "Slate") + help_block("Slate")
+             + tip(uc_combo("SlateStyle", "Stile della slate", SLATE_STYLES), T["SlateStyle"])
+             + tip(uc_text("TitleImage", "Titolo in PNG (file)", on_change=image_script("TitleImage", "sync")), T["TitleImage"])
+             + uc_button("TitlePick", "Scegli il titolo in PNG...", image_script("TitleImage", "pick"))
+             + tip(uc_slider("TitleImageSize", "Dimensione del titolo in PNG (%)", 20, 200, 100, integer=False), T["TitleImageSize"])
+             + uc_label("SecLogo", "Loghi (sulla slate; anche sulla coda se vuoi)")
+             + tip(uc_text("Logo", "Logo (file)", on_change=image_script("Logo", "sync")), T["Logo"])
+             + uc_button("LogoPick", "Scegli il logo...", image_script("Logo", "pick"))
+             + uc_combo("LogoPos", "Posizione", LOGO_POS)
+             + tip(uc_slider("LogoSize", "Larghezza (% del quadro)", 5, 100, 12, integer=False), T["LogoSize"])
+             + tip(uc_text("Logo2", "Secondo logo (file)", on_change=image_script("Logo2", "sync")), T["Logo"])
+             + uc_button("Logo2Pick", "Scegli il secondo logo...", image_script("Logo2", "pick"))
+             + uc_combo("LogoPos2", "Posizione del secondo logo", LOGO_POS)
+             + tip(uc_slider("LogoSize2", "Larghezza del secondo logo (%)", 5, 100, 12, integer=False), T["LogoSize"])
+             + tip(uc_check("LogoOnTail", "Loghi anche sulla coda", 0), T["LogoOnTail"])
+             + uc_label("SecLook", "Colori di slate, coda e grafica") + tip(color_controls(), T["Colors"]))
+    cd = (uc_label("SecCd", "Countdown") + help_block("Countdown")
+          + tip(uc_combo("CdStyle", "Stile del countdown", CD_STYLES), T["CdStyle"])
+          + tip(uc_combo("CdTheme", "Tema (sfondo e colori)", [t[0] for t in CD_THEMES], on_change=vis), T["CdTheme"])
+          + tip(uc_combo("CdDisc", "Disco dentro il cerchio", CD_DISC, on_change=vis), T["CdDisc"])
+          + tip(uc_check("CdCF", "Fotogrammi di controllo C C F F sul 4 (SMPTE Universal)", 0), T["CdCF"])
+          + "".join(hide(tip(uc_color(pfx, lab, CD_GROUP + i, d), T["CdColor"])) for i, (pfx, lab, d) in enumerate(CD_COLORS))
+          + uc_label("SecCdBox", "Logo e dati sul countdown")
+          + tip(uc_check("CdLogo", "Logo sopra il countdown (riquadro nero)", 0, on_change=vis), T["CdLogo"])
+          + hide(uc_slider("CdLogoSize", "Dimensione del riquadro del logo (%)", 20, 140, 70, integer=False))
+          + tip(uc_check("CdInfo", "Dati sotto il countdown (riquadro nero)", 0, on_change=vis), T["CdInfo"])
+          + "".join(hide(uc_check(k, "  " + lab, d)) for k, lab, d, _ in CD_FIELDS)
+          + uc_label("SecCal", "Taratura (immagine creata da Genera)")
+          + tip(uc_check("CalOn", "Strumenti di taratura", 1, on_change=vis), T["CalOn"])
+          + tip(uc_combo("CalGammaRef", "Gamma di riferimento", GAMMA_REFS), T["CalGammaRef"])
+          + "".join(cal_section(f, label) for f, label, _ in CALIBRATION)
+          + uc_label("SecEnd", "Ultimo fotogramma del leader (il programma parte al successivo)")
+          + tip(uc_check("EndDot", "Pallino sull'ultimo fotogramma", 0, on_change=vis), T["EndDot"])
+          + hide(uc_combo("EndDotPos", "Posizione del pallino", END_DOT_POS))
+          + hide(uc_slider("EndDotSize", "Diametro del pallino (% dell'altezza)", 1, 20, 5, integer=False)))
+    guide = (uc_label("SecGuides", "Frame lines e safe area (a pixel interi)") + help_block("Guide")
+             + tip(uc_check("GuidesSlate", "Sulla slate (sotto i testi)", 1), T["GuidesSlate"])
+             + tip(uc_check("GuidesCd", "Sul countdown e la taratura (Genera impagina la taratura dentro)", 1), T["GuidesCd"])
+             + "".join(tip(uc_check(k, lab, 0, on_change=vis), T["Guide"])
+                       + hide(uc_color(*[guide_color(k)[i] for i in (0, 1, 3, 2)]))
                        for k, lab in [("FLTL", "Formato della timeline")]
                        + [(f, "Frame line " + lab + ":1") for f, lab, _ in FRAMELINES]
-                       + [("SafeAction", "Safe action 93% (EBU R95)"), ("SafeTitle", "Safe title 90%")])
-             + uc_label("SecEnd", "Ultimo fotogramma del leader (il programma parte al successivo)")
-             + uc_check("EndDot", "Pallino sull'ultimo fotogramma", 0)
-             + uc_combo("EndDotPos", "Posizione del pallino", END_DOT_POS)
-             + uc_slider("EndDotSize", "Diametro del pallino (% dell'altezza)", 1, 20, 5, integer=False))
-    tech = (uc_label("SecTech", "Dati tecnici")
-            + uc_text("ColorInfo", "Spazio colore (letto da Genera)", read_only=True)
-            + uc_text("AudioFormat", "Formato audio (es. 5.1 + stereo, 24 bit 48 kHz)")
+                       + [("SafeAction", "Safe action 93% (EBU R95)"), ("SafeTitle", "Safe title 90%")]))
+    tech = (uc_label("SecTech", "Dati tecnici") + help_block("Tecnico")
+            + tip(uc_text("ColorInfo", "Spazio colore (letto da Genera)", read_only=True), T["ColorInfo"])
+            + tip(uc_text("AudioFormat", "Formato audio (es. 5.1 + stereo, 24 bit 48 kHz)"), T["AudioFormat"])
+            + uc_label("SecBars", "Barre (Genera sceglie quelle dello standard)")
+            + tip(uc_combo("BarsType", "Tipo di barre", BARS_TYPES), T["BarsType"])
             + uc_label("SecAudio", "Audio (tono 1 kHz)")
-            + uc_combo("PopLevel", "Livello pop", ["Dallo standard", "-20 dBFS (SMPTE / USA)", "-18 dBFS (EBU / Europa)"])
-            + uc_check("BeepEach", "Bip anche su 8..3 (non standard)", 0)
-            + uc_label("SecCal", "Taratura sul countdown (immagine creata da Genera)")
-            + uc_check("CalOn", "Strumenti di taratura", 1)
-            + uc_combo("CalGammaRef", "Gamma di riferimento", GAMMA_REFS)
-            + "".join(uc_check(f, label, d) for f, label, d in CALIBRATION))
-    hidden = "".join(uc_hidden(k) for k in HIDDEN_NUM + HIDDEN_GEN) + "".join(uc_hidden(im[0], "Text") for im in GEN_IMAGES)
-    uc = (on_page("Progetto", prog) + on_page("Dati", data) + on_page("Aspetto", look)
+            + tip(uc_combo("PopLevel", "Livello pop", ["Dallo standard", "-20 dBFS (SMPTE / USA)", "-18 dBFS (EBU / Europa)"]), T["PopLevel"])
+            + tip(uc_check("BeepEach", "Bip anche su 8..3 (non standard)", 0), T["BeepEach"]))
+    hidden = uc_hidden("VisCode", "Text") + "".join(uc_hidden(k) for k in HIDDEN_NUM + HIDDEN_GEN) + "".join(uc_hidden(im[0], "Text") for im in GEN_IMAGES)
+    uc = (on_page("Progetto", prog) + on_page("Dati", data) + on_page("Slate", slate) + on_page("Countdown", cd)
           + on_page("Guide", guide) + on_page("Tecnico", tech) + hidden)
+    shown = re.findall(r"^\t+(\w+) = \{", uc, re.M)
+    assert shown[:len(head_inputs())] == [x for x, _ in head_inputs()], "ordine dell'Inspector diverso da head_inputs()"
 
     values = [("Preset", "0"), ("Reel", "1"), ("DurSel", "0"), ("ProgramTC", '"00:00:30:00"'), ("Breaks", "0"),
               ("Custom", "0"), ("BarsSec", "0"), ("SlateSec", "8"), ("GapSec", "2"), ("CountFrom", "8"),
@@ -1280,18 +1610,21 @@ def head(std=None):
               ("DateAuto", "1"), ("Phase", "0"), ("Note", '""'), ("GuidesSlate", "1"), ("GuidesCd", "1"),
               ("FLTL", "0"), ("SafeAction", "0"), ("SafeTitle", "0"), ("EndDot", "0"), ("EndDotPos", "0"),
               ("EndDotSize", "5"), ("ColorInfo", '""'), ("AudioFormat", '""'),
-              ("PopLevel", "0"), ("BeepEach", "0"), ("Logo", '""'), ("LogoPos", "0"), ("LogoSize", "12"),
+              ("BarsType", "0"), ("PopLevel", "0"), ("BeepEach", "0"), ("Logo", '""'), ("LogoPos", "0"), ("LogoSize", "12"),
               ("Logo2", '""'), ("LogoPos2", "1"), ("LogoSize2", "12"),
               ("SlateStyle", "0"), ("TitleImage", '""'), ("TitleImageSize", "100"),
-              ("LogoOnTail", "0"), ("CdStyle", "0"), ("CalOn", "1"), ("CalGammaRef", "0"), ("CdLogo", "0"), ("CdLogoSize", "70"), ("CdInfo", "0")]
+              ("LogoOnTail", "0"), ("CdStyle", "0"), ("CdTheme", "0"), ("CdDisc", "0"), ("CdCF", "0"), ("CalOn", "1"), ("CalGammaRef", "0"), ("CdLogo", "0"), ("CdLogoSize", "70"), ("CdInfo", "0")]
     values += [(k, str(d)) for k, _, d, _ in CD_FIELDS]
     values += [(i, str(std.get("slot_defaults", {}).get(c, 0))) for c, i, _ in SLOT_INPUTS]
     values += [(f, '""') for f, _, _ in PRODUCTION_FIELDS + POST_FIELDS if f not in ("Title", "Version")]
     values += [(f, "0") for f, _, _ in STATUSES]
     values += [(f, "0") for f, _, _ in FRAMELINES]
-    values += [(f, str(d)) for f, _, d in CALIBRATION]
+    values += [(f, str(d)) for f, _, d in CALIBRATION] + [("CalStarsPos", "0")]
+    values += [(f + "Help", lua_string(CAL_HELP[f])) for f, _, _ in CALIBRATION]
     values += [(k, "0") for k in HIDDEN_NUM + HIDDEN_GEN] + [(im[0], '""') for im in GEN_IMAGES]
-    values += color_values() + [(p + ch, repr(v)) for p, _, d in GUIDE_COLORS for ch, v in zip(("Red", "Green", "Blue"), d)]
+    values += color_values() + [(p + ch, repr(v)) for p, _, d in GUIDE_COLORS + CD_COLORS
+                                for ch, v in zip(("Red", "Green", "Blue"), d)]
+    values += [(page + "HelpT", lua_string(HELP[page][1])) for page in PAGES] + [("VisCode", lua_string(vis_code))]
 
     g = G()
     g.controls(values, uc)
@@ -1308,7 +1641,12 @@ def head(std=None):
     guides = guides_layer(g)
     base = g.gate("MGuides", "Bg", [guides], "%s and LK.GuidesSlate > 0.5" % ANY_GUIDE)
     # una taratura per stile (Genera le disegna tutte): cambiando stile si vede subito quella giusta
-    cbase = "Bg"
+    # countdown: sfondo e disco del tema (dal vivo), poi la taratura di Genera
+    g.background("CdBg", rgb=theme_rgb(1))
+    g.mask("CdDiscM", "EllipseMask", X("_RD * 0.985"), X("_RD * 0.985"))
+    g.background("CdDiscBg", rgb=[X("(math.floor(LK.CdDisc + 0.5) == 2) and LK.CdDiscC%s or 0.2" % ch)
+                                  for ch in ("Red", "Green", "Blue")], mask="CdDiscM")
+    cbase = g.gate("MCdDisc", "CdBg", ["CdDiscBg"], CD_DISC_ON)
     for i, k in enumerate(("Cal", "Cal1", "Cal2")):
         cal_on = ('LK.CalOn > 0.5 and _CS == %d and LK.%sImage.Value ~= "" and LK.%sW > 0 and LK.%sH > 0 '
                   'and math.abs(LK.%sW / LK.%sH - _A) < 0.01' % (i, k, k, k, k, k))
@@ -1316,7 +1654,7 @@ def head(std=None):
     cbase = g.gate("MGuidesCd", cbase, [guides], "%s and LK.GuidesCd > 0.5" % ANY_GUIDE)
     # slate: quattro stili alternati, poi titolo in PNG, loghi e orologio ident
     s_ = slate_panels(g, P, base, static)
-    for i, fn in ((1, slate_style_b), (2, slate_style_c), (3, slate_style_d)):
+    for i, fn in ((1, slate_style_b), (2, slate_style_c), (3, slate_style_d), (4, slate_style_e)):
         s_ = g.dissolve("SStyle%d" % i, s_, fn(g, P, base, static), "(math.floor(LK.SlateStyle + 0.5) == %d) and 1 or 0" % i)
     s_ = g.gate("STitleImg", s_, [title_image_layer()], 'LK.TitleImage.Value ~= "" and LK.TitleW > 0 and LK.TitleH > 0')
     s_ = g.gate("SLogo1", s_, [logo_layer("", "Logo1Ld")], logo_cond(""))
@@ -1325,10 +1663,21 @@ def head(std=None):
     top = g.dissolve("MSlate", top, s_, ex("(%s) and 1 or 0" % SLATEVIS))
     # countdown + 2-pop, sopra le frame lines (la taratura PNG di Genera sta sulla traccia sopra)
     lead = leader_stack(g, "L", cbase, 'Text((_REM < %s * _FPS and _REM >= 2 * _FPS) and tostring(math.ceil(_REM / _FPS)) or "")' % C,
-                        sweep_vis="_REM < %s * _FPS and _REM > 2 * _FPS" % C, cd=C, extras=countdown_extras(g))
+                        sweep_vis="_REM < %s * _FPS and _REM > 2 * _FPS" % C, cd=C, extras=countdown_extras(g),
+                        line=theme_rgb(2), digit=theme_rgb(3))
     top = g.dissolve("MLeader", top, lead, ex("(%s) and 1 or 0" % LEADVIS))
-    g.text("PicStart", "{ 0.5, 0.5 }", "0.075", 'Text("PICTURE\\nSTART")', tint("Text"), spacing=1.0)
-    top = g.gate("MPicStart", top, ["PicStart"], "%s > 0 and _REM == %s * _FPS" % (C, C))
+    # fotogrammi di controllo del leader SMPTE Universal: C C in alto e F F in basso durante il 4
+    cf = []
+    for i, (txt, x, y) in enumerate((("C", 0.1, 0.84), ("C", 0.9, 0.84), ("F", 0.1, 0.16), ("F", 0.9, 0.16))):
+        cf.append(g.text("CF%d" % i, "{ %s, %s }" % (x, y), X("2 * 0.11 / _A * _N"), 'Text("%s")' % txt, theme_rgb(3)))
+    top = g.gate("MCF", top, cf, "LK.CdCF > 0.5 and %s > 0 and _REM <= %s * _FPS and math.ceil(_REM / _FPS) == 4"
+                 % (C, C))
+    # fotogramma Picture Start come nel leader SMPTE RP 428-6: fondo verde-grigio chiaro a tutto quadro e
+    # scritta nera, PICTURE sopra e START piu' grande sotto
+    g.background("PicStartBg", rgb=["0.725", "0.792", "0.718"])
+    g.text("PicStart", "{ 0.5, 0.66 }", X("0.15 * _N"), 'Text("PICTURE")', ["0", "0", "0"])
+    g.text("PicStart2", "{ 0.5, 0.37 }", X("0.27 * _N"), 'Text("START")', ["0", "0", "0"], style="Regular")
+    top = g.gate("MPicStart", top, ["PicStartBg", "PicStart", "PicStart2"], "%s > 0 and _REM == %s * _FPS" % (C, C))
     g.background("Flash", rgb=["1", "1", "1"])
     top = g.gate("MFlash", top, ["Flash"], "%s > 0.5 and _REM <= %s and _REM > %s - %s" % (FL_ON, SYNCREM, SYNCREM, SYNCFR))
     # pallino sull'ultimo fotogramma del leader: il programma inizia al fotogramma successivo
