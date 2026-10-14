@@ -316,7 +316,7 @@ for _, t in ipairs(tracks.video) do
       for _, n in ipairs(names) do
         local ld, ti = it.comp.loaders[n], it.comp.tool.inputs
         local pre = ({ Logo1Ld = "Logo", Logo2Ld = "Logo2", TitleLd = "Title", CalLd = "Cal", Cal1Ld = "Cal1", Cal2Ld = "Cal2", DialBLd = "DialB",
-          DialCLd = "DialC" })[n]
+          DialCLd = "DialC", BarsLd = "Bars" })[n]
         print(string.format("RESULT loader=%s|%s|%s|%s|%s|%s", it.name, n, tostring(ld.Clip), tostring(ti[pre .. "W"]),
           tostring(ti[pre .. "H"]), tostring(ld.inputs.HoldLastFrame)))
       end

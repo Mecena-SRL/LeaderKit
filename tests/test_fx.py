@@ -1482,3 +1482,143 @@ def test_burnin_big_timecode_independent(built):
     # la zona libera dei watermark segue il TC spostato / ingrandito
     w = lambda **kw: burn_tools(1920, 1080, BBig=1, BWater=1, BWaterPos=2, **kw)["Water"]["Center"][1]
     assert w(BBigPct=18) > w() and w(BBigY=10) > w()
+
+
+# ------------------------------------------------------------------ 1.2: barre e riferimenti colorimetrici
+BARS_LUA = r"""
+dofile(arg[1])
+assert(LK_OVERLAY.renderBars(arg[2], tonumber(arg[3]), tonumber(arg[4]), { prim = arg[5] }))
+"""
+
+
+def bars_png(tmp_path, w, h, prim="709"):
+    from PIL import Image
+    script = tmp_path / "bars.lua"
+    script.write_text(BARS_LUA)
+    png = tmp_path / ("bars_%dx%d_%s.png" % (w, h, prim))
+    out = subprocess.run([LUA, str(script), os.path.join(ROOT, "fx", "overlay.lua"), str(png), str(w), str(h), prim],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert out.returncode == 0, out.stderr.decode()
+    im = Image.open(png).convert("RGB")
+    return im
+
+
+def runs(im, y):
+    """Tratti di colore costante della riga y: [(x iniziale, colore)]."""
+    out, prev = [], None
+    for x in range(im.width):
+        p = im.getpixel((x, y))
+        if p != prev:
+            out.append((x, p))
+            prev = p
+    return out
+
+
+def test_bars_rp219_geometry_and_levels(tmp_path):
+    """SMPTE RP 219 a 1920x1080: lati 240 px, barre 3a/28, file 7/12, 1/12, 1/12, 3/12, PLUGE e rampa."""
+    im = bars_png(tmp_path, 1920, 1080)
+    g, q = 102, 191                                                   # 40% e 75% a 8 bit
+    top = runs(im, 300)
+    assert [x for x, _ in top] == [0, 240, 446, 651, 857, 1063, 1269, 1474, 1680]
+    assert [c for _, c in top] == [(g, g, g), (q, q, q), (q, q, 0), (0, q, q), (0, q, 0), (q, 0, q), (q, 0, 0), (0, 0, q),
+                                   (g, g, g)]
+    row2 = runs(im, 650)
+    assert row2[0] == (0, (0, 255, 255)) and row2[1] == (240, (0, 63, 105)) and row2[2] == (446, (q, q, q))
+    assert row2[-1] == (1680, (0, 0, 255))                            # -I tra ciano 100% e 75% bianco
+    assert im.getpixel((300, 760)) == (65, 0, 120)                    # +Q
+    ramp = [im.getpixel((x, 760))[0] for x in range(446, 1474)]
+    assert ramp[0] == 0 and ramp[-1] == 255 and all(b >= a for a, b in zip(ramp, ramp[1:]))
+    assert im.getpixel((1500, 760)) == (255, 255, 255) and im.getpixel((1700, 760)) == (255, 0, 0)
+    # fila 4: 15% grigio, 0%, 100% bianco (2c), PLUGE +2% (5) e +4% (10) a c/3, 15% grigio
+    pl = runs(im, 950)
+    assert pl == [(0, (38, 38, 38)), (240, (0, 0, 0)), (549, (255, 255, 255)), (960, (0, 0, 0)), (1269, (5, 5, 5)),
+                  (1337, (0, 0, 0)), (1406, (10, 10, 10)), (1474, (0, 0, 0)), (1680, (38, 38, 38))]
+    assert im.getpixel((500, 629)) == (q, q, 0)                       # confini delle file: 630, 720, 810
+    assert im.getpixel((300, 630)) == (0, 63, 105) and im.getpixel((300, 720)) == (65, 0, 120)
+    assert im.getpixel((300, 810)) == (0, 0, 0)
+
+
+def test_bars_rp219_wide_raster_and_rec2020(tmp_path):
+    """2K DCI: barre come a 1920, lati di 304 px; con Rec.2020 -I e +Q diventano 75% bianco e 0% nero."""
+    im = bars_png(tmp_path, 2048, 1080)
+    assert [x for x, _ in runs(im, 300)][:3] == [0, 304, 510] and runs(im, 300)[-1][0] == 1744
+    im = bars_png(tmp_path, 3840, 2160, "2020")
+    assert im.getpixel((600, 1300)) == (191, 191, 191) and im.getpixel((600, 1500)) == (0, 0, 0)
+
+
+def test_bars_kind_in_generator(built):
+    """BarsKind 0: 100%; 1: EBU 75% (bianco 100%); 2: PNG RP 219 sopra le barre, solo se caricato."""
+    t = dump_tools(HEAD(built), 25, 1920, 1080, 1000, 0, BarsKind=0)
+    assert t["Bar1"]["TopLeftRed"] == 1 and t["Bar1"]["TopLeftBlue"] == 0 and t["MBarsImg"]["Mix"] == 0
+    t = dump_tools(HEAD(built), 25, 1920, 1080, 1000, 0, BarsKind=1)
+    assert t["Bar0"]["TopLeftRed"] == 1 and t["Bar1"]["TopLeftRed"] == 0.75 and t["Bar6"]["TopLeftBlue"] == 0.75
+    t = dump_tools(HEAD(built), 25, 1920, 1080, 1000, 0, BarsKind=2)
+    assert t["MBarsImg"]["Mix"] == 0                                  # niente PNG: restano le barre 100%
+    t = dump_tools(HEAD(built), 25, 1920, 1080, 1000, 0, BarsKind=2, BarsImage="b.png", BarsW=1920, BarsH=1080)
+    assert t["MBarsImg"]["Mix"] == 1 and abs(t["MBarsImgM1"]["Size"] - 1) < 1e-9
+
+
+def test_engine_bars_type(code):
+    """Barre dallo standard (DPP 100%) o scelte nel pannello (SMPTE RP 219: PNG nel Loader)."""
+    res, log = run_engine(code, fps="25", df="0", preset="dpp_uk", head=5, progstart=30, program=600, dursel=0)
+    assert "Barre SMPTE" not in log and loaders(res).get("BarsLd", ["nil"])[0] in ("nil", "")
+    res, log = run_engine(code, fps="25", df="0", preset="dpp_uk", head=5, progstart=30, program=600, dursel=0,
+                          in_BarsType=3)
+    assert "Barre SMPTE RP 219 1920x1080" in log, log
+    path, w, h = loaders(res)["BarsLd"]
+    assert (int(w), int(h)) == (1920, 1080) and os.path.exists(path)
+    res, log = run_engine(code, fps="25", df="0", preset="dpp_uk", head=5, progstart=30, program=600, dursel=0,
+                          in_BarsType=2)
+    assert "Barre SMPTE" not in log and loaders(res).get("BarsLd", ["nil"])[0] in ("nil", "")
+
+
+def test_standards_have_bars_type():
+    assert {p["id"]: p["bars_type"] for p in STD["presets"]}["dpp_uk"] == "100"
+    assert all(p["bars_type"] in ("100", "75", "smpte") for p in STD["presets"])
+    assert {p["id"]: p["bars_type"] for p in STD["presets"]}["publitalia_spot"] == "75"
+
+
+REF_LUA = r"""
+dofile(arg[1])
+local function p(c) print(c[1] .. "," .. c[2] .. "," .. c[3]) end
+p(LK_OVERLAY.refColor({ 115, 82, 68 }, 2.2, "709"))
+p(LK_OVERLAY.refColor({ 115, 82, 68 }, 2.4, "709"))
+p(LK_OVERLAY.refColor({ 243, 243, 242 }, 2.4, "709"))
+p(LK_OVERLAY.refColor({ 175, 54, 60 }, 2.6, "p3"))
+p(LK_OVERLAY.refColor({ 128, 128, 128 }, 2.4, "2020"))
+p(LK_OVERLAY.c75({ 255, 0, 255 }))
+"""
+
+
+def test_reference_colors_follow_output(tmp_path):
+    """ColorChecker e Monk: sRGB pubblicato -> lineare -> primari di uscita -> gamma di uscita."""
+    script = tmp_path / "ref.lua"
+    script.write_text(REF_LUA)
+    out = subprocess.run([LUA, str(script), os.path.join(ROOT, "fx", "overlay.lua")], stdout=subprocess.PIPE)
+    rows = [tuple(int(v) for v in r.split(",")) for r in out.stdout.decode().split()]
+    assert rows[0] == (115, 82, 68)                                   # uscita sRGB 2.2: valori pubblicati
+    assert rows[1] == (122, 91, 78)                                   # BT.1886 2.4: stessa luce sul monitor
+    assert rows[2][0] == rows[2][1] and rows[2][0] > 243               # neutro resta neutro
+    r, g, b = rows[3]
+    assert r < 175 + 10 and g > 54                                    # rosso dentro il gamut P3 (meno saturo)
+    assert rows[4][0] == rows[4][1] == rows[4][2]                     # grigio neutro anche in Rec.2020
+    assert rows[5] == (191, 0, 191)
+
+
+def test_calibration_colors_75(tmp_path):
+    """Striscia dei colori: sopra 100%, sotto 75% dell'ampiezza (bersagli 75% del vettorscopio)."""
+    items, px = calibration(tmp_path, 1920, 1080)
+    x, y, w, h = items["colors"][0]
+    p = 2 + max(1, round(0.05 * min(w, h)))
+    hh = (h - 2 * p) // 2
+    assert px[x + p + 2, y + p + 2][:3] == (255, 0, 0)
+    assert px[x + p + 2, y + p + hh + 2][:3] == (191, 0, 0)
+
+
+@pytest.mark.parametrize("style", [0, 1, 2])
+def test_calibration_every_style_has_ramps(tmp_path, style):
+    """Le rampe continue (banding) ci sono in tutte e tre le viste del countdown."""
+    items, _ = cal_items(tmp_path, 1920, 1080, style)
+    kinds = set(i[0] for i in items)
+    assert kinds & {"rampWR", "ramps"}, kinds
+    assert {"checker", "skin", "gamma", "info", "peak", "blue", "sphere", "res"} <= kinds

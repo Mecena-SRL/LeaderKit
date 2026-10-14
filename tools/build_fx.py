@@ -504,14 +504,16 @@ CALIBRATION = [("CalStars", "Stelle di Siemens negli angoli (fuoco)", 1),
                ("CalPeak", "Riferimenti del bianco (95% nel 100%) e del nero (5% nel 0%)", 1),
                ("CalEdge", "Bordo del raster e angoli", 1),
                ("CalCenter", "Mirino centrale", 1), ("CalLabels", "Fotogrammi al secondo e risoluzione", 1)]
+BARS_TYPES = ["Dallo standard", "100% (100/0/100/0, DPP)", "75% (EBU 100/0/75/0)",
+              "SMPTE RP 219 HD (75%, -I/+Q, rampa, PLUGE)"]
 GAMMA_REFS = ["Dallo spazio colore di uscita", "2.2 (sRGB, web)", "2.4 (Rec.709 / BT.1886)", "2.6 (DCI, cinema)"]
 LOGO_POS = ["In alto a destra", "In alto a sinistra", "In basso a destra", "In basso a sinistra", "Al centro"]
 END_DOT_POS = ["In alto a destra (cue mark)", "Al centro", "In alto a sinistra"]
-HIDDEN_NUM = ["LogoW", "LogoH", "Logo2W", "Logo2H", "TitleW", "TitleH"]
+HIDDEN_NUM = ["LogoW", "LogoH", "Logo2W", "Logo2H", "TitleW", "TitleH", "BarsKind"]
 # immagini create da Genera e caricate nei Loader (percorso e dimensioni in pixel, input di servizio)
 GEN_IMAGES = [("CalImage", "CalLd", "CalW", "CalH"), ("Cal1Image", "Cal1Ld", "Cal1W", "Cal1H"),
               ("Cal2Image", "Cal2Ld", "Cal2W", "Cal2H"), ("DialBImage", "DialBLd", "DialBW", "DialBH"),
-              ("DialCImage", "DialCLd", "DialCW", "DialCH")]
+              ("DialCImage", "DialCLd", "DialCW", "DialCH"), ("BarsImage", "BarsLd", "BarsW", "BarsH")]
 HIDDEN_GEN = [k for im in GEN_IMAGES for k in im[2:]]
 
 
@@ -540,7 +542,7 @@ def head_inputs():
               + [x for k in GUIDE_KEYS for x in [k] + ["C%s%s" % (k, ch) for ch in ("Red", "Green", "Blue")]]
               + ["SecEnd", "EndDot", "EndDotPos", "EndDotSize"])
     out += [(x, "Guide") for x in guides]
-    tech = (["SecTech", "ColorInfo", "AudioFormat", "SecAudio", "PopLevel", "BeepEach", "SecCal", "CalOn", "CalGammaRef"]
+    tech = (["SecTech", "ColorInfo", "AudioFormat", "SecBars", "BarsType", "SecAudio", "PopLevel", "BeepEach", "SecCal", "CalOn", "CalGammaRef"]
             + [f for f, _, _ in CALIBRATION])
     out += [(x, "Tecnico") for x in tech]
     return out
@@ -628,15 +630,21 @@ def slate_columns():
 
 # ------------------------------------------------------------------ elementi grafici
 def bars_stack(g):
-    """Barre 100% a pieno raster (DPP: bianco, giallo, ciano, verde, magenta, rosso, blu, nero)."""
+    """Barre a pieno raster: bianco, giallo, ciano, verde, magenta, rosso, blu, nero. BarsKind 0: 100%
+    (100/0/100/0, DPP); 1: EBU 100/0/75/0 (bianco al 100%, colori al 75%). BarsKind 2: SMPTE RP 219
+    (PNG di Genera nel Loader BarsLd, sopra queste; prima di Genera restano queste)."""
     colors = [(1, 1, 0), (0, 1, 1), (0, 1, 0), (1, 0, 1), (1, 0, 0), (0, 0, 1), (0, 0, 0)]
     top = g.background("Bar0", rgb=["1", "1", "1"])
+    amp = "(math.floor(LK.BarsKind + 0.5) == 1 and 0.75 or 1)"
     for i, (rr, gg, bb) in enumerate(colors, 1):
         cx = (i + 0.5) / 8.0
         g.mask("Bar%dM" % i, "RectangleMask", repr(1 / 8.0 + 0.001), "1", center="{ %s, 0.5 }" % repr(cx))
-        g.background("Bar%d" % i, rgb=[repr(float(rr)), repr(float(gg)), repr(float(bb))], mask="Bar%dM" % i)
+        g.background("Bar%d" % i, rgb=[X("%s * %s" % (repr(float(v)), amp)) if v else "0.0" for v in (rr, gg, bb)],
+                     mask="Bar%dM" % i)
         top = g.merge("BarsM%d" % i, top, "Bar%d" % i)
-    return top
+    on = ('math.floor(LK.BarsKind + 0.5) == 2 and LK.BarsImage.Value ~= "" and LK.BarsW > 0 and LK.BarsH > 0 '
+          'and math.abs(LK.BarsW / LK.BarsH - _A) < 0.01')
+    return g.gate("MBarsImg", top, [("BarsLd", X("Point(0.5, 0.5)"), X("_W / math.max(1, LK.BarsW)"))], on)
 
 
 def leader_stack(g, prefix, base, digit_expr, sweep_vis=None, cd=None, extras=()):
@@ -1261,6 +1269,8 @@ def head(std=None):
     tech = (uc_label("SecTech", "Dati tecnici")
             + uc_text("ColorInfo", "Spazio colore (letto da Genera)", read_only=True)
             + uc_text("AudioFormat", "Formato audio (es. 5.1 + stereo, 24 bit 48 kHz)")
+            + uc_label("SecBars", "Barre (Genera sceglie quelle dello standard)")
+            + uc_combo("BarsType", "Tipo di barre", BARS_TYPES)
             + uc_label("SecAudio", "Audio (tono 1 kHz)")
             + uc_combo("PopLevel", "Livello pop", ["Dallo standard", "-20 dBFS (SMPTE / USA)", "-18 dBFS (EBU / Europa)"])
             + uc_check("BeepEach", "Bip anche su 8..3 (non standard)", 0)
@@ -1280,7 +1290,7 @@ def head(std=None):
               ("DateAuto", "1"), ("Phase", "0"), ("Note", '""'), ("GuidesSlate", "1"), ("GuidesCd", "1"),
               ("FLTL", "0"), ("SafeAction", "0"), ("SafeTitle", "0"), ("EndDot", "0"), ("EndDotPos", "0"),
               ("EndDotSize", "5"), ("ColorInfo", '""'), ("AudioFormat", '""'),
-              ("PopLevel", "0"), ("BeepEach", "0"), ("Logo", '""'), ("LogoPos", "0"), ("LogoSize", "12"),
+              ("BarsType", "0"), ("PopLevel", "0"), ("BeepEach", "0"), ("Logo", '""'), ("LogoPos", "0"), ("LogoSize", "12"),
               ("Logo2", '""'), ("LogoPos2", "1"), ("LogoSize2", "12"),
               ("SlateStyle", "0"), ("TitleImage", '""'), ("TitleImageSize", "100"),
               ("LogoOnTail", "0"), ("CdStyle", "0"), ("CalOn", "1"), ("CalGammaRef", "0"), ("CdLogo", "0"), ("CdLogoSize", "70"), ("CdInfo", "0")]

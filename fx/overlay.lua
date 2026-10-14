@@ -511,7 +511,7 @@ LK_OVERLAY = (function()
   }
   local CAPTIONS = { star = "FUOCO", sphere = "CONTOURING", peak = "BIANCO / NERO", info = "PIXEL 1:1",
     res = "NITIDEZZA / RGB", gamma = "GAMMA", blue = "BLU 47B", checker = "COLORCHECKER", skin = "INCARNATI",
-    rampWR = "RAMPE", rampGB = "RAMPE", grey = "GRIGI / NERI 0-10%", colors = "SATURI / DESATURATI" }
+    rampWR = "RAMPE", rampGB = "RAMPE", ramps = "RAMPE", grey = "GRIGI / NERI 0-10%", colors = "COLORI 100% / 75%" }
   M.CAPTIONS = CAPTIONS
 
   function M.clusters(W, H, spec, out, ix0, iy0, ix1, iy1, m)
@@ -574,7 +574,7 @@ LK_OVERLAY = (function()
 
   -- Quadrante: i test sono la ghiera dell'orologio. Tessere con angoli arrotondati lungo la ghiera (a destra nitidezza
   -- e gamma, a sinistra livelli e colore; niente in alto e in basso, dove stanno logo e dati), grigi e
-  -- neri 0-10% come arco a sinistra, colori saturi e desaturati come arco a destra, stelle negli angoli.
+  -- neri 0-10% come arco a sinistra, colori al 100% e al 75% come arco a destra, stelle negli angoli.
   local RADIAL = { { "info", 50 }, { "res", 80 }, { "gamma", 110 }, { "sphere", 140 },
     { "peak", 310 }, { "blue", 280 }, { "checker", 250 }, { "skin", 220 } }
   function M.radial(W, H, spec, out, ix0, iy0, ix1, iy1, m)
@@ -630,13 +630,18 @@ LK_OVERLAY = (function()
         span = outerW - inner(my, my + tc + cap)
         if span < tc + 2 * g then return end
         list[#list + 1] = { (dir < 0) and "checker" or "skin", X((span - tc) / 2, tc), my, tc, true }
-        -- fila bassa: stella nell'angolo, pixel 1:1 / gamma al centro dello spazio che resta
+        -- fila bassa: stella nell'angolo, poi pixel 1:1 e rampe (a sinistra) o gamma (a destra)
+        -- distribuiti nello spazio che resta
         local by = y1 - cap - tb
+        local botK = (dir < 0) and { "info", "ramps" } or { "gamma" }
         span = outerW - inner(by, y1)
-        free = span - t - g - tb
+        free = span - t - g - #botK * tb
         if free < 2 * g then return end
         list[#list + 1] = { "star", X(0, t), y1 - t, t }
-        list[#list + 1] = { (dir < 0) and "info" or "gamma", X(t + g + free / 2, tb), by, tb, true }
+        e = free / (#botK + 1)
+        for k, kind in ipairs(botK) do
+          list[#list + 1] = { kind, X(t + g + k * e + (k - 1) * tb, tb), by, tb, true }
+        end
       end
       -- ingombro di ogni elemento con la sua didascalia (centrata sotto, puo' essere piu' larga della
       -- tessera): dentro l'area utile, fuori da ghiera e colonna del cerchio, senza sovrapposizioni
@@ -817,10 +822,39 @@ LK_OVERLAY = (function()
   -- toppa uniforme con la stessa luce media di righe alterne 0 / 100% con il gamma g: 0.5^(1/g)
   function M.gammaPatch(g) return floor(255 * 0.5 ^ (1 / g) + 0.5) end
 
+  -- Riferimenti colorimetrici (ColorChecker, scala Monk): i valori pubblicati sono sRGB 8 bit (primari
+  -- Rec.709, curva sRGB). Per un display Rec.709 / BT.1886 (gamma 2.4), DCI-P3 (2.6) o Rec.2020 vanno
+  -- linearizzati, portati nei primari di uscita e ricodificati con il gamma di uscita: cosi' sul monitor di
+  -- riferimento la toppa ha la stessa luce e la stessa cromaticita' della tavola vera (D65). Con uscita
+  -- sRGB 2.2 i valori restano quelli pubblicati.
+  local TO_PRIM = {   -- matrici lineari Rec.709 -> primari di uscita (D65; ITU-R BT.2087 per Rec.2020)
+    p3 = { { 0.822462, 0.177538, 0 }, { 0.033194, 0.966806, 0 }, { 0.017083, 0.072397, 0.910520 } },
+    ["2020"] = { { 0.627404, 0.329283, 0.043313 }, { 0.069097, 0.919540, 0.011362 }, { 0.016391, 0.088013, 0.895595 } },
+  }
+  function M.refColor(c, g, prim)
+    g = g or 2.4
+    if abs(g - 2.2) < 0.01 and not TO_PRIM[prim or ""] then return { c[1], c[2], c[3] } end
+    local lin = {}
+    for i = 1, 3 do
+      local v = c[i] / 255
+      lin[i] = (v <= 0.04045) and (v / 12.92) or (((v + 0.055) / 1.055) ^ 2.4)
+    end
+    local m = TO_PRIM[prim or ""]
+    if m then
+      lin = { m[1][1] * lin[1] + m[1][2] * lin[2] + m[1][3] * lin[3], m[2][1] * lin[1] + m[2][2] * lin[2] + m[2][3] * lin[3],
+        m[3][1] * lin[1] + m[3][2] * lin[2] + m[3][3] * lin[3] }
+    end
+    local out = {}
+    for i = 1, 3 do out[i] = floor(255 * max(0, min(1, lin[i])) ^ (1 / g) + 0.5) end
+    return out
+  end
+
   -- ------------------------------------------------------------ moduli
   local WHITE, BLACK = { 255, 255, 255 }, { 0, 0, 0 }
   local INK = { 16, 16, 16 }
   local RGBCMY = { { 255, 0, 0 }, { 0, 255, 0 }, { 0, 0, 255 }, { 255, 255, 0 }, { 0, 255, 255 }, { 255, 0, 255 } }
+  -- stesso colore al 75% dell'ampiezza (191 su 255: 721 a 10 bit in livelli video, come le barre 75%)
+  function M.c75(c) return { floor(c[1] * 0.75 + 0.5), floor(c[2] * 0.75 + 0.5), floor(c[3] * 0.75 + 0.5) } end
 
   -- testo allineato a sinistra ridotto fino a stare in w
   local function fitLeft(cv, s, x, y, gh, w, c)
@@ -941,7 +975,8 @@ LK_OVERLAY = (function()
     cv:rect(cx - q / 2, ym - q / 2, cx + q / 2, ym, { 0, 255, 255 })
     cv:rect(cx - q / 2, ym, cx + q / 2, ym + q / 2, WHITE)
   end
-  -- ColorChecker 24: resa del colore, incarnati (le prime due toppe) e scala neutra
+  -- ColorChecker 24: resa del colore, incarnati (le prime due toppe) e scala neutra, nel gamma e nei
+  -- primari di uscita (M.refColor)
   function MODULES.checker(cv, x, y, s, p, ctx)
     local iw = s - 2 * p
     local pitch = iw / 6
@@ -950,7 +985,7 @@ LK_OVERLAY = (function()
     for i, c in ipairs(CHECKER) do
       local col, row = (i - 1) % 6, floor((i - 1) / 6)
       local px, py = x + p + col * pitch + (pitch - ps) / 2, gy + row * pitch + (pitch - ps) / 2
-      cv:rect(px, py, px + ps, py + ps, c)
+      cv:rect(px, py, px + ps, py + ps, M.refColor(c, ctx.gamma, ctx.prim))
     end
   end
   -- toni della pelle (al posto dei volti del leader SMPTE): i 10 toni della scala Monk, dal piu'
@@ -964,7 +999,7 @@ LK_OVERLAY = (function()
       local col, row = (i - 1) % 5, floor((i - 1) / 5)
       local c = { tonumber(hex:sub(1, 2), 16), tonumber(hex:sub(3, 4), 16), tonumber(hex:sub(5, 6), 16) }
       local px, py = x + p + col * pitch + (pitch - ps) / 2, gy + row * pitch + (pitch - ps) / 2
-      cv:rect(px, py, px + ps, py + ps, c)
+      cv:rect(px, py, px + ps, py + ps, M.refColor(c, ctx.gamma, ctx.prim))
     end
   end
   -- verifica del gamma (come "2,6 γ" del leader SMPTE, qui con il gamma dello spazio colore del
@@ -1019,19 +1054,26 @@ LK_OVERLAY = (function()
       cv:rect(x0, y + p + hh, x1, y + h - p, { v, v, v })
     end
   end
-  -- colori saturi (in alto) e desaturati (in basso, 70% di saturazione): i saturi mostrano il bordo
-  -- della gamma, i desaturati tinta e matrice del colore dentro la gamma
+  -- primari e secondari al 100% (in alto, bordo della gamma) e al 75% (in basso, come le barre EBU
+  -- 100/0/75/0 e SMPTE): al vettorscopio ogni toppa cade nel suo bersaglio 100% o 75%
   function STRIPS.colors(cv, x, y, w, h, p)
     local hh = floor((h - 2 * p) / 2)
     local iw = w - 2 * p
     for i, c in ipairs(RGBCMY) do
       local x0, x1 = x + p + iw * (i - 1) / 6, x + p + iw * i / 6
       cv:rect(x0, y + p, x1, y + p + hh, c)
-      cv:rect(x0, y + p + hh, x1, y + h - p, { floor(c[1] + (255 - c[1]) * 0.3 + 0.5),
-        floor(c[2] + (255 - c[2]) * 0.3 + 0.5), floor(c[3] + (255 - c[3]) * 0.3 + 0.5) })
+      cv:rect(x0, y + p + hh, x1, y + h - p, M.c75(c))
     end
   end
-  local ENABLED = { star = "stars", sphere = "contour", peak = "peak", gamma = "gamma", res = "res", blue = "blue",
+  -- rampe continue in una tessera (Quadrante): bianco, rosso, verde, blu, una fascia per canale
+  function MODULES.ramps(cv, x, y, s, p, ctx)
+    local iw = s - 2 * p
+    local cols = { WHITE, { 255, 0, 0 }, { 0, 255, 0 }, { 0, 0, 255 } }
+    for i, c in ipairs(cols) do
+      cv:ramp(x + p, y + p + iw * (i - 1) / 4, x + s - p, y + p + iw * i / 4, BLACK, c)
+    end
+  end
+  local ENABLED = { ramps = "ramps", star = "stars", sphere = "contour", peak = "peak", gamma = "gamma", res = "res", blue = "blue",
     checker = "checker", skin = "skin", rampWR = "ramps", rampGB = "ramps", grey = "grey", colors = "color" }
 
   -- bordo del raster (1 px esatto) e triangoli negli angoli: se si vedono, il display mostra tutto il quadro
@@ -1089,7 +1131,7 @@ LK_OVERLAY = (function()
     local blw = (style == 2) and 1 or ((style == 1) and 0 or lw)
     if style == 2 then border = { floor(accent[1] * 0.45 + 0.5), floor(accent[2] * 0.45 + 0.5), floor(accent[3] * 0.45 + 0.5) } end
     local ctx = { cal = cal, accent = accent, fpsLabel = spec.fpsLabel, resLabel = spec.resLabel, W = W, H = H,
-      gamma = spec.gamma }
+      gamma = spec.gamma, prim = spec.prim }
     local capc = (style == 2) and { floor(accent[1] * 0.6), floor(accent[2] * 0.6), floor(accent[3] * 0.6) } or accent
     for _, it in ipairs(L.items) do
       if it.kind == "card" then
@@ -1150,8 +1192,7 @@ LK_OVERLAY = (function()
           if a.kind == "black" then local v = floor(k * 2.55 + 0.5) return { max(v, 1) == 1 and 0 or v, v, v } end
           local c = RGBCMY[k + 1]
           if a.kind == "color" then return c end
-          return { floor(c[1] + (255 - c[1]) * 0.3 + 0.5), floor(c[2] + (255 - c[2]) * 0.3 + 0.5),
-            floor(c[3] + (255 - c[3]) * 0.3 + 0.5) }
+          return M.c75(c)
         end)
       end
     end
@@ -1189,6 +1230,74 @@ LK_OVERLAY = (function()
       end
     end
     return cv, L
+  end
+
+  -- ------------------------------------------------------------ barre SMPTE RP 219
+  -- Barre HD SMPTE RP 219 (ARIB STD-B28) alla risoluzione della timeline. Valori R'G'B' normalizzati
+  -- (0 = nero 64, 1 = bianco 940 a 10 bit in livelli video): Resolve li porta ai livelli video in uscita.
+  -- Geometria di RP 219: larghezza utile a = min(W, 16/9 H), barre c = 3a/28 (7c = 3a/4), lati d =
+  -- (W - 7c) / 2 (a 1920: d = 240; a 2K DCI: 304); altezze 7/12, 1/12, 1/12, 3/12.
+  --   fila 1: 40% grigio | 75% bianco, giallo, ciano, verde, magenta, rosso, blu | 40% grigio
+  --   fila 2: 100% ciano | -I | 75% bianco (6c) | 100% blu
+  --   fila 3: 100% giallo | +Q | rampa Y 0-100% (5c) | 100% bianco | 100% rosso
+  --   fila 4: 15% grigio | 0% (3c/2) | 100% bianco (2c) | 0% (5c/6) | PLUGE -2, 0, +2, 0, +4% (c/3) | 0% (c) | 15% grigio
+  -- -I e +Q valgono solo con i primari Rec.709 (RP 219): con Rec.2020 diventano 75% bianco e 0% nero.
+  -- Il -2% (sotto il nero) non entra in un'immagine a 8 bit 0-255 ed esce come 0%: il PLUGE si legge
+  -- su +2% appena visibile e +4% visibile.
+  local function ycc10(Y, Cb, Cr)          -- Y'CbCr 10 bit (BT.709, livelli video) -> R'G'B' 0..1
+    local y, cb, cr = (Y - 64) / 876, (Cb - 512) / 896, (Cr - 512) / 896
+    return { y + 1.5748 * cr, y - 0.187324 * cb - 0.468124 * cr, y + 1.8556 * cb }
+  end
+  M.ycc10 = ycc10
+  function M.barsGeometry(W, H)
+    local a = min(W, H * 16 / 9)
+    local c = 3 * a / 28
+    local d = (W - 7 * c) / 2
+    local rows = { 0, floor(H * 7 / 12 + 0.5), floor(H * 8 / 12 + 0.5), floor(H * 9 / 12 + 0.5), H }
+    return c, d, rows
+  end
+  function M.composeBars(W, H, spec)
+    spec = spec or {}
+    local cv = canvas(W, H)
+    local c, d, rows = M.barsGeometry(W, H)
+    local iq = (spec.prim ~= "2020")
+    local function v8(rgb) return { floor(255 * max(0, min(1, rgb[1])) + 0.5), floor(255 * max(0, min(1, rgb[2])) + 0.5),
+      floor(255 * max(0, min(1, rgb[3])) + 0.5) } end
+    local function g(v) return { v, v, v } end
+    -- una fila: elenco di { larghezza in unita' c (o "d" per i lati), colore R'G'B' 0..1 | "ramp" }
+    local function row(r, list)
+      local x = 0
+      local y0, y1 = rows[r], rows[r + 1]
+      for _, e in ipairs(list) do
+        local wpx = (e[1] == "d") and d or e[1] * c
+        local xa, xb = floor(x + 0.5), floor(x + wpx + 0.5)
+        if e[2] == "ramp" then cv:ramp(xa, y0, xb, y1, { 0, 0, 0 }, { 255, 255, 255 })
+        else
+          local col = v8(e[2])
+          cv:add(y0, y1 - 1, function(_, rw)
+            for xx = max(0, xa), min(W, xb) - 1 do
+              local i = xx * 4 + 1
+              rw[i], rw[i + 1], rw[i + 2], rw[i + 3] = col[1], col[2], col[3], 255
+            end
+          end)
+        end
+        x = x + wpx
+      end
+    end
+    local q = 0.75
+    row(1, { { "d", g(0.4) }, { 1, g(q) }, { 1, { q, q, 0 } }, { 1, { 0, q, q } }, { 1, { 0, q, 0 } },
+      { 1, { q, 0, q } }, { 1, { q, 0, 0 } }, { 1, { 0, 0, q } }, { "d", g(0.4) } })
+    row(2, { { "d", { 0, 1, 1 } }, { 1, iq and ycc10(244, 612, 395) or g(q) }, { 6, g(q) }, { "d", { 0, 0, 1 } } })
+    row(3, { { "d", { 1, 1, 0 } }, { 1, iq and ycc10(141, 697, 606) or g(0) }, { 5, "ramp" }, { 1, g(1) },
+      { "d", { 1, 0, 0 } } })
+    row(4, { { "d", g(0.15) }, { 1.5, g(0) }, { 2, g(1) }, { 5 / 6, g(0) }, { 1 / 3, g(-0.02) }, { 1 / 3, g(0) },
+      { 1 / 3, g(0.02) }, { 1 / 3, g(0) }, { 1 / 3, g(0.04) }, { 1, g(0) }, { "d", g(0.15) } })
+    return cv
+  end
+  function M.renderBars(path, W, H, spec)
+    local ok, res = pcall(function() return M.composeBars(W, H, spec):write(path) end)
+    if not ok then return false, tostring(res) end
+    return res, nil
   end
 
   -- ------------------------------------------------------------ quadranti della slate

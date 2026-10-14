@@ -65,7 +65,7 @@ in cache per tutto il clip.
 | **Dati** | *Produzione*: titolo, produzione, produttore, regia, cliente, agenzia, codice (Ad-ID/Clock/Auditel), episodio/rullo, lingua, data con bottone **Oggi** e spunta **Data sempre aggiornata**. *Post-produzione*: montaggio, assistente al montaggio, color, suono, VFX, versione, fase, stato dei reparti (TEMP/FINAL), note |
 | **Aspetto** | stile della slate, titolo in PNG, logo e secondo logo con **Scegli…** (posizione, larghezza, anche sulla coda), **logo e dati sul countdown** (riquadri neri), colori |
 | **Guide** | frame lines (formato della timeline e 1.33–2.39), safe area 93% e 90%, dove mostrarle (**slate** e/o **countdown con la taratura**), colore delle guide, **pallino sull'ultimo fotogramma** |
-| **Tecnico** | spazio colore (letto dal progetto), formato audio, livello del pop, strumenti di taratura |
+| **Tecnico** | spazio colore (letto dal progetto), formato audio, **tipo di barre**, livello del pop, strumenti di taratura |
 
 ## Slate
 
@@ -149,7 +149,7 @@ fino al FFOA, ma lo lascia se lo vuoi.
 |---|---|---|
 | **Standard** | come il leader SMPTE / Academy: due cerchi spessi, croce a tutto quadro, cifra Bold | i moduli nelle posizioni del leader SMPTE RP 428-6, al massimo il 15% dell'altezza |
 | **Pannelli** | leader classico: disco grigio dentro il cerchio, cerchi sottili, croce solo attorno al cerchio | sfondo antracite; stelle negli angoli dell'area utile; due schede grigie accanto al cerchio (**Nitidezza e gamma**, **Livelli e colore**) con tessere senza bordo e didascalia sotto ognuna |
-| **Quadrante** | i test diventano la ghiera: grigi e neri 0-10% come arco a sinistra, colori saturi e desaturati come arco a destra, 60 tacche, cifra Light | griglia proporzionata: stelle di Siemens grandi nei quattro angoli; in alto bianco/nero e blu 47B (a sinistra), contouring e nitidezza (a destra); sulla linea di centro colorchecker e incarnati, i più grandi; in basso pixel 1:1 e gamma. Tessere con angoli arrotondati riempite dal test, didascalia sotto |
+| **Quadrante** | i test diventano la ghiera: grigi e neri 0-10% come arco a sinistra, colori al 100% e al 75% come arco a destra, 60 tacche, cifra Light | griglia proporzionata: stelle di Siemens grandi nei quattro angoli; in alto bianco/nero e blu 47B (a sinistra), contouring e nitidezza (a destra); sulla linea di centro colorchecker e incarnati, i più grandi; in basso pixel 1:1 e rampe (a sinistra), gamma (a destra). Tessere con angoli arrotondati riempite dal test, didascalia sotto |
 
 Il countdown (8→2, Picture Start, braccio, 2-pop) è calcolato a ogni fotogramma
 dal frame rate della timeline: 48 fotogrammi a 24/23.976, 50 a 25, 60 a 29.97 DF.
@@ -172,17 +172,45 @@ l'altro. Ogni modulo ha la sua spunta nella scheda Tecnico.
 | **Righe 1-4 px e RGB** | nitidezza, scalatura, registrazione dei pannelli, sottocampionamento del colore | le righe da 1 px nette; le righe rosse, verdi e blu da 1 px pure, senza frange |
 | **Verifica del blu** | matrice del colore (canale blu) | con il filtro Wratten 47B o il solo canale blu, magenta, ciano, blu e bianco sembrano uguali: i quadrati interni spariscono |
 | **Grigi e neri 0-10%** | scala dei grigi e livello del nero | 11 gradini neutri e distinti; nei neri a passi dell'1% il primo visibile dice dove il display perde il dettaglio |
-| **Colori saturi / desaturati** | primari e secondari al bordo della gamma (sopra) e dentro la gamma (sotto, 70%) | tinte pulite, nessuna fusione tra saturi e desaturati |
+| **Colori 100% / 75%** | primari e secondari al 100% (sopra, bordo della gamma) e al 75% dell'ampiezza (sotto, come le barre EBU 100/0/75/0 e SMPTE) | tinte pulite; al vettorscopio ogni toppa cade nel suo bersaglio 100% o 75% |
 | **Rampe B/N, R, G, B** | banding e clip di un canale | sfumature continue, senza cambi di tinta |
-| **ColorChecker 24** | resa del colore e scala neutra (valori sRGB X-Rite) | confronto con la tavola vera o con la misura |
-| **Toni della pelle** | incarnati (al posto dei volti del leader SMPTE): i 10 toni della scala Monk | distinti e naturali, senza dominanti |
+| **ColorChecker 24** | resa del colore e scala neutra (valori sRGB X-Rite, convertiti nel gamma e nei primari di uscita) | confronto con la tavola vera o con la misura |
+| **Toni della pelle** | incarnati (al posto dei volti del leader SMPTE): i 10 toni della scala Monk, convertiti come il ColorChecker | distinti e naturali, senza dominanti |
 | **Bordo e angoli** | quanto tagliano overscan e mascherini | 1 px bianco sul bordo e triangoli negli angoli: se si vedono, si vede tutto il quadro |
 | **Angoli dei formati** | frame lines accese sul countdown | triangolo nell'angolo di ogni formato: resta visibile anche se il mascherino copre la linea |
 | **Mirino** | centro del quadro | quadrati e asterisco centrati sulla croce |
 
 I test su livelli e gamma valgono se il leader arriva all'uscita senza trasformazioni di colore (timeline
 Rec.709 o generatori nello spazio di uscita).
+
+ColorChecker e toni della pelle sono pubblicati in sRGB (primari Rec.709, curva sRGB). Genera li
+linearizza, li porta nei primari dello spazio colore di uscita (Rec.709, P3 D65 o Rec.2020) e li
+ricodifica con il gamma di riferimento. Così sul monitor di riferimento ogni toppa ha la stessa
+luce e la stessa tinta della tavola vera. Con uscita sRGB 2.2 restano i valori pubblicati.
 La scala in alto (e in basso) al centro si disegna solo se lì non ci sono il logo (o i dati).
+
+## Barre
+
+Scheda **Tecnico › Tipo di barre**. Con *Dallo standard* Genera usa le barre dello standard scelto:
+
+| Tipo | Disegno | Standard |
+|---|---|---|
+| **100%** (100/0/100/0) | 8 barre a pieno raster al 100%: bianco, giallo, ciano, verde, magenta, rosso, blu, nero | TV Italia ed Europa, DPP, Sky (le barre SMPTE "non sono accettabili" per il DPP) |
+| **EBU 75%** (100/0/75/0) | stesse barre, bianco al 100% e colori al 75% | Spot RAI e Publitalia (prassi dei vendor: barre 75% con tono a −18 dBFS) |
+| **SMPTE RP 219** (ARIB STD-B28) | barre HD a quattro file: 75% con lati al 40%; ciano 100%, −I, bianco 75%, blu 100%; giallo 100%, +Q, rampa 0-100%, bianco 100%, rosso 100%; nero, bianco 100% e PLUGE (−2, 0, +2, 0, +4%) con lati al 15% | USA, streaming, cinema, copie di lavoro |
+
+- Le barre 100% e 75% sono nel generatore e si vedono subito. Le SMPTE sono un PNG disegnato da
+  Genera alla risoluzione della timeline con la geometria di RP 219: barre larghe 3/28 della
+  larghezza utile, lati di 240 px a 1920 e di 304 px su 2K DCI, file alte 7/12, 1/12, 1/12 e 3/12.
+  Finché non premi Genera restano le barre 100%.
+- I valori sono quelli di RP 219-2 in livelli video (75% = 721 a 10 bit, a 8 bit 191 su 255). −I e +Q
+  valgono solo con i primari Rec.709: con uscita Rec.2020 diventano bianco 75% e nero 0%, come
+  prevede RP 219.
+- **PLUGE**: il generatore lavora a 8 bit da 0 a 100%, quindi la toppa −2% (sotto il nero) esce come 0%.
+  Il nero si regola così: +2% appena visibile, +4% visibile. Per il −2% vero serve un generatore di
+  segnale esterno.
+- Il tono di line-up è quello dello standard; se lo standard non lo indica è −20 dBFS con le barre
+  SMPTE (USA) e −18 dBFS con le altre (EBU).
 
 ## Standard inclusi
 
