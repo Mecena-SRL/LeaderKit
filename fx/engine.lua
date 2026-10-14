@@ -595,6 +595,19 @@ local function targetPrimaries()
   return "709"
 end
 local accent = { get("AccentRed", 0.85), get("AccentGreen", 0.85), get("AccentBlue", 0.85) }
+-- tema del countdown (come nel generatore): sfondo e colore delle linee, per bordi e didascalie della taratura
+local function themeColor(v, style, isBg)
+  if type(v) == "number" then return { v, v, v } end
+  if v == "" or v == nil then
+    if isBg then
+      if style == 1 then return { 0.08, 0.08, 0.08 } end
+      return { get("BgRed", 0), get("BgGreen", 0), get("BgBlue", 0) }
+    end
+    return accent
+  end
+  return { get(v .. "Red", 0), get(v .. "Green", 0), get(v .. "Blue", 0) }
+end
+local cdTheme = (LK_CD_THEMES or {})[math.floor(get("CdTheme", 0) + 0.5) + 1] or { "", "Accent" }
 
 -- chiave del file in cache: tutti i valori della spec, in ordine
 local function specKey(v)
@@ -625,8 +638,16 @@ end
 -- taratura sul countdown, a tutto quadro: sotto frame lines, cerchio, logo e dati (sono nel generatore)
 if countFrom > 0 and get("CalOn", 1) > 0.5 then
   local cal = {}
-  for _, k in ipairs(LK_CALIBRATION or {}) do cal[string.lower(string.sub(k, 4))] = get(k, 1) > 0.5 end
+  -- Mostra: 0 spento, 1 normale, 2 piccolo, 3 grande
+  local sizes = {}
+  for _, k in ipairs(LK_CALIBRATION or {}) do
+    local v = math.floor(get(k, 1) + 0.5)
+    local name = string.lower(string.sub(k, 4))
+    cal[name] = v > 0
+    sizes[name] = (v > 0) and v or nil
+  end
   local spec = { accent = accent, cal = cal, fpsLabel = string.format("%g/SEC", r.fps), resLabel = resClass(),
+    sizes = sizes, starsPos = math.floor(get("CalStarsPos", 0) + 0.5),
     gamma = targetGamma(), prim = targetPrimaries(), cdLogo = get("CdLogo", 0) > 0.5 and get("Logo", "") ~= "", cdInfo = get("CdInfo", 0) > 0.5,
     style = math.floor(get("CdStyle", 0) + 0.5) }
   -- con le frame lines sul countdown i moduli stanno dentro l'area comune delle linee accese e gli
@@ -653,6 +674,7 @@ if countFrom > 0 and get("CalOn", 1) > 0.5 then
     local sp = {}
     for kk, vv in pairs(spec) do sp[kk] = vv end
     sp.style = st - 1
+    sp.bg, sp.ink = themeColor(cdTheme[1], sp.style, true), themeColor(cdTheme[2], sp.style, false)
     local pth = genImage("Taratura", sp, function(p) return LK_OVERLAY.render(p, w, h, sp) end,
       k .. "Image", k .. "Ld", k .. "W", k .. "H", "Taratura")
     if sp.style == spec.style then path = pth end
@@ -867,3 +889,9 @@ report[#report + 1] = "\nCONTROLLI\n" .. table.concat(checks, "\n")
 if P.notes and #P.notes > 0 then report[#report + 1] = "\nNOTE DELLO STANDARD\n- " .. table.concat(P.notes, "\n- ") end
 warnings = {}   -- gia' elencati nei controlli
 show("LeaderKit — Genera")
+-- pannello in ordine: solo le voci che servono a questo standard e a queste scelte
+pcall(function()
+  local code = lk:GetInput("VisCode") or ""
+  local f = (code ~= "") and (loadstring or load)(code)
+  if f then f(lk) end
+end)

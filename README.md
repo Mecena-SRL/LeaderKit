@@ -63,13 +63,20 @@ in cache per tutto il clip.
 |---|---|
 | **Progetto** | standard, rullo, durata del programma, slot, break TV, marker, coda, **Genera** / **Rimuovi**, esito e timecode calcolati, durate personalizzate |
 | **Dati** | *Produzione*: titolo, produzione, produttore, regia, cliente, agenzia, codice (Ad-ID/Clock/Auditel), episodio/rullo, lingua, data con bottone **Oggi** e spunta **Data sempre aggiornata**. *Post-produzione*: montaggio, assistente al montaggio, color, suono, VFX, versione, fase, stato dei reparti (TEMP/FINAL), note |
-| **Aspetto** | stile della slate, titolo in PNG, logo e secondo logo con **Scegli…** (posizione, larghezza, anche sulla coda), **logo e dati sul countdown** (riquadri neri), colori |
-| **Guide** | frame lines (formato della timeline e 1.33–2.39), safe area 93% e 90%, dove mostrarle (**slate** e/o **countdown con la taratura**), colore delle guide, **pallino sull'ultimo fotogramma** |
-| **Tecnico** | spazio colore (letto dal progetto), formato audio, **tipo di barre**, livello del pop, strumenti di taratura |
+| **Slate** | stile della slate, titolo in PNG, logo e secondo logo con **Scegli…** (posizione, larghezza, anche sulla coda), colori di slate, coda e grafica |
+| **Countdown** | stile, **tema** (sfondo, linee, cifra), disco nel cerchio, logo e dati sul countdown, **taratura** (gamma di riferimento e una spunta per ogni strumento), pallino sull'ultimo fotogramma |
+| **Guide** | frame lines (formato della timeline e 1.33–2.39), safe area 93% e 90%, dove mostrarle (**slate** e/o **countdown con la taratura**), un colore per ogni guida |
+| **Tecnico** | spazio colore (letto dal progetto), formato audio, **tipo di barre**, livello del pop e bip |
+
+Il pannello mostra solo le voci che servono: i colori del tema compaiono con *Personalizzato*, quelli di
+una guida quando la accendi, gli strumenti di taratura con *Strumenti di taratura* acceso, dimensione e
+posizione del pallino quando lo accendi, il tipo di barre solo con gli standard che hanno le barre. Genera
+rimette in ordine il pannello. In cima a ogni scheda c'è una **guida richiudibile (ⓘ)**; passando con il
+mouse su una voce compare la sua spiegazione nella barra di stato.
 
 ## Slate
 
-Quattro stili (Aspetto › Slate):
+Quattro stili (Slate › Stile della slate):
 
 | Stile | Impaginazione |
 |---|---|
@@ -125,7 +132,7 @@ logo, dati e cifra:
 
 ## Logo e dati sul countdown
 
-Scheda **Aspetto › Countdown**, con spunte. Logo e dati stanno nella colonna del cerchio, in
+Scheda **Countdown**, con spunte. Logo e dati stanno nella colonna del cerchio, in
 **riquadri neri con il bordo nel colore della grafica** (come i moduli della taratura), sopra
 frame lines e taratura:
 - **Logo sopra il countdown**: riquadro piccolo, quadrato o più largo se il logo è largo (mai più
@@ -143,14 +150,29 @@ fino al FFOA, ma lo lascia se lo vuoi.
 
 ## Countdown e taratura
 
-**Tre stili** (Aspetto › Countdown › Stile; Genera prepara le tre tarature, poi si passa da uno stile all'altro senza rigenerare):
+**Tre stili** (Countdown › Stile; Genera prepara le tre tarature, poi si passa da uno stile all'altro senza rigenerare):
 
 | Stile | Countdown | Taratura |
 |---|---|---|
-| **Standard** | come il leader SMPTE / Academy: due cerchi spessi, croce a tutto quadro, cifra Bold | i moduli nelle posizioni del leader SMPTE RP 428-6, al massimo il 15% dell'altezza |
-| **Pannelli** | leader classico: disco grigio dentro il cerchio, cerchi sottili, croce solo attorno al cerchio | sfondo antracite; stelle negli angoli dell'area utile; due schede grigie accanto al cerchio (**Nitidezza e gamma**, **Livelli e colore**) con tessere senza bordo e didascalia sotto ognuna |
-| **Quadrante** | i test diventano la ghiera: grigi e neri 0-10% come arco a sinistra, colori al 100% e al 75% come arco a destra, 60 tacche, cifra Light | griglia proporzionata: stelle di Siemens grandi nei quattro angoli; in alto bianco/nero e blu 47B (a sinistra), contouring e nitidezza (a destra); sulla linea di centro colorchecker e incarnati, i più grandi; in basso pixel 1:1 e rampe (a sinistra), gamma (a destra). Tessere con angoli arrotondati riempite dal test, didascalia sotto |
+| **Standard** | come il leader SMPTE / Academy: due cerchi spessi, croce a tutto quadro, cifra Bold | i moduli nelle posizioni e nelle proporzioni del leader SMPTE RP 428-6: prove fino al 19% dell'altezza, bianco/nero e righe RGB strette (mezzo modulo), strisce lunghe due moduli e mezzo, mirino grande al centro |
+| **Pannelli** | leader classico: disco grigio dentro il cerchio, cerchi sottili, croce solo attorno al cerchio | stelle negli angoli dell'area utile; due schede accanto al cerchio (**Nitidezza e gamma**, **Livelli e colore**) con le prove senza bordo e la didascalia sotto |
+| **Quadrante** | ghiera con i valori scritti: grigi 0-100 e neri 0-10 a sinistra, colori R G B Y C M al 100% e al 75% a destra, 60 tacche, cifra Light | carta di taratura in due pannelli titolati accanto al cerchio (sopra e sotto sui verticali). **Livelli e nitidezza**: bianco/nero RP 133, PLUGE, gamma; scala dei grigi e dei neri; rampe B/N, R, G, B; sfera, pixel 1:1, righe 1-4 px. **Colore**: ColorChecker 6 × 4, blu 47B; scala Monk 5 × 2; colori 100/75%, zone plate. Ogni prova nella sua forma vera (quadrato, striscia, tavola) con bordo sottile; stelle di Siemens negli angoli |
 
+**Tema del countdown** (Countdown › Tema). Sfondo, cerchi, croce, braccio e cifra cambiano dal vivo; la
+taratura adatta bordi e didascalie quando premi Genera.
+
+| Tema | Sfondo | Linee e cifra | Riferimento |
+|---|---|---|---|
+| **Dallo stile** | nero; antracite con disco grigio su Pannelli | colori *Grafica del leader* e *Testo* | come le versioni precedenti |
+| **Nero** | nero | *Grafica del leader* e *Testo* | leader digitale SMPTE RP 428-6 |
+| **Grigio medio** | grigio medio | bianche | SMPTE Universal leader (nato su fondo grigio medio, poi scurito per i proiettori) |
+| **Bianco** | bianco | nere | Academy leader (SMPTE 301): fondo chiaro e cifre nere |
+| **Grigio scuro** | grigio scuro | chiare | orologi delle TV |
+| **Personalizzato** | a scelta | a scelta (linee e cifra separate) | |
+
+**Disco dentro il cerchio**: *Dal tema*, *Nessuno* o *Pieno* con il suo colore.
+
+Il fotogramma **Picture Start** è come nel leader RP 428-6: fondo verde-grigio chiaro e scritta nera.
 Il countdown (8→2, Picture Start, braccio, 2-pop) è calcolato a ogni fotogramma
 dal frame rate della timeline: 48 fotogrammi a 24/23.976, 50 a 25, 60 a 29.97 DF.
 
@@ -160,7 +182,13 @@ Il leader SMPTE, come questo, serve per fuoco, formato e un controllo di fiducia
 taratura strumentale. È un PNG a tutto quadro nel generatore, sotto frame lines, cerchio, logo e dati. I
 moduli stanno **ai lati del cerchio**: due file di tre quadrati con le stelle negli angoli esterni e due
 strisce vicino alla linea di centro. Sui formati stretti (4:3 molto stretto, verticali) vanno uno sopra
-l'altro. Ogni modulo ha la sua spunta nella scheda Tecnico.
+l'altro. Ogni modulo ha la sua spunta nella scheda Countdown.
+
+Dove stanno e perché, secondo le norme da cui vengono: le **stelle di fuoco negli angoli** perché il fuoco
+cala prima ai bordi (le carte di back focus mettono una stella grande al centro e quattro piccole negli
+angoli); **bordo e angoli sul perimetro** perché misurano il taglio; **livelli, gamma e colori vicino al centro**, dove il display è più uniforme e
+si guarda di fronte; il **mirino al centro**. Il gamma usa righe **solo orizzontali**: con righe verticali
+la luce media dipende dalla velocità del display e il confronto non vale.
 
 | Modulo | A cosa serve | Come si legge |
 |---|---|---|
@@ -168,7 +196,7 @@ l'altro. Ogni modulo ha la sua spunta nella scheda Tecnico.
 | **Sfera divisa** | contouring nelle alte luci (metà alta, 60–100%) e nelle ombre (metà bassa, 0–16%) | sfumature continue, senza anelli né gradini; in basso l'ombra sparisce nel nero senza bordo |
 | **Bianco e nero** | clip dei bianchi, neri schiacciati (valori di SMPTE RP 133) | il quadrato al 95% nel bianco e quello al 5% nel nero devono vedersi entrambi |
 | **24/SEC · risoluzione** | frame rate e classe della timeline (SD, 720, HD, 2K, UHD, 4K, 8K) con i pixel esatti; triangolo di righe di 1 px annidate, orizzontali e verticali | alla mappatura 1:1 dei pixel ogni riga è netta e uniforme; moiré, righe doppie o grigio piatto = il monitor o il proiettore scala l'immagine |
-| **Gamma** (γ del progetto) | gamma del display: righe di 1 px nero/bianco (luce media 50%) su un grigio 0.5^(1/γ) | al 100% e da lontano le righe spariscono nel grigio; se somigliano alla toppa in alto a sinistra (γ − 0.2) il gamma del display è più basso, a destra (γ + 0.2) più alto. Il γ viene dallo spazio colore di uscita (Rec.709 2.4, sRGB 2.2, DCI/P3 2.6) o si sceglie in Tecnico › Gamma di riferimento |
+| **Gamma** (γ del progetto) | gamma del display: righe orizzontali di 1 px nero/bianco (luce media 50%) accanto a un grigio 0.5^(1/γ) | al 100% e da lontano le righe spariscono nel grigio; se somigliano alla toppa in alto a sinistra (γ − 0.2) il gamma del display è più basso, a destra (γ + 0.2) più alto. Il γ viene dallo spazio colore di uscita (Rec.709 2.4, sRGB 2.2, DCI/P3 2.6) o si sceglie in Tecnico › Gamma di riferimento |
 | **Righe 1-4 px e RGB** | nitidezza, scalatura, registrazione dei pannelli, sottocampionamento del colore | le righe da 1 px nette; le righe rosse, verdi e blu da 1 px pure, senza frange |
 | **Verifica del blu** | matrice del colore (canale blu) | con il filtro Wratten 47B o il solo canale blu, magenta, ciano, blu e bianco sembrano uguali: i quadrati interni spariscono |
 | **Grigi e neri 0-10%** | scala dei grigi e livello del nero | 11 gradini neutri e distinti; nei neri a passi dell'1% il primo visibile dice dove il display perde il dettaglio |
@@ -176,9 +204,11 @@ l'altro. Ogni modulo ha la sua spunta nella scheda Tecnico.
 | **Rampe B/N, R, G, B** | banding e clip di un canale | sfumature continue, senza cambi di tinta |
 | **ColorChecker 24** | resa del colore e scala neutra (valori sRGB X-Rite, convertiti nel gamma e nei primari di uscita) | confronto con la tavola vera o con la misura |
 | **Toni della pelle** | incarnati (al posto dei volti del leader SMPTE): i 10 toni della scala Monk, convertiti come il ColorChecker | distinti e naturali, senza dominanti |
-| **Bordo e angoli** | quanto tagliano overscan e mascherini | 1 px bianco sul bordo e triangoli negli angoli: se si vedono, si vede tutto il quadro |
+| **PLUGE** (ITU-R BT.814, Quadrante) | livello del nero e contrasto, come le barre vicino al nero del PLUGE | su nero il +2% si vede appena e il +4% si vede; se sparisce il +2% il nero è schiacciato, se il fondo diventa grigio è alzato; la toppa bianca serve a regolare il contrasto. Il −2% non entra in un'immagine 0-255 |
+| **Zone plate** (Quadrante) | risposta in frequenza, scalatura, aliasing (BBC R&D) | anelli sempre più fitti fino a 0.5 cicli per pixel sul bordo: alla mappatura 1:1 solo anelli concentrici; cerchi in più o grigio piatto = immagine scalata o filtrata |
+| **Bordo e angoli** | quanto tagliano overscan e mascherini | 1 px sul bordo e triangoli negli angoli: se si vedono, si vede tutto il quadro |
 | **Angoli dei formati** | frame lines accese sul countdown | triangolo nell'angolo di ogni formato: resta visibile anche se il mascherino copre la linea |
-| **Mirino** | centro del quadro | quadrati e asterisco centrati sulla croce |
+| **Mirino** | centro ottico e allineamento del proiettore | disco grigio, tre quadrati concentrici e asterisco centrati sulla croce (come nel leader RP 428-6) |
 
 I test su livelli e gamma valgono se il leader arriva all'uscita senza trasformazioni di colore (timeline
 Rec.709 o generatori nello spazio di uscita).
