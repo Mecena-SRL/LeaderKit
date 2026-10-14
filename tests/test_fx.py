@@ -417,7 +417,7 @@ def test_setting_size_and_prefs(built):
     """Meno testo nel comp (piu' leggero da salvare) e comp:GetPrefs mai ripetuto nella stessa espressione."""
     text = open(HEAD(built)).read()
     # 1.2: barre SMPTE, temi, guide e spiegazioni del pannello; quasi tutto e' testo dei bottoni, non espressioni
-    assert len(text) < 790000, len(text)          # 0.14: stili del countdown e colore per guida (era 640000)
+    assert len(text) < 820000, len(text)          # 1.2: + testa SMPTE Universal          # 0.14: stili del countdown e colore per guida (era 640000)
     assert build_fx.engine("remove").count("\n") < 400             # Rimuovi non incorpora tutto il motore
     for expr in re.findall(r'Expression = "((?:[^"\\]|\\.)*)"', text):
         for key in ("Rate", "Width", "Height"):
@@ -648,13 +648,13 @@ def test_burnin_matte_presets_and_custom(built):
 
 
 def test_slate_styles_switch(built):
-    """Quattro stili: si alternano con Dissolve; con un titolo in PNG il titolo testuale sparisce."""
+    """Cinque stili: si alternano con Dissolve; con un titolo in PNG il titolo testuale sparisce."""
     head = HEAD(built)
     names = build_fx.SLATE_STYLES
-    assert len(names) == 4
-    for st in range(4):
+    assert len(names) == 5
+    for st in range(5):
         t = dump_tools(head, 24, 1920, 1080, 432, 40, SlateStyle=st, Title="Juna")
-        for i in (1, 2, 3):
+        for i in (1, 2, 3, 4):
             assert t["SStyle%d" % i]["Mix"] == (1 if i == st else 0)
     t = dump_tools(head, 24, 1920, 1080, 432, 40, SlateStyle=1, Title="Juna", Director="Janicel Diaz")
     assert t["BTitle"]["StyledText"] == "JUNA" and t["BTitle"]["HorizontalLeftCenterRight"] == -1
@@ -1715,3 +1715,23 @@ def test_quadrante_panels(tmp_path):
     box = dict((i[0], i) for i in items)
     assert box["grey"][3] > 2.5 * box["grey"][4] and abs(box["checker6"][3] / box["checker6"][4] - 1.5) < 0.05
     assert box["peak"][3] == box["peak"][4] >= 90                        # prove quadrate grandi almeno 90 px a 1080
+
+
+@pytest.mark.parametrize("t,node,text", [(5, "UVal", "IL FILM"), (70, "ULead", "UNIVERSAL"), (95, "UHead", "HEAD"),
+                                        (120, "UAsp", "ASPECT RATIO   1.78:1"), (150, "UPic", "PICTURE"),
+                                        (180, "USnd", "SOUND START")])
+def test_slate_smpte_universal_cards(built, t, node, text):
+    """Testa SMPTE Universal: i fotogrammi d'identificazione si susseguono durante la slate (8\" a 24 fps)."""
+    tt = dump_tools(HEAD(built), 24, 1920, 1080, 432, t, SlateStyle=4, Title="Il film", CountFrom=8)
+    assert tt["SStyle4"]["Mix"] == 1 and text in tt[node]["StyledText"]
+    others = [n for n in ("UVal", "ULead", "UHead", "UAsp", "UPic", "USnd") if n != node]
+    assert all(tt[n]["StyledText"].strip() == "" for n in others)
+
+
+def test_countdown_control_frames(built):
+    """C C F F solo durante il 4 e solo se richiesti."""
+    on4 = dump_tools(HEAD(built), 24, 1920, 1080, 432, 432 - 4 * 24 + 3, CdCF=1)
+    on5 = dump_tools(HEAD(built), 24, 1920, 1080, 432, 432 - 5 * 24 + 3, CdCF=1)
+    off = dump_tools(HEAD(built), 24, 1920, 1080, 432, 432 - 4 * 24 + 3)
+    assert on4["MCF"]["Mix"] == 1 and on5["MCF"]["Mix"] == 0 and off["MCF"]["Mix"] == 0
+    assert on4["CF0"]["StyledText"] == "C" and on4["CF3"]["StyledText"] == "F"

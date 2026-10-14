@@ -544,7 +544,8 @@ TIPS = {
     "DateAuto": "Mostra sempre la data del giorno del render invece del campo Data.",
     "Phase": "Fase di lavorazione scritta sulla slate.",
     "Status": "TEMP nel colore evidenza, FINAL in verde.",
-    "SlateStyle": "Impaginazione della slate: Pannelli, Quadrante, Orologio o Minimale.",
+    "SlateStyle": "Impaginazione della slate: Pannelli, Quadrante, Orologio, Minimale, oppure i fotogrammi "
+                  "d'identificazione della testa SMPTE Universal in sequenza.",
     "TitleImage": "PNG con trasparenza che sostituisce il titolo di testo; incolla il percorso o usa Scegli.",
     "TitleImageSize": "Grandezza del titolo in PNG rispetto al suo riquadro.",
     "Logo": "PNG o JPG; incolla il percorso o usa Scegli. Genera lo ricarica e segnala i file mancanti.",
@@ -555,6 +556,8 @@ TIPS = {
     "CdTheme": "Sfondo, linee e cifra del countdown. Personalizzato mostra i selettori dei colori. Premi Genera per adattare la taratura.",
     "CdDisc": "Riempie l'interno del cerchio. Dal tema: solo lo stile Pannelli con il tema Dallo stile.",
     "CdColor": "Colore del tema Personalizzato.",
+    "CdCF": "Lettere C C (in alto) e F F (in basso) durante il secondo del 4, come i fotogrammi di controllo del leader "
+            "SMPTE Universal: si usavano per controllare inquadratura e fuoco in proiezione.",
     "CdLogo": "Logo in un riquadro nero sopra il cerchio.",
     "CdInfo": "Titolo e ruoli scelti in un riquadro nero sotto il cerchio.",
     "CalOn": "Strumenti di verifica disegnati da Genera alla risoluzione e nel gamma di uscita.",
@@ -719,7 +722,7 @@ def head_inputs():
              "SecLogo", "Logo", "LogoPick", "LogoPos", "LogoSize", "Logo2", "Logo2Pick", "LogoPos2", "LogoSize2",
              "LogoOnTail", "SecLook"] + color_inputs())
     out += [(x, "Slate") for x in slate]
-    cd = (["SecCd"] + hb("Countdown") + ["CdStyle", "CdTheme", "CdDisc"]
+    cd = (["SecCd"] + hb("Countdown") + ["CdStyle", "CdTheme", "CdDisc", "CdCF"]
           + [p + ch for p, _, _ in CD_COLORS for ch in ("Red", "Green", "Blue")]
           + ["SecCdBox", "CdLogo", "CdLogoSize", "CdInfo"] + [k for k, _, _, _ in CD_FIELDS]
           + ["SecCal", "CalOn", "CalGammaRef"] + cal_inputs()
@@ -1008,11 +1011,13 @@ def footer(g, name, static, note=False, top=None, x="0.5", width="0.94"):
 
 # ------------------------------------------------------------------ stili della slate
 SLATE_STYLES = ["Pannelli (produzione / post / tecnico)", "Quadrante (fotogrammi, dati a destra)",
-                "Orologio (titolo e dati a destra)", "Minimale (titolo al centro)"]
+                "Orologio (titolo e dati a destra)", "Minimale (titolo al centro)",
+                "Testa SMPTE Universal (fotogrammi d'identificazione)"]
 # riquadro del titolo in PNG per stile: (x, y, larghezza, altezza, ancora) in frazioni del quadro;
 # ancora "center" = x e' il centro, "left" = x e' il bordo sinistro.
 TITLE_BOXES = [(0.5, 0.815, 0.60, 0.11, "center"), (0.53, 0.845, 0.42, 0.10, "left"),
-               (0.58, 0.80, 0.38, 0.16, "left"), (0.5, 0.60, 0.70, 0.18, "center")]
+               (0.58, 0.80, 0.38, 0.16, "left"), (0.5, 0.60, 0.70, 0.18, "center"),
+               (0.5, 0.9, 0.36, 0.08, "center")]
 # quadranti: centro x (W), centro y (H), raggio (espressione, frazione di H): stretti sui formati stretti
 DIAL_B = (0.27, 0.5, "math.min(0.36, 0.22 * _A)")
 DIAL_C = (0.28, 0.5, "math.min(0.31, 0.20 * _A)")
@@ -1216,6 +1221,68 @@ def slate_style_d(g, P, base, static):
     foot = footer(g, "Foot3", static)
     top = g.merge("DMt", top, g.chain("DTx", ["DHead", "DTitle", "DDir", "DLine", "DWho", foot]))
     return g.merge("DMs", top, status_chips(g, "DSt", "0.21"))
+
+
+# Testa SMPTE Universal (SMPTE 55, ripresa da EBU Tech 3203): la sezione d'identificazione prima del
+# countdown, in fotogrammi che si susseguono durante la slate, come sulla pellicola: dati del film, SMPTE
+# UNIVERSAL LEADER, PICTURE HEAD (con il punto), formato e tipo di suono, PICTURE con rullo / colore /
+# durata, SOUND START (cerchio con la croce). Testi diritti (sulla pellicola stanno di traverso).
+UNIVERSAL_CARDS = [(0.0, 0.30), (0.30, 0.44), (0.44, 0.56), (0.56, 0.70), (0.70, 0.84), (0.84, 1.0)]
+
+
+def slate_style_e(g, P, base, static):
+    S, GP, C = field(P, "slate"), field(P, "gap"), field(P, "countdown")
+    frac = "local _F = ((%s + %s + %s) * _FPS - _REM) / math.max(1, %s * _FPS) " % (S, GP, C, S)
+
+    def card(i):
+        a, b = UNIVERSAL_CARDS[i]
+        return frac + "local _ON = (_F >= %s and _F < %s) " % (repr(a), repr(b))
+
+    top = base
+    # 1) identificazione: etichette a sinistra, valori a destra
+    rows = [("PICTURE", "LK.Title.Value"), ("COMPANY", "LK.Production.Value"), ("SERIES", "LK.Episode.Value"),
+            ("REEL NO.", 'tostring(math.floor(LK.Reel + 0.5))'), ("PROD. NO.", "LK.Code.Value"),
+            ("PLAY DATE", DATE_EXPR % TODAY)]
+    labels = "\\n".join(r[0] for r in rows)
+    values = "(" + " .. '\\n' .. ".join("string.upper(tostring(%s))" % r[1] for r in rows) + ")"
+    pre = card(0)
+    g.text("ULab", X("Point(0.16, 0.5)"), X("2 * 0.045 / _A * _N"), ex('Text(_ON and "%s" or "")' % labels, pre),
+           tint("Text", 0.7), align="l", spacing=1.25)
+    g.text("UVal", X("Point(0.42, 0.5)"), X("2 * 0.06 / _A * _N"), ex('Text(_ON and %s or "")' % values, pre),
+           tint("Text"), style="Regular", align="l", spacing=1.0)
+    # 2) SMPTE UNIVERSAL LEADER, ripetuto come sulla pellicola
+    g.text("ULead", "{ 0.5, 0.5 }", X("2 * 0.05 / _A * _N"),
+           ex('Text(_ON and "SMPTE\\nUNIVERSAL\\nLEADER" or "")', card(1)), tint("Text"), spacing=1.05)
+    # 3) PICTURE HEAD con il punto (la marca di partenza)
+    g.text("UHead", "{ 0.5, 0.5 }", X("2 * 0.06 / _A * _N"), ex('Text(_ON and "PICTURE           HEAD" or "")', card(2)),
+           tint("Text"))
+    g.mask("UDotM", "EllipseMask", X("0.045 / _A"), X("0.045 / _A"), center="{ 0.5, 0.5 }")
+    dot = g.background("UDot", color="Text", mask="UDotM")
+    # 4) formato e tipo di suono
+    asp = 'string.format("%.2f:1", _A)'
+    snd = '(LK.AudioFormat.Value ~= "" and string.upper(LK.AudioFormat.Value) or "—")'
+    g.text("UAsp", "{ 0.5, 0.5 }", X("2 * 0.045 / _A * _N"),
+           ex('Text(_ON and ("ASPECT RATIO   " .. %s .. "\\n\\nTYPE OF SOUND   " .. %s) or "")' % (asp, snd), card(3)),
+           tint("Text"), spacing=1.0)
+    # 5) PICTURE grande e la riga rullo / colore / durata / soggetto
+    g.text("UPic", "{ 0.5, 0.58 }", X("2 * 0.11 / _A * _N"), ex('Text(_ON and "PICTURE" or "")', card(4)), tint("Text"))
+    meta = ('"REEL " .. tostring(math.floor(LK.Reel + 0.5)) .. "     COLOR " .. (LK.ColorInfo.Value ~= "" and '
+            'string.upper(LK.ColorInfo.Value) or "—") .. "     LENGTH " .. LK.Duration.Value .. "     SUBJECT " .. '
+            'string.upper(LK.Title.Value)')
+    text_fit(g, "UMeta", "Point(0.5, 0.36)", "0.03", "0.9", "(_ON and (%s) or '')" % meta, tint("Text", 0.85),
+             style="Regular", pre=card(4))
+    # 6) SOUND START: cerchio con la croce, come i fotogrammi di partenza del suono
+    g.mask("USndR", "EllipseMask", X("0.5 / _A"), X("0.5 / _A"), border=X("%s * 1.4" % LINE_W))
+    g.mask("USndH", "RectangleMask", X("0.2 / _A"), X("%s * 1.6 * _A" % LINE_W), chain="USndR")
+    g.mask("USndV", "RectangleMask", X("%s * 1.6" % LINE_W), "0.2", chain="USndH")
+    ring = g.background("USndBg", color="Text", mask="USndV")
+    g.text("USnd", "{ 0.5, 0.5 }", X("2 * 0.03 / _A * _N"),
+           ex('Text(_ON and "\\n\\n\\n\\nSOUND START" or "")', card(5)), tint("Text"))
+    for name in ("ULab", "UVal", "ULead", "UHead", "UAsp", "UPic", "UMeta", "USnd"):
+        top = g.merge("UM" + name, top, name)
+    top = g.gate("UGDot", top, [dot], "(function() %s return _ON end)()" % card(2))
+    top = g.gate("UGSnd", top, [ring], "(function() %s return _ON end)()" % card(5))
+    return top
 
 
 # ------------------------------------------------------------------ immagini (logo, titolo in PNG)
@@ -1498,6 +1565,7 @@ def head(std=None):
           + tip(uc_combo("CdStyle", "Stile del countdown", CD_STYLES), T["CdStyle"])
           + tip(uc_combo("CdTheme", "Tema (sfondo e colori)", [t[0] for t in CD_THEMES], on_change=vis), T["CdTheme"])
           + tip(uc_combo("CdDisc", "Disco dentro il cerchio", CD_DISC, on_change=vis), T["CdDisc"])
+          + tip(uc_check("CdCF", "Fotogrammi di controllo C C F F sul 4 (SMPTE Universal)", 0), T["CdCF"])
           + "".join(hide(tip(uc_color(pfx, lab, CD_GROUP + i, d), T["CdColor"])) for i, (pfx, lab, d) in enumerate(CD_COLORS))
           + uc_label("SecCdBox", "Logo e dati sul countdown")
           + tip(uc_check("CdLogo", "Logo sopra il countdown (riquadro nero)", 0, on_change=vis), T["CdLogo"])
@@ -1545,7 +1613,7 @@ def head(std=None):
               ("BarsType", "0"), ("PopLevel", "0"), ("BeepEach", "0"), ("Logo", '""'), ("LogoPos", "0"), ("LogoSize", "12"),
               ("Logo2", '""'), ("LogoPos2", "1"), ("LogoSize2", "12"),
               ("SlateStyle", "0"), ("TitleImage", '""'), ("TitleImageSize", "100"),
-              ("LogoOnTail", "0"), ("CdStyle", "0"), ("CdTheme", "0"), ("CdDisc", "0"), ("CalOn", "1"), ("CalGammaRef", "0"), ("CdLogo", "0"), ("CdLogoSize", "70"), ("CdInfo", "0")]
+              ("LogoOnTail", "0"), ("CdStyle", "0"), ("CdTheme", "0"), ("CdDisc", "0"), ("CdCF", "0"), ("CalOn", "1"), ("CalGammaRef", "0"), ("CdLogo", "0"), ("CdLogoSize", "70"), ("CdInfo", "0")]
     values += [(k, str(d)) for k, _, d, _ in CD_FIELDS]
     values += [(i, str(std.get("slot_defaults", {}).get(c, 0))) for c, i, _ in SLOT_INPUTS]
     values += [(f, '""') for f, _, _ in PRODUCTION_FIELDS + POST_FIELDS if f not in ("Title", "Version")]
@@ -1586,7 +1654,7 @@ def head(std=None):
     cbase = g.gate("MGuidesCd", cbase, [guides], "%s and LK.GuidesCd > 0.5" % ANY_GUIDE)
     # slate: quattro stili alternati, poi titolo in PNG, loghi e orologio ident
     s_ = slate_panels(g, P, base, static)
-    for i, fn in ((1, slate_style_b), (2, slate_style_c), (3, slate_style_d)):
+    for i, fn in ((1, slate_style_b), (2, slate_style_c), (3, slate_style_d), (4, slate_style_e)):
         s_ = g.dissolve("SStyle%d" % i, s_, fn(g, P, base, static), "(math.floor(LK.SlateStyle + 0.5) == %d) and 1 or 0" % i)
     s_ = g.gate("STitleImg", s_, [title_image_layer()], 'LK.TitleImage.Value ~= "" and LK.TitleW > 0 and LK.TitleH > 0')
     s_ = g.gate("SLogo1", s_, [logo_layer("", "Logo1Ld")], logo_cond(""))
@@ -1598,6 +1666,12 @@ def head(std=None):
                         sweep_vis="_REM < %s * _FPS and _REM > 2 * _FPS" % C, cd=C, extras=countdown_extras(g),
                         line=theme_rgb(2), digit=theme_rgb(3))
     top = g.dissolve("MLeader", top, lead, ex("(%s) and 1 or 0" % LEADVIS))
+    # fotogrammi di controllo del leader SMPTE Universal: C C in alto e F F in basso durante il 4
+    cf = []
+    for i, (txt, x, y) in enumerate((("C", 0.1, 0.84), ("C", 0.9, 0.84), ("F", 0.1, 0.16), ("F", 0.9, 0.16))):
+        cf.append(g.text("CF%d" % i, "{ %s, %s }" % (x, y), X("2 * 0.11 / _A * _N"), 'Text("%s")' % txt, theme_rgb(3)))
+    top = g.gate("MCF", top, cf, "LK.CdCF > 0.5 and %s > 0 and _REM <= %s * _FPS and math.ceil(_REM / _FPS) == 4"
+                 % (C, C))
     # fotogramma Picture Start come nel leader SMPTE RP 428-6: fondo verde-grigio chiaro a tutto quadro e
     # scritta nera, PICTURE sopra e START piu' grande sotto
     g.background("PicStartBg", rgb=["0.725", "0.792", "0.718"])

@@ -76,7 +76,7 @@ mouse su una voce compare la sua spiegazione nella barra di stato.
 
 ## Slate
 
-Quattro stili (Slate › Stile della slate):
+Cinque stili (Slate › Stile della slate):
 
 | Stile | Impaginazione |
 |---|---|
@@ -85,6 +85,12 @@ Quattro stili (Slate › Stile della slate):
 | **Orologio** | a sinistra un cronometro con la lancetta sui secondi al FFOA; a destra il titolo nel colore evidenza e i dati |
 | **Minimale** | titolo grande al centro, regia, una riga di dati essenziali, stato dei reparti |
 
+- **Testa SMPTE Universal** (quinto stile): durante la slate si susseguono i fotogrammi d'identificazione
+  del leader SMPTE Universal (SMPTE 55, ripreso da EBU Tech 3203), diritti invece che di traverso come sulla
+  pellicola: *PICTURE / COMPANY / SERIES / REEL NO. / PROD. NO. / PLAY DATE* con i dati della scheda Dati;
+  *SMPTE UNIVERSAL LEADER*; *PICTURE ● HEAD*; *ASPECT RATIO* (della timeline) e *TYPE OF SOUND* (formato
+  audio); *PICTURE* con rullo, colore, durata e soggetto; *SOUND START* (cerchio con la croce). Nel
+  countdown, la spunta **C C F F** mostra i fotogrammi di controllo del leader Universal durante il 4.
 - **Campi**: compaiono solo quelli compilati. I testi lunghi si riducono per stare nel loro riquadro e,
   se non basta, vengono troncati con "…"; nessun testo scende sotto i 7 px di maiuscole (leggibile
   anche a 480p). Nei Quadrante e Orologio i dati vanno su due colonne quando in una sarebbero piccoli;
