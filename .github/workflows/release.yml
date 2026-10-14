@@ -12,6 +12,10 @@ on:
       version:
         description: "Versione da pubblicare (es. 0.8.0)"
         required: true
+      draft:
+        description: "Solo bozza: la release resta da pubblicare a mano da GitHub"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -42,5 +46,6 @@ jobs:
           [ -f "$NOTES" ] || echo "LeaderKit ${VERSION}" > "$NOTES"
           PRE=""
           case "$VERSION" in 0.*|*-*) PRE="--prerelease" ;; esac
+          if [ "${{ inputs.draft }}" = "true" ]; then PRE="$PRE --draft"; fi
           gh release create "$TAG" "dist/LeaderKit-${VERSION}.drfx" --target "$(git rev-parse HEAD)" \
             --title "LeaderKit ${VERSION}" --notes-file "$NOTES" $PRE
