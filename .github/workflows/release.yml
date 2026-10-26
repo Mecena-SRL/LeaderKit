@@ -47,5 +47,14 @@ jobs:
           PRE=""
           case "$VERSION" in 0.*|*-*) PRE="--prerelease" ;; esac
           if [ "${{ inputs.draft }}" = "true" ]; then PRE="$PRE --draft"; fi
+          # una bozza gia' creata per questa versione si aggiorna (drfx, note, commit) e si pubblica
+          if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null)" = "true" ]; then
+            gh release upload "$TAG" "dist/LeaderKit-${VERSION}.drfx" --clobber
+            DRAFT="--draft=false"
+            [ "${{ inputs.draft }}" = "true" ] && DRAFT="--draft=true"
+            gh release edit "$TAG" --target "$(git rev-parse HEAD)" --title "LeaderKit ${VERSION}" \
+              --notes-file "$NOTES" $DRAFT
+            exit 0
+          fi
           gh release create "$TAG" "dist/LeaderKit-${VERSION}.drfx" --target "$(git rev-parse HEAD)" \
             --title "LeaderKit ${VERSION}" --notes-file "$NOTES" $PRE
