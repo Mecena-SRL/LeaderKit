@@ -7,6 +7,8 @@ lavoro. Tutto si adatta al **frame rate e alla risoluzione reali della
 timeline**. I valori di riferimento sono in
 [`docs/industry-standards.md`](docs/industry-standards.md).
 
+**Guida d'uso** (passo passo, ricette e problemi frequenti): [`docs/guida.md`](docs/guida.md).
+
 Versioni e download: [Releases](https://github.com/Mecena-SRL/LeaderKit/releases)
 (pre-release 0.x, testate su Resolve Studio 21.1 per macOS).
 
@@ -326,10 +328,13 @@ Tutti i blocchi hanno la stessa grandezza, la più grande con cui ognuno sta nel
 testi), e un **contorno nero** (spunta e spessore nella scheda Aspetto, attivo di default),
 così il timecode si legge anche sul bianco.
 
-**Dimensione e colore dei dati** (scheda Aspetto): *Piccolo* (1.3%), *Medio* (1.8%, il
-vecchio default), *Grande* (2.6%) oppure *Cursore* (1-5% del quadro, a scelta). Il colore dei
-dati può essere bianco, giallo, verde o ciano. Se una riga è troppo lunga per lo spazio la
-grandezza scende al massimo al 70% della scelta e la riga si tronca con "…". Il **TC grande**
+**Dimensione e colore dei dati** (scheda Aspetto): *Piccolo* (1.3%), *Medio* (1.8%, default),
+*Grande* (2.6%) oppure *Cursore* (1-5%), in percentuale del lato corto del quadro e **mai sotto
+10 px** di maiuscole. Il colore dei dati può essere bianco, giallo, verde o ciano. Dalla 1.3 la
+grandezza è **sempre quella scelta** (*Testi lunghi e bande strette › Grandezza fissa*, default):
+una riga troppo lunga si tronca con "…", una banda del mascherino troppo bassa manda i dati dentro
+l'immagine, bande laterali troppo strette li mandano ai bordi. Con *Riduci i testi lunghi* la
+grandezza può scendere fino al 70% della scelta prima di troncare o spostare i dati. Il **TC grande**
 può stare nella posizione standard, **più in basso** sul bordo o al centro, ed è **autonomo**
 dai dati agli angoli: ha la sua dimensione (% del quadro), lo spostamento orizzontale e
 verticale e il suo colore (scheda Aspetto). I watermark in basso seguono la sua posizione.
@@ -387,17 +392,17 @@ nessuna banda**: i dati stanno ai bordi del quadro della timeline, qualunque sia
 - **Letterbox**: se il formato è più largo della timeline, le bande stanno sopra
   e sotto. I dati vanno nelle bande nere, fuori dall'immagine attiva, come
   raccomanda Netflix (Dailies Best Practices), vicino all'immagine. Se una banda è troppo
-  bassa per due righe, i dati diventano una riga sola; se non basta neanche quella
-  (es. 1.85 su 16:9 a 480p) vanno dentro l'immagine, sul bordo.
+  bassa per due righe alla grandezza scelta, i dati diventano una riga sola; se non basta
+  neanche quella (es. 1.85 su 16:9) vanno dentro l'immagine, sul bordo.
 - **Pillarbox**: se il formato è più stretto (es. 4:3 su 16:9 o 2.39), le bande stanno ai
   lati e i dati vanno lì **su più righe** (ogni voce separata da "·" va a capo), ancorati al
-  bordo esterno: su 1920×1080 con 4:3 le maiuscole sono di circa 14 px. Se la banda è troppo
-  stretta per un testo leggibile (es. 4:3 su 854×480) i dati tornano ai bordi del quadro.
+  bordo esterno, se ogni voce ci sta intera. Altrimenti (es. 4:3 su 16:9 con nomi di file
+  lunghi, o 4:3 su 854×480) i dati tornano ai bordi del quadro alla grandezza scelta.
 - **Formato nativo**: senza mascherino, i dati stanno ai bordi o dentro
   l'immagine (safe 90%); le **bande semitrasparenti** dietro ai dati sono una
   spunta, spenta di default.
 
-L'altezza del testo è una percentuale del lato corto del quadro (mai sotto 9 px),
+L'altezza del testo è una percentuale del lato corto del quadro (mai sotto 10 px),
 quindi resta la stessa su 16:9, 2:1 e DCI e non esplode sui verticali. I dati sono **allineati ai bordi** (sinistra e destra). Se in
 una versione di Resolve l'ancoraggio di Text+ non si comporta come previsto,
 "Allineamento dei dati › Centrati nelle celle" li riporta al centro delle loro

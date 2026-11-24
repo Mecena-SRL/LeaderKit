@@ -718,8 +718,14 @@ def test_burnin_matte_precise_and_data_inside(built):
     t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=names.index("2.39:1 (Scope)"))
     assert abs(t["MatTM"]["Height"] * 1080 - 138) < 1e-6
     assert t["T1"]["StyledText"] == "IL FILM\n24 fps"                     # banda alta: due righe
-    # 1.85 su 16:9: banda di 22 px, troppo bassa per due righe -> una riga sola, dentro la banda
+    # 1.85 su 16:9: banda di 22 px. Grandezza fissa (default): la banda non rimpicciolisce i dati,
+    # che vanno dentro l'immagine alla grandezza scelta
     t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=names.index("1.85:1 (Flat)"))
+    assert t["T1"]["StyledText"] == "IL FILM\n24 fps" and abs(t["T1"]["Center"][1] - 0.93) < 1e-9
+    assert abs(t["T1"]["Size"] * 1920 / 2 - 0.018 * 1080) < 1e-6
+    # "Riduci" con Piccolo: una riga sola, dentro la banda
+    t = dump_tools(setting, 24, 1920, 1080, 480, 0, Seg=seg, RecStart=86400, TlFps=24, BMatte=names.index("1.85:1 (Flat)"),
+                   BFit=1, BSizeMode=0)
     lb = t["MatTM"]["Height"]
     assert abs(lb * 1080 - (1080 - 2 * round(1920 / 1.85 / 2)) / 2) < 1e-6
     assert t["T1"]["StyledText"] == "IL FILM     24 fps"
@@ -1069,8 +1075,9 @@ BURN_LENS = "20,33,20,2,3|10,10,10,1,1|18,39,18,2,3|18,24,18,2,2|22,35,14,2,3"
 
 def burn_tools(w, h, **kw):
     setting = os.path.join(ROOT, "dist", "LeaderKit Burn-in.setting")
+    kw.setdefault("BLens", BURN_LENS)
     return dump_tools(setting, 24, w, h, 480, 0, Seg=BURN_SEG, SegIdx="000000000000000001", RecStart=86400,
-                      TlW=w, TlH=h, BLens=BURN_LENS, **kw)
+                      TlW=w, TlH=h, **kw)
 
 
 def burn_cap_px(t, k, w, h):
@@ -1087,7 +1094,12 @@ def test_engine_burnin_lengths(built, code):
 
 def test_burnin_matte_pillarbox_stacked(built):
     """4:3 su 16:9: righe impilate nelle bande laterali, leggibili (non piu' minuscole)."""
+    # grandezza fissa (default): il nome file non sta intero nella banda -> dati ai bordi, alla grandezza scelta
     t = burn_tools(1920, 1080, BMatte=1)
+    assert t["T1"]["StyledText"] == "A001C003_260926_R2AB\nA001  ·  CAM A"
+    assert abs(burn_cap_px(t, 1, 1920, 1080) - 0.018 * 1080) < 1e-6
+    # "Riduci i testi lunghi": righe impilate nelle bande
+    t = burn_tools(1920, 1080, BMatte=1, BFit=1)
     assert t["T1"]["StyledText"] == "A001C003_260926_R2AB\nA001\nCAM A"
     assert t["T3"]["StyledText"] == "SRC TC 00:00:41:16\nAUD TC 01:02:30:00\nSR 012"
     for k in range(1, 6):
@@ -1103,7 +1115,7 @@ def test_burnin_narrow_band_falls_back(built):
     """480p con 4:3: la banda di 107 px non basta, i dati tornano ai bordi del quadro (leggibili)."""
     t = burn_tools(854, 480, BMatte=1)
     assert t["T1"]["StyledText"] == "A001C003_260926_R2AB\nA001  ·  CAM A"
-    assert t["T1"]["Center"][0] < 0.05 and burn_cap_px(t, 1, 854, 480) >= 8.5
+    assert t["T1"]["Center"][0] < 0.05 and burn_cap_px(t, 1, 854, 480) >= 10 - 1e-9
     # 1.85 su 16:9 a 480p: banda di 9 px, dati dentro l'immagine
     t = burn_tools(854, 480, BMatte=6)
     assert abs(t["T1"]["Center"][1] - 0.93) < 1e-9
@@ -1446,7 +1458,7 @@ def test_burnin_size_not_shrunk_by_one_long_line(built):
                        BSizeMode=mode)
         px.append(burn_cap_px(t, 1, 4096, 2048))
     assert px[0] < px[1] < px[2], px
-    assert px[1] >= 0.7 * 1.8 / 100 * 2048 - 0.01
+    assert abs(px[1] - 1.8 / 100 * 2048) < 0.01                  # grandezza fissa (default): esattamente Medio
     # la riga che non ci sta si tronca con "…" invece di uscire dal quadro
     seg = "86400|86880|1000|1|24|0|-1|0|" + "A" * 150 + "~|~|SRC {SRC}~|REC {REC}~~{REC}|~"
     t = dump_tools(os.path.join(ROOT, "dist", "LeaderKit Burn-in.setting"), 24, 4096, 2048, 480, 0, Seg=seg,
@@ -1735,3 +1747,20 @@ def test_countdown_control_frames(built):
     off = dump_tools(HEAD(built), 24, 1920, 1080, 432, 432 - 4 * 24 + 3)
     assert on4["MCF"]["Mix"] == 1 and on5["MCF"]["Mix"] == 0 and off["MCF"]["Mix"] == 0
     assert on4["CF0"]["StyledText"] == "C" and on4["CF3"]["StyledText"] == "F"
+
+
+def test_burnin_size_is_what_you_choose(built):
+    """La grandezza dei dati e' quella scelta in ogni formato, mascherino e lunghezza dei testi (mai minuscola)."""
+    names = [m for m, _ in build_fx.MATTES]
+    long_lens = "158,158,40,2,3|38,38,38,1,1|20,20,20,2,2|20,20,20,2,2|51,51,51,2,2"
+    for w, h in ((1920, 1080), (1280, 720), (1080, 1920)):
+        for matte in ("Nessuno", "1.85:1 (Flat)", "2.39:1 (Scope)", "1.33:1 (4:3)"):
+            mi = [i for i, n in enumerate(names) if n.startswith(matte)][0]
+            for mode, pct in ((0, 1.3), (2, 2.6)):
+                t = burn_tools(w, h, BMatte=mi, BSizeMode=mode, BLens=long_lens)
+                want = max(pct / 100 * min(w, h), build_fx.BURN_MIN_PX)
+                for k in range(1, 6):
+                    assert abs(burn_cap_px(t, k, w, h) - want) < 1e-6, (w, h, matte, mode, k)
+    # "Riduci": mai sotto il 70% della scelta ne' sotto il minimo in pixel
+    t = burn_tools(1280, 720, BSizeMode=0, BFit=1, BLens=long_lens)
+    assert burn_cap_px(t, 1, 1280, 720) >= build_fx.BURN_MIN_PX - 1e-9
