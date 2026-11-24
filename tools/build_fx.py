@@ -1761,6 +1761,8 @@ BURN_PHASES = [
 ]
 BURN_SIZES = ["Piccolo", "Medio", "Grande", "Cursore (scegli tu)"]
 BURN_SIZE_PCT = [1.3, 1.8, 2.6]            # altezza dei dati ai lati, % del lato corto del quadro
+BURN_MIN_PX = 10                           # maiuscole dei dati mai sotto 10 px (leggibili anche a 720p e 480p)
+BURN_FIT = ["Grandezza fissa (i testi lunghi si troncano con …)", "Riduci i testi lunghi (fino al 70%)"]
 WATER_POS = ["In alto", "Al centro", "In basso"]
 WATER_PRESETS = ["COPIA LAVORO", "NON DISTRIBUIRE", "NON DIFFONDERE", "CONFIDENZIALE", "SOLO USO INTERNO",
                  "SOLO PER REVISIONE", "BOZZA", "VERSIONE DI LAVORO", "SCREENER - NON COPIARE",
@@ -1818,12 +1820,17 @@ BURN_GEO = (
     # immagine attiva in pixel interi e pari (es. 1920 x 804 per 2.39 su 1920 x 1080)
     "local LB = (MR > AR + 0.01) and (H - 2 * math.floor(W / MR / 2 + 0.5)) / (2 * H) or 0 "
     "local PB = (MR > 0 and MR < AR - 0.01) and (W - 2 * math.floor(H * MR / 2 + 0.5)) / (2 * W) or 0 "
-    # maiuscole (frazione di H): percentuale del lato corto, mai sotto 9 px; MINC = minimo nelle bande
+    # maiuscole (frazione di H): percentuale del lato corto, mai sotto BURN_MIN_PX pixel.
+    # FL = grandezza minima: con "Grandezza fissa" (default) e' la grandezza scelta (i testi lunghi si
+    # troncano, la banda troppo bassa manda i dati nell'immagine); con "Riduci" il 70% della scelta.
     "local SZ = ({ %s })[math.floor(LK.BSizeMode + 0.5) + 1] or LK.BSize "
-    "local BCAP = math.max(LK.BBigPct / 100 * REF, 9) / H "
-    "local CAP = math.max(SZ / 100 * REF, 9) / H local MINC = math.max(0.011 * REF, 8) / H "
+    "local MINP = %s / H "
+    "local BCAP = math.max(LK.BBigPct / 100 * REF, %s) / H "
+    "local CAP = math.max(SZ / 100 * REF, %s) / H "
+    "local FL = (LK.BFit > 0.5) and math.max(0.7 * CAP, MINP) or CAP "
     "local INSIDE = LK.BPos > 0.5 "
-    % (len(MATTES) - 1, ", ".join(repr(max(r, 0)) for _, r in MATTES), ", ".join(repr(x) for x in BURN_SIZE_PCT)))
+    % (len(MATTES) - 1, ", ".join(repr(max(r, 0)) for _, r in MATTES), ", ".join(repr(x) for x in BURN_SIZE_PCT),
+       BURN_MIN_PX, BURN_MIN_PX, BURN_MIN_PX))
 
 # Impaginazione, calcolata solo con numeri: le lunghezze massime dei testi di ogni blocco (su tutto il
 # programma) le scrive Aggiorna in LK.BLens, cosi' la grandezza non cambia a ogni stacco e non serve
@@ -1835,19 +1842,20 @@ BURN_LAY = (
     "LN[#LN + 1] = { a + 0, b + 0, c + 0, d + 0, e + 0 } end "
     "for k = #LN + 1, 5 do LN[k] = { 22, 34, 20, 2, 3 } end "
     "local C5 = LN[5][1] > 0 "
-    # la grandezza scelta (Piccolo / Medio / Grande / cursore) non scende sotto il 70%: una riga lunga in un
-    # punto del programma non rimpicciolisce tutto; le righe che non ci stanno si troncano con "…"
-    "local FL = 0.7 * CAP "
+    # la grandezza scelta (Piccolo / Medio / Grande / cursore) non scende sotto FL: di default resta quella
+    # scelta in ogni modo e formato; le righe che non ci stanno si troncano con "…"
     "local WID = { C5 and 0.33 or 0.46, C5 and 0.33 or 0.46, 0.46, 0.46, 0.28 } "
-    "local function FITW(i, w) local c = 9 for k = 1, 5 do if LN[k][i] > 0 then "
-    "c = math.min(c, w[k] * AR / (%s * LN[k][i])) end end return math.max(c, FL) end "
+    "local function RAWW(i, w) local c = 9 for k = 1, 5 do if LN[k][i] > 0 then "
+    "c = math.min(c, w[k] * AR / (%s * LN[k][i])) end end return c end "
+    "local function FITW(i, w) return math.max(RAWW(i, w), FL) end "
     "local MODE, C = 'EDGE', 0 "
     "if INSIDE or (LB <= 0 and PB <= 0) then MODE, C = (INSIDE and 'IN' or 'EDGE'), math.min(CAP, FITW(1, WID)) "
     "elseif LB > 0 then local c2 = math.min(CAP, LB / 3.2, FITW(1, WID)) local c1 = math.min(CAP, LB / 1.7, FITW(2, WID)) "
-    "if c2 >= MINC and c2 >= 0.9 * c1 then MODE, C = 'LB2', c2 elseif c1 >= MINC then MODE, C = 'LB1', c1 "
+    "if c2 >= FL - 1e-9 and c2 >= 0.9 * c1 then MODE, C = 'LB2', c2 elseif c1 >= FL - 1e-9 then MODE, C = 'LB1', c1 "
     "else MODE, C = 'IN', math.min(CAP, FITW(1, WID)) end "
-    "else local w = 0.9 * PB local cp = math.min(CAP, FITW(3, { w, w, w, w, w })) "
-    "if cp >= MINC then MODE, C = 'PB', cp else MODE, C = 'EDGE', math.min(CAP, FITW(1, WID)) end end "
+    "else local w = 0.9 * PB local cp = math.min(CAP, RAWW(3, { w, w, w, w, w })) "
+    # bande laterali solo se ogni voce ci sta intera (alla grandezza scelta, o ridotta fino a FL)
+    "if cp >= FL - 1e-9 then MODE, C = 'PB', cp else MODE, C = 'EDGE', math.min(CAP, FITW(1, WID)) end end "
     "local PC = %s * C local function HB(n) return (math.max(1, n) - 1) * PC + 0.88 * C end "
     # TC grande: standard (sopra i dati in basso), piu' in basso (sul bordo) o al centro
     "local BP = math.floor(LK.BBigPos + 0.5) "
@@ -1874,7 +1882,7 @@ BURN_ZONE = (
     "ZT = math.min(ZT, 1 - LB) - GAP ZB = math.max(ZB, LB) + GAP "
     # elenco dei canali: sul bordo scelto, i watermark restano nello spazio che avanza
     "local CHTOP = LK.BChPos < 0.5 local CHT0, CHB0 = ZT, ZB "
-    "local CHC = math.max(math.min(C, 0.4 * (1 - 2 * PB) * AR / (%s * math.max(cl, 1))), 0.6 * C) "
+    "local CHC = math.max(math.min(C, 0.4 * (1 - 2 * PB) * AR / (%s * math.max(cl, 1))), math.min(C, math.max(0.6 * C, MINP))) "
     "if LK.BChList > 0.5 and cn > 0 then if CHTOP then ZT = ZT - HB(cn) - GAP else ZB = ZB + HB(cn) + GAP end end "
     % 0.76)
 
@@ -2010,6 +2018,7 @@ def burnin(std=None):
             + uc_combo("BAlign", "Allineamento dei dati", ["Ai bordi (sinistra / destra)", "Centrati nelle celle"])
             + uc_combo("BSizeMode", "Dimensione dei dati ai lati", BURN_SIZES)
             + uc_slider("BSize", "Altezza col cursore (% del quadro)", 1, 5, 1.8, integer=False)
+            + uc_combo("BFit", "Testi lunghi e bande strette", BURN_FIT)
             + uc_combo("BTextColor", "Colore dei dati", [n for n, _ in TEXT_COLORS])
             + uc_combo("BBigPos", "TC grande: posizione", BIG_POS)
             + uc_slider("BBigPct", "TC grande: dimensione (% del quadro)", 2, 20, 9, integer=False)
@@ -2031,7 +2040,7 @@ def burnin(std=None):
     values = [("BPhase", "2"), ("BTitleText", '""'), ("BVersionText", '""'),
               ("BRecipient", '""'), ("BInfo", '"Metti il clip sopra il montato (V3/V4) e premi Aggiorna"'),
               ("BFrameMode", "1"), ("BPos", "0"), ("BAlign", "0"), ("BMatte", "0"), ("BMatteRatio", "2.39"),
-              ("BMatteAlpha", "1"), ("BSize", "1.8"), ("BSizeMode", "1"), ("BTextColor", "0"), ("BBigPos", "0"), ("BBigPct", "9"),
+              ("BMatteAlpha", "1"), ("BSize", "1.8"), ("BSizeMode", "1"), ("BFit", "0"), ("BTextColor", "0"), ("BBigPos", "0"), ("BBigPct", "9"),
               ("BBigX", "0"), ("BBigY", "0"), ("BBigColor", "0"), ("BBands", "0"),
               ("BBandAlpha", "0.6"), ("BWaterAlpha", "0.18"), ("BWaterSize", "0.06"),
               ("BChList", "0"), ("BChName", "1"), ("BChSrc", "1"), ("BChFmt", "1"), ("BChPos", "0"),
@@ -2140,7 +2149,7 @@ def burnin(std=None):
               + [(x, "Watermark") for sw, st, sp, _, _ in WATER_SLOTS for x in (sw, sw + "Pre", st, sp)]
               + [("BWaterSize", "Watermark"), ("BWaterAlpha", "Watermark")]
               + [(x, "Aspetto") for x in ("BMatte", "BMatteRatio", "BMatteAlpha", "BPos", "BAlign", "BSizeMode",
-                                          "BSize", "BTextColor", "BBigPos", "BBigPct", "BBigX", "BBigY",
+                                          "BSize", "BFit", "BTextColor", "BBigPos", "BBigPct", "BBigX", "BBigY",
                                           "BBigColor", "BBands", "BBandAlpha", "BOutline", "BOutlineW")])
     return group(BURN_NAME, g, top, inputs)
 
